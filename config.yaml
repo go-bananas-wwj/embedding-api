@@ -4,17 +4,17 @@ models:
   change_detection_v4:
     name: "变化检测 (V4)"
     description: "基于 V4 embedding 的两期差分变化检测"
-    path: "models/system/v4/change_detection/monthly_cd_head_v3_ohem.pt"
+    path: "models/v4/change_detection/monthly_cd_head_v3_ohem.pt"
     type: "pytorch"
   change_detection_v5:
     name: "变化检测 (V5)"
     description: "基于 V5 embedding 的两期差分变化检测 (推荐)"
-    path: "models/system/v5/change_detection/monthly_cd_head_v5_final.pt"
+    path: "models/v5/change_detection/monthly_cd_head_v5_final.pt"
     type: "pytorch"
   classification_v4_linear:
     name: "地物分类 (V4 Linear Probe)"
     description: "V4 线性分类探针"
-    path: "models/system/v4/linear_probe"
+    path: "models/v4/linear_probe"
     type: "sklearn"
     tasks:
       worldcover: {file: "worldcover_linear_probe.pkl", classes: 11}
@@ -24,7 +24,7 @@ models:
   classification_v4_convhead:
     name: "地物分类 (V4 ConvHead)"
     description: "V4 轻量卷积分类头"
-    path: "models/system/v4/convhead"
+    path: "models/v4/convhead"
     type: "pytorch"
     tasks:
       worldcover: {file: "worldcover_convhead.pt", classes: 11}
@@ -34,7 +34,7 @@ models:
   classification_v5_linear:
     name: "地物分类 (V5 Linear Probe)"
     description: "V5 线性分类探针"
-    path: "models/system/v5/linear_probe"
+    path: "models/v5/linear_probe"
     type: "sklearn"
     tasks:
       worldcover: {file: "worldcover_linear_probe.pkl", classes: 11}
@@ -44,7 +44,7 @@ models:
   classification_v5_linear_v2:
     name: "地物分类 (V5 Linear Probe v2)"
     description: "V5 线性分类探针第二版"
-    path: "models/system/v5/linear_probe_v2"
+    path: "models/v5/linear_probe_v2"
     type: "sklearn"
     tasks:
       worldcover: {file: "worldcover_linear_probe.pkl", classes: 11}
@@ -54,7 +54,7 @@ models:
   classification_v5_convhead:
     name: "地物分类 (V5 ConvHead)"
     description: "V5 轻量卷积分类头"
-    path: "models/system/v5/convhead"
+    path: "models/v5/convhead"
     type: "pytorch"
     tasks:
       worldcover: {file: "worldcover_convhead.pt", classes: 11}
@@ -65,12 +65,12 @@ models:
   change_detection:
     name: "变化检测"
     description: "系统级两期 embedding 差分变化检测 (ChangeDetectionHeadV3)"
-    path: "models/system/v5/change_detection/monthly_cd_head_v5_final.pt"
+    path: "models/v5/change_detection/monthly_cd_head_v5_final.pt"
     type: "pytorch"
   classification:
     name: "地物分类"
     description: "基于 Linear Probe 的地物分类模型集合 (V5)"
-    path: "models/system/v5/linear_probe"
+    path: "models/v5/linear_probe"
     type: "sklearn"
     tasks:
       worldcover: {file: "worldcover_linear_probe.pkl", classes: 11}

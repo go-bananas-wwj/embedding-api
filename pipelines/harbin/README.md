@@ -95,5 +95,5 @@ python pipelines/harbin/visualize_labels_v2.py
 ## 路径说明
 
 - 所有**数据输出路径**已指向 `embedding-api/data/harbin/` 下的统一结构
-- 所有**模型路径**已指向 `embedding-api/models/harbin/`
+- 所有**模型路径**已指向 `embedding-api/models/v{4,5}/harbin/`
 - 外部大文件（原始 embedding、S2 影像）通过环境变量配置，保持在外部存储
