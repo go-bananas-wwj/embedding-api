@@ -1,55 +1,61 @@
 regions:
   harbin:
     name: "哈尔滨新区"
-    patches_meta: "/workspace/xuannv_show/data/harbin/patches_meta.json"
+    patches_meta: "data/harbin/patches_meta.json"
     embeddings:
-      v2: "/workspace/xuannv_show/data/harbin/embeddings/v2"
+      v2:
+        path: "data/harbin/embeddings"
+        template: "{patch_id}.png"
+        formats: ["png"]
     tasks:
       construction:
         name: "建筑工地监测"
         description: "监测建筑工地变化情况"
         versions:
           v1:
-            results: "/workspace/xuannv_show/data/harbin/results/construction"
-            predictions: "/workspace/xuannv_show/data/harbin/predictions/construction"
-            labels: "/workspace/xuannv_show/data/harbin/labels/construction"
+            results: "data/harbin/tasks/construction/v1/results"
+            predictions: "data/harbin/tasks/construction/v1/predictions"
+            labels: "data/harbin/tasks/construction/v1/labels"
+            label_vis: "data/harbin/tasks/construction/v1/label_vis"
           v2:
-            results: "/workspace/xuannv_show/data/harbin/results_v2/construction"
-            predictions: "/workspace/xuannv_show/data/harbin/predictions_v2/construction"
-            labels: "/workspace/xuannv_show/data/harbin/labels_v2/construction"
-            label_vis: "/workspace/xuannv_show/data/harbin/label_vis_v2/construction"
+            results: "data/harbin/tasks/construction/v2/results"
+            predictions: "data/harbin/tasks/construction/v2/predictions"
+            labels: "data/harbin/tasks/construction/v2/labels"
+            label_vis: "data/harbin/tasks/construction/v2/label_vis"
       building_change:
         name: "建筑变化监测"
         description: "监测建筑物变化情况"
         versions:
           v1:
-            results: "/workspace/xuannv_show/data/harbin/results/building_change"
-            predictions: "/workspace/xuannv_show/data/harbin/predictions/building_change"
-            labels: "/workspace/xuannv_show/data/harbin/labels/building_change"
-            label_vis: "/workspace/xuannv_show/data/harbin/label_vis/building_change"
+            results: "data/harbin/tasks/building_change/v1/results"
+            predictions: "data/harbin/tasks/building_change/v1/predictions"
+            labels: "data/harbin/tasks/building_change/v1/labels"
+            label_vis: "data/harbin/tasks/building_change/v1/label_vis"
       farmland:
         name: "耕地非农非粮监测"
         description: "监测耕地被非法占用情况"
         versions:
           v1:
-            results: "/workspace/xuannv_show/data/harbin/results/farmland"
-            predictions: "/workspace/xuannv_show/data/harbin/predictions/farmland"
-            labels: "/workspace/xuannv_show/data/harbin/labels/farmland"
-            label_vis: "/workspace/xuannv_show/data/harbin/label_vis/farmland"
+            results: "data/harbin/tasks/farmland/v1/results"
+            predictions: "data/harbin/tasks/farmland/v1/predictions"
+            labels: "data/harbin/tasks/farmland/v1/labels"
+            label_vis: "data/harbin/tasks/farmland/v1/label_vis"
       land_conversion:
         name: "土地转换监测"
         description: "监测土地用途转换情况"
         versions:
           v2:
-            results: "/workspace/xuannv_show/data/harbin/results_v2/land_conversion"
-            predictions: "/workspace/xuannv_show/data/harbin/predictions_v2/land_conversion"
-            labels: "/workspace/xuannv_show/data/harbin/labels_v2/land_conversion"
-            label_vis: "/workspace/xuannv_show/data/harbin/label_vis_v2/land_conversion"
+            results: "data/harbin/tasks/land_conversion/v2/results"
+            predictions: "data/harbin/tasks/land_conversion/v2/predictions"
+            labels: "data/harbin/tasks/land_conversion/v2/labels"
+            label_vis: "data/harbin/tasks/land_conversion/v2/label_vis"
+
   haidian:
     name: "海淀区"
-    patches_meta: "/workspace/olmo/data/haidian/patches_meta_v2.json"
+    patches_meta: "data/haidian/patches_meta_v2.json"
     embeddings:
-      aef: "/workspace/olmo/data/haidian/aef_embeddings/haidian_2025_patches"
-      cache: "/workspace/olmo/embeddings_cache/olmoearth"
-      viz: "/workspace/olmo/data/haidian/viz_multi_source"
+      v2:
+        path: "data/haidian/embeddings"
+        template: "{patch_id}.npy"
+        formats: ["npy"]
     tasks: {}
