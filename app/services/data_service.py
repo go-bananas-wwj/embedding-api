@@ -331,8 +331,14 @@ class DataService:
             base = ver.get("results")
             if base:
                 if period:
+                    # v2 structure: {base}/{period}/{period}.png
+                    path = _resolve_path(base, f"{period}/{period}.png")
+                    if path:
+                        return path
+                    # v1 structure: {base}/{period}.png
                     path = _resolve_path(base, f"{period}.png")
-                    return path
+                    if path:
+                        return path
                 # Dynamic discovery: find first PNG instead of hardcoded names
                 path = DataService._find_first_file(base, "*.png")
                 if path:
@@ -347,7 +353,8 @@ class DataService:
             if base:
                 if period:
                     path = _resolve_path(base, f"{patch_id}_{period}.npy")
-                    return path
+                    if path:
+                        return path
                 # Dynamic discovery
                 path = DataService._find_first_file(base, f"{patch_id}_*.npy")
                 if path:
@@ -363,7 +370,8 @@ class DataService:
                 if period:
                     period_dir = Path(base) / period
                     path = _resolve_path(str(period_dir), f"{patch_id}.npy")
-                    return path
+                    if path:
+                        return path
                 path = _resolve_path(base, f"{patch_id}.npy")
                 if path:
                     return path
@@ -373,11 +381,18 @@ class DataService:
         elif format_type == "tile":
             base = ver.get("results")
             if base:
-                tiles_dir = Path(base) / "tiles"
                 if period:
+                    # v2 structure: {base}/{period}/tiles/{patch_id}.png
+                    path = _resolve_path(base, f"{period}/tiles/{patch_id}.png")
+                    if path:
+                        return path
+                    # v1 structure: {base}/tiles/{patch_id}_{period}.png
+                    tiles_dir = Path(base) / "tiles"
                     path = _resolve_path(str(tiles_dir), f"{patch_id}_{period}.png")
-                    return path
-                # Dynamic discovery
+                    if path:
+                        return path
+                # v1 fallback: dynamic discovery in {base}/tiles/
+                tiles_dir = Path(base) / "tiles"
                 path = DataService._find_first_file(str(tiles_dir), f"{patch_id}_*.png")
                 if path:
                     return path

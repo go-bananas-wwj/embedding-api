@@ -54,22 +54,44 @@ class TileService:
         if not base:
             return []
 
-        tiles_dir = Path(base) / "tiles"
-        if not tiles_dir.exists():
-            return []
+        # Build list of tiles directories to scan
+        # v2: {base}/{period}/tiles/   v1: {base}/tiles/
+        tiles_dirs = []
+        if period:
+            tiles_dirs.append(Path(base) / period / "tiles")
+        tiles_dirs.append(Path(base) / "tiles")
 
-        tiles = sorted(tiles_dir.glob("*.png"))
         result = []
-        for t in tiles:
-            parts = t.stem.split("_")
-            if len(parts) >= 3:
-                patch_id = "_".join(parts[:-1])
-                tile_period = parts[-1]
-                result.append(
-                    {
-                        "patch_id": patch_id,
-                        "period": tile_period,
-                        "filename": t.name,
-                    }
-                )
+        seen = set()
+        for tiles_dir in tiles_dirs:
+            if not tiles_dir.exists():
+                continue
+            tiles = sorted(tiles_dir.glob("*.png"))
+            for t in tiles:
+                if t.name in seen:
+                    continue
+                seen.add(t.name)
+                parts = t.stem.split("_")
+                if len(parts) >= 3:
+                    # v1 format: patch_000000_2025-10.png
+                    patch_id = "_".join(parts[:-1])
+                    tile_period = parts[-1]
+                    result.append(
+                        {
+                            "patch_id": patch_id,
+                            "period": tile_period,
+                            "filename": t.name,
+                        }
+                    )
+                elif len(parts) == 2:
+                    # v2 format: patch_000000.png
+                    patch_id = "_".join(parts)
+                    tile_period = period
+                    result.append(
+                        {
+                            "patch_id": patch_id,
+                            "period": tile_period,
+                            "filename": t.name,
+                        }
+                    )
         return result
