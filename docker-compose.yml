@@ -1,0 +1,17 @@
+version: "3.8"
+
+services:
+  embedding-api:
+    build: .
+    container_name: embedding-api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./config.yaml:/app/config.yaml
+      # Mount data directories (adjust paths as needed)
+      - /workspace/xuannv_show/data/harbin:/data/harbin:ro
+      - /workspace/olmo/data/haidian:/data/haidian:ro
+      - /workspace/olmo/embeddings_cache:/data/embeddings_cache:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped

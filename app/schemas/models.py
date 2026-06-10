@@ -1,0 +1,86 @@
+"""Pydantic models for API request/response schemas."""
+
+from typing import Any, Dict, List, Optional
+from pydantic import BaseModel, Field
+
+
+class HealthResponse(BaseModel):
+    status: str
+    version: str = "0.1.0"
+    regions: List[str]
+
+
+class RegionInfo(BaseModel):
+    id: str
+    name: str
+    patch_count: int
+    tasks: List[str]
+
+
+class RegionsResponse(BaseModel):
+    regions: List[RegionInfo]
+
+
+class SourceInfo(BaseModel):
+    pass
+
+
+class PatchBase(BaseModel):
+    patch_id: str
+    bounds_wgs84: List[float]
+    sources: Dict[str, int]
+    time_range: List[str]
+
+
+class PatchDetail(PatchBase):
+    bounds: Optional[List[float]] = None
+    crs: Optional[str] = None
+    has_embedding: bool = False
+    available_tasks: List[str] = []
+
+
+class PaginatedPatchesResponse(BaseModel):
+    total: int
+    page: int
+    page_size: int
+    patches: List[PatchDetail]
+
+
+class TaskInfo(BaseModel):
+    id: str
+    name: str
+    description: Optional[str] = None
+    versions: List[str]
+
+
+class TasksResponse(BaseModel):
+    tasks: List[TaskInfo]
+
+
+class TaskSummary(BaseModel):
+    task: str
+    name: str
+    version: str
+    period: Optional[str] = None
+    grid_size: Optional[int] = None
+    total_polygons: Optional[int] = None
+    total_patches: Optional[int] = None
+    positive_patches: Optional[int] = None
+    negative_patches: Optional[int] = None
+
+
+class EmbeddingStats(BaseModel):
+    patch_id: str
+    shape: List[int]
+    dtype: str
+    min: float
+    max: float
+    mean: float
+
+
+class EmbeddingFormats(BaseModel):
+    available_formats: List[str]
+
+
+class ErrorResponse(BaseModel):
+    detail: str
