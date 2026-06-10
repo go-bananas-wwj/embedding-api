@@ -26,6 +26,7 @@ regions:
             results: "/workspace/xuannv_show/data/harbin/results/building_change"
             predictions: "/workspace/xuannv_show/data/harbin/predictions/building_change"
             labels: "/workspace/xuannv_show/data/harbin/labels/building_change"
+            label_vis: "/workspace/xuannv_show/data/harbin/label_vis/building_change"
       farmland:
         name: "耕地非农非粮监测"
         description: "监测耕地被非法占用情况"
@@ -34,6 +35,7 @@ regions:
             results: "/workspace/xuannv_show/data/harbin/results/farmland"
             predictions: "/workspace/xuannv_show/data/harbin/predictions/farmland"
             labels: "/workspace/xuannv_show/data/harbin/labels/farmland"
+            label_vis: "/workspace/xuannv_show/data/harbin/label_vis/farmland"
       land_conversion:
         name: "土地转换监测"
         description: "监测土地用途转换情况"
@@ -43,15 +45,6 @@ regions:
             predictions: "/workspace/xuannv_show/data/harbin/predictions_v2/land_conversion"
             labels: "/workspace/xuannv_show/data/harbin/labels_v2/land_conversion"
             label_vis: "/workspace/xuannv_show/data/harbin/label_vis_v2/land_conversion"
-      demolition:
-        name: "拆迁监测"
-        description: "监测建筑物拆除情况"
-        versions:
-          v2:
-            results: "/workspace/xuannv_show/data/harbin/results_v2/demolition"
-            labels: "/workspace/xuannv_show/data/harbin/labels_v2/demolition"
-            label_vis: "/workspace/xuannv_show/data/harbin/label_vis_v2/demolition"
-
   haidian:
     name: "海淀区"
     patches_meta: "/workspace/olmo/data/haidian/patches_meta_v2.json"
