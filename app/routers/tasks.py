@@ -128,8 +128,15 @@ async def get_task_result(
                     filename=f"{patch_id}_{task_type}_prediction.npy",
                 )
         else:
+            # Try summary image first, then fallback to per-patch tile
             path = DataService.get_task_result_path(
                 region_id, patch_id, task_type, "png", version, period
+            )
+            if path and path.lower().endswith(".png"):
+                return FileResponse(path, media_type="image/png")
+            # Fallback: per-patch tile image (results/.../tiles/patch_*.png)
+            path = DataService.get_task_result_path(
+                region_id, patch_id, task_type, "tile", version, period
             )
             if path and path.lower().endswith(".png"):
                 return FileResponse(path, media_type="image/png")
@@ -222,6 +229,53 @@ async def get_task_label(
     raise HTTPException(
         status_code=404,
         detail=f"Label not found for patch '{patch_id}', task '{task_type}'",
+    )
+
+
+@router.get(
+    "/regions/{region_id}/patches/{patch_id}/tasks/{task_type}/label_vis",
+    responses={
+        200: {"content": {"image/png": {}}},
+        404: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+    },
+)
+async def get_task_label_vis(
+    region_id: str,
+    patch_id: str,
+    task_type: str,
+    version: str = Query("v1"),
+    period: Optional[str] = Query(None),
+):
+    """Get label visualization image for a specific patch.
+
+    Returns a PNG image showing the ground-truth label overlay
+    (e.g., bounding boxes or segmentation mask visualization).
+    """
+    config = get_config()
+    if not config.region_exists(region_id):
+        raise HTTPException(status_code=404, detail=f"Region '{region_id}' not found")
+
+    try:
+        patch = DataService.get_patch(region_id, patch_id)
+    except DataValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not patch:
+        raise HTTPException(status_code=404, detail=f"Patch '{patch_id}' not found")
+
+    try:
+        path = DataService.get_task_result_path(
+            region_id, patch_id, task_type, "label_vis", version, period
+        )
+    except DataValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if path and path.lower().endswith(".png"):
+        return FileResponse(path, media_type="image/png")
+
+    raise HTTPException(
+        status_code=404,
+        detail=f"Label visualization not found for patch '{patch_id}', task '{task_type}'",
     )
 
 

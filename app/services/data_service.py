@@ -352,6 +352,11 @@ class DataService:
             base = ver.get("predictions") or ver.get("results")
             if base:
                 if period:
+                    # v2 structure: {base}/{period}/{patch_id}.npy
+                    path = _resolve_path(base, f"{period}/{patch_id}.npy")
+                    if path:
+                        return path
+                    # v1 structure: {base}/{patch_id}_{period}.npy
                     path = _resolve_path(base, f"{patch_id}_{period}.npy")
                     if path:
                         return path
@@ -378,6 +383,17 @@ class DataService:
                 # Try meta.json for summary
                 meta_path = _resolve_path(base, "meta.json")
                 return meta_path
+        elif format_type == "label_vis":
+            base = ver.get("label_vis")
+            if base:
+                if period:
+                    period_dir = Path(base) / period
+                    path = _resolve_path(str(period_dir), f"{patch_id}.png")
+                    if path:
+                        return path
+                path = _resolve_path(base, f"{patch_id}.png")
+                if path:
+                    return path
         elif format_type == "tile":
             base = ver.get("results")
             if base:
