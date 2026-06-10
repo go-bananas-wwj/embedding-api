@@ -2,7 +2,9 @@
 
 from fastapi import APIRouter, HTTPException
 from app.config import get_config
-from app.schemas.models import RegionsResponse, RegionInfo, HealthResponse
+from app.schemas.models import (
+    RegionsResponse, RegionInfo, HealthResponse, RegionDetail, RegionTaskMeta,
+)
 
 router = APIRouter()
 
@@ -37,7 +39,7 @@ async def list_regions():
     return RegionsResponse(regions=regions)
 
 
-@router.get("/regions/{region_id}")
+@router.get("/regions/{region_id}", response_model=RegionDetail)
 async def get_region(region_id: str):
     """Get region details."""
     config = get_config()
@@ -47,18 +49,18 @@ async def get_region(region_id: str):
     region = config.get_region(region_id)
     patches = config.get_patches(region_id)
     tasks = {
-        tid: {
-            "name": tinfo.get("name", tid),
-            "description": tinfo.get("description", ""),
-            "versions": list(tinfo.get("versions", {}).keys()),
-        }
+        tid: RegionTaskMeta(
+            name=tinfo.get("name", tid),
+            description=tinfo.get("description", ""),
+            versions=list(tinfo.get("versions", {}).keys()),
+        )
         for tid, tinfo in region.get("tasks", {}).items()
     }
 
-    return {
-        "id": region_id,
-        "name": region.get("name", region_id),
-        "patch_count": len(patches),
-        "tasks": tasks,
-        "embeddings": list(region.get("embeddings", {}).keys()),
-    }
+    return RegionDetail(
+        id=region_id,
+        name=region.get("name", region_id),
+        patch_count=len(patches),
+        tasks=tasks,
+        embeddings=list(region.get("embeddings", {}).keys()),
+    )

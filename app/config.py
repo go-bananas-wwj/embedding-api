@@ -1,5 +1,6 @@
 """Configuration loading with hot-reload support."""
 
+import atexit
 import copy
 import json
 import logging
@@ -19,15 +20,24 @@ CONFIG_PATH = Path(os.environ.get("CONFIG_PATH", DEFAULT_CONFIG_PATH))
 
 
 class ConfigReloadHandler(FileSystemEventHandler):
-    """Watchdog handler for config file changes."""
+    """Watchdog handler for config file changes with debounce."""
 
     def __init__(self, config_manager, config_path: Path):
         self.config_manager = config_manager
         self.config_path = str(config_path.resolve())
+        self._timer: Optional[threading.Timer] = None
+        self._lock = threading.Lock()
 
     def on_modified(self, event):
         if event.src_path == self.config_path:
-            self.config_manager.reload()
+            with self._lock:
+                if self._timer:
+                    self._timer.cancel()
+                self._timer = threading.Timer(0.5, self._do_reload)
+                self._timer.start()
+
+    def _do_reload(self):
+        self.config_manager.reload()
 
 
 class ConfigManager:
@@ -41,6 +51,8 @@ class ConfigManager:
         self._patches_cache: Dict[str, List[Dict[str, Any]]] = {}
         self.reload()
         self._start_watching()
+        # Register cleanup on normal process exit
+        atexit.register(self.stop_watching)
 
     def reload(self):
         """Reload configuration from file."""
@@ -50,6 +62,10 @@ class ConfigManager:
                     self._config = yaml.safe_load(f)
                 # Clear patches cache on config reload
                 self._patches_cache.clear()
+                # Also clear DataService cache since config changed
+                from app.services.data_service import DataService
+                with DataService._cache_lock:
+                    DataService._available_tasks_cache.clear()
                 logger.info(f"Config reloaded from {self.config_path}")
             except (yaml.YAMLError, OSError) as e:
                 logger.error(f"Failed to reload config: {e}")

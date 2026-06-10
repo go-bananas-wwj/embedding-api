@@ -17,6 +17,20 @@ class RegionInfo(BaseModel):
     tasks: List[str]
 
 
+class RegionTaskMeta(BaseModel):
+    name: str
+    description: str
+    versions: List[str]
+
+
+class RegionDetail(BaseModel):
+    id: str
+    name: str
+    patch_count: int
+    tasks: Dict[str, RegionTaskMeta]
+    embeddings: List[str]
+
+
 class RegionsResponse(BaseModel):
     regions: List[RegionInfo]
 
@@ -72,6 +86,17 @@ class EmbeddingStats(BaseModel):
     min: float
     max: float
     mean: float
+
+
+class TileInfo(BaseModel):
+    patch_id: str
+    period: Optional[str] = None
+    filename: str
+
+
+class TilesResponse(BaseModel):
+    tiles: List[TileInfo]
+    total: int
 
 
 class ErrorResponse(BaseModel):

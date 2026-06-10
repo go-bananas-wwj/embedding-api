@@ -35,6 +35,8 @@ class TestRegions:
         data = response.json()
         assert data["id"] == "harbin"
         assert data["patch_count"] == 424
+        assert "tasks" in data
+        assert "embeddings" in data
 
     def test_get_region_haidian(self):
         response = client.get("/regions/haidian")
@@ -73,6 +75,16 @@ class TestPatches:
 
     def test_list_patches_swapped_bbox(self):
         response = client.get("/regions/harbin/patches?bbox=10,10,5,5")
+        assert response.status_code == 422
+
+    def test_list_patches_page_boundary(self):
+        # page_size at upper limit
+        response = client.get("/regions/harbin/patches?page=1&page_size=100")
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["patches"]) == 100
+        # page_size exceeds limit
+        response = client.get("/regions/harbin/patches?page=1&page_size=101")
         assert response.status_code == 422
 
     def test_get_patch(self):
@@ -114,6 +126,11 @@ class TestEmbeddings:
         response = client.get("/regions/harbin/patches/patch_000000/embedding?format=png")
         assert response.status_code == 200
         assert response.headers["content-type"] == "image/png"
+
+    def test_get_embedding_cache(self):
+        response = client.get("/regions/harbin/patches/patch_000000/embedding?format=cache")
+        # Should fall back to available format
+        assert response.status_code in (200, 404)
 
     def test_get_embedding_invalid_format(self):
         response = client.get("/regions/harbin/patches/patch_000000/embedding?format=invalid")
@@ -161,6 +178,16 @@ class TestTasks:
             "/regions/harbin/patches/patch_000000/tasks/construction/result?format=invalid"
         )
         assert response.status_code == 422
+
+    def test_get_task_prediction(self):
+        response = client.get("/regions/harbin/patches/patch_000000/tasks/construction/prediction")
+        # May be 200 or 404 depending on data availability
+        assert response.status_code in (200, 404)
+
+    def test_get_task_label(self):
+        response = client.get("/regions/harbin/patches/patch_000000/tasks/construction/label")
+        # May be 200 or 404 depending on data availability
+        assert response.status_code in (200, 404)
 
     def test_get_tile_not_implemented(self):
         response = client.get("/regions/harbin/tasks/construction/tiles/10/100/100.png")

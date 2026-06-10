@@ -1,11 +1,12 @@
 """Data file path resolution and metadata loading."""
 
-import asyncio
 import json
 import logging
 import math
 import os
 import re
+import threading
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -19,9 +20,22 @@ _PATCH_ID_PATTERN = re.compile(r"^patch_\d{6}$")
 # Valid period pattern: alphanumeric, hyphen, underscore only (no dots)
 _PERIOD_PATTERN = re.compile(r"^[\w\-]+$")
 
+# Max file size for embeddings (100MB)
+MAX_FILE_SIZE = 100 * 1024 * 1024
+
 
 class DataServiceError(Exception):
     """Custom exception for data service errors."""
+    pass
+
+
+class DataValidationError(DataServiceError):
+    """Raised when input validation fails."""
+    pass
+
+
+class DataNotFoundError(DataServiceError):
+    """Raised when requested data is not found."""
     pass
 
 
@@ -40,7 +54,8 @@ def _validate_period(period: Optional[str]) -> bool:
 def _resolve_path(base_dir: str, relative: str) -> Optional[str]:
     """Resolve and validate a path is within the base directory.
 
-    Uses Path.relative_to() to prevent path traversal via prefix matching.
+    Uses Path.relative_to() to prevent path traversal via prefix matching,
+    and checks for symlinks to mitigate TOCTOU race conditions.
     """
     try:
         base = Path(base_dir).resolve()
@@ -48,19 +63,52 @@ def _resolve_path(base_dir: str, relative: str) -> Optional[str]:
         # Use relative_to to ensure target is actually inside base,
         # not just sharing a common prefix (e.g., /foo vs /foobar)
         target.relative_to(base)
-        return str(target) if target.exists() else None
+
+        # Security: check for symlinks in the path chain.
+        # This mitigates (but cannot fully eliminate) TOCTOU race conditions.
+        for part in target.parents:
+            if part == base:
+                break
+            if part.exists() and part.is_symlink():
+                logger.warning(f"Symlink in path chain blocked: {relative}")
+                return None
+
+        # Final check: ensure target itself is not a symlink
+        if target.exists():
+            if target.is_symlink():
+                logger.warning(f"Symlink target blocked: {relative}")
+                return None
+            return str(target)
+        return None
     except (OSError, ValueError):
         return None
+
+
+def _check_file_size(path: str) -> None:
+    """Check file size is within allowed limit. Raises DataServiceError if too large."""
+    try:
+        size = os.path.getsize(path)
+        if size > MAX_FILE_SIZE:
+            raise DataServiceError(
+                f"File too large: {size} bytes (max {MAX_FILE_SIZE})"
+            )
+    except OSError as e:
+        raise DataServiceError(f"Cannot access file: {e}")
 
 
 class DataService:
     """Service for resolving data file paths."""
 
+    # Simple TTL cache for available_tasks to avoid N+1 scans
+    _available_tasks_cache: Dict[Tuple[str, str], Tuple[List[str], float]] = {}
+    _AVAILABLE_TASKS_CACHE_TTL = 60.0  # seconds
+    _cache_lock = threading.Lock()
+
     @staticmethod
     def get_patch(region_id: str, patch_id: str) -> Optional[Dict[str, Any]]:
         """Get patch metadata by ID."""
         if not _validate_patch_id(patch_id):
-            raise DataServiceError(f"Invalid patch_id format: '{patch_id}'")
+            raise DataValidationError(f"Invalid patch_id format: '{patch_id}'")
         config = get_config()
         patches = config.get_patches(region_id)
         for p in patches:
@@ -102,7 +150,7 @@ class DataService:
                             filtered.append(p)
                 patches = filtered
             except ValueError as e:
-                raise DataServiceError(f"Invalid bbox format: {e}")
+                raise DataValidationError(f"Invalid bbox format: {e}")
 
         total = len(patches)
         start = (page - 1) * page_size
@@ -113,7 +161,7 @@ class DataService:
     def get_embedding_path(region_id: str, patch_id: str, fmt: str = "png") -> Optional[str]:
         """Resolve embedding file path using config-driven templates."""
         if not _validate_patch_id(patch_id):
-            raise DataServiceError(f"Invalid patch_id format: '{patch_id}'")
+            raise DataValidationError(f"Invalid patch_id format: '{patch_id}'")
         config = get_config()
         region = config.get_region(region_id)
         if not region:
@@ -162,7 +210,8 @@ class DataService:
         try:
             files = sorted(Path(base_dir).glob(pattern))
             if files:
-                return str(files[0])
+                resolved = _resolve_path(str(files[0].parent), files[0].name)
+                return resolved
         except OSError:
             pass
         return None
@@ -178,9 +227,9 @@ class DataService:
     ) -> Optional[str]:
         """Resolve task result file path."""
         if not _validate_patch_id(patch_id):
-            raise DataServiceError(f"Invalid patch_id format: '{patch_id}'")
+            raise DataValidationError(f"Invalid patch_id format: '{patch_id}'")
         if not _validate_period(period):
-            raise DataServiceError(f"Invalid period format: '{period}'")
+            raise DataValidationError(f"Invalid period format: '{period}'")
 
         config = get_config()
         region = config.get_region(region_id)
@@ -294,14 +343,17 @@ class DataService:
         try:
             parent = Path(labels_base).parent if labels_base else None
             if parent:
-                summary_path = parent / "summary.json"
-                if summary_path.exists():
-                    with open(summary_path, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                        if period and period in data:
-                            return data[period].get(task_type)
-                        if task_type in data:
-                            return data[task_type]
+                # Security: validate parent path is still within allowed data dirs
+                summary_path_str = _resolve_path(str(parent), "summary.json")
+                if summary_path_str:
+                    summary_path = Path(summary_path_str)
+                    if summary_path.exists():
+                        with open(summary_path, "r", encoding="utf-8") as f:
+                            data = json.load(f)
+                            if period and period in data:
+                                return data[period].get(task_type)
+                            if task_type in data:
+                                return data[task_type]
         except (json.JSONDecodeError, OSError) as e:
             logger.warning(f"Failed to load summary.json: {e}")
 
@@ -312,6 +364,14 @@ class DataService:
         """Get list of tasks that have data for this patch."""
         if not _validate_patch_id(patch_id):
             return []
+
+        cache_key = (region_id, patch_id)
+        with DataService._cache_lock:
+            if cache_key in DataService._available_tasks_cache:
+                tasks, timestamp = DataService._available_tasks_cache[cache_key]
+                if time.time() - timestamp < DataService._AVAILABLE_TASKS_CACHE_TTL:
+                    return tasks
+
         config = get_config()
         region = config.get_region(region_id)
         if not region:
@@ -335,7 +395,11 @@ class DataService:
                     if path:
                         available.append(task_name)
                         break
-        return list(set(available))
+        result = list(set(available))
+
+        with DataService._cache_lock:
+            DataService._available_tasks_cache[cache_key] = (result, time.time())
+        return result
 
     @staticmethod
     def has_embedding(region_id: str, patch_id: str) -> bool:
