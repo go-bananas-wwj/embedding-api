@@ -87,6 +87,13 @@ uvicorn app.main:app --host 0.0.0.0 --port 9061
 docker-compose up -d
 ```
 
+> **环境变量配置**（可选，生产环境建议设置）：
+> - `CONFIG_FILE` — 指定配置文件路径，默认 `./config.yaml`
+> - `LOG_LEVEL` — 日志级别，默认 `INFO`
+> - `TZ` — 时区，默认 `Asia/Shanghai`
+>
+> **CORS**：服务已配置跨域，前端可直接从浏览器调用。如需限制特定域名，修改 `app/main.py` 中的 `CORSMiddleware` 配置。
+
 ---
 
 ## 📡 接口总览
@@ -256,8 +263,10 @@ GET /regions/{region_id}/patches?page=1&page_size=20&bbox=minx,miny,maxx,maxy
 | 参数 | 类型 | 必填 | 默认值 | 说明 |
 |------|------|------|--------|------|
 | `page` | int | 否 | 1 | 页码，从 1 开始 |
-| `page_size` | int | 否 | 20 | 每页数量，最大 100 |
+| `page_size` | int | 否 | 20 | 每页数量，**最大 100**，超过将返回 422 错误 |
 | `bbox` | string | 否 | - | 地理范围过滤，格式：`minx,miny,maxx,maxy`（WGS84 坐标系） |
+
+**坐标顺序**：`minx,miny,maxx,maxy` 分别对应 **最小经度、最小纬度、最大经度、最大纬度**。
 
 **bbox 示例**:
 ```
@@ -301,14 +310,15 @@ bbox=126.5,45.74,126.55,45.76
 | `total` | int | 符合条件的 Patch 总数 |
 | `page` | int | 当前页码 |
 | `page_size` | int | 每页数量 |
+| `has_next` | bool | 是否有下一页（`total > page * page_size` 时为 `true`） |
 | `patch_id` | string | Patch 唯一标识 |
 | `bounds_wgs84` | float[4] | 经纬度范围 `[min_lng, min_lat, max_lng, max_lat]` |
-| `sources` | object | 数据源统计（如 Sentinel-2 影像数量） |
-| `time_range` | string[2] | 数据时间范围 `[开始, 结束]` |
+| `sources` | object | 各数据源包含的影像/样本数量（如 `s2: 182` 表示 Sentinel-2 有 182 个时间切片） |
+| `time_range` | string[2] | 数据时间范围 `[开始年月, 结束年月]`，格式为 `YYYY-MM` |
 | `has_embedding` | bool | 是否有嵌入数据 |
-| `available_tasks` | string[] | 该 Patch 有结果的下游任务 |
+| `available_tasks` | string[] | 该 Patch 有结果的下游任务（前端可用此字段动态渲染「查看任务」按钮，只显示有数据的任务） |
 
-**前端提示**: `bounds_wgs84` 可以直接用于在地图上绘制矩形框，表示 Patch 的位置。
+**前端提示**: `bounds_wgs84` 可以直接用于在地图上绘制矩形框，表示 Patch 的位置。前端可通过 `has_next` 判断是否需要显示「加载更多」按钮。
 
 ---
 
@@ -360,9 +370,9 @@ GET /regions/{region_id}/patches/{patch_id}/embedding?format=png
 
 | 参数 | 类型 | 必填 | 默认值 | 说明 |
 |------|------|------|--------|------|
-| `format` | string | 否 | `png` | 输出格式：`png`、`npy`、`json` |
+| `format` | string | 否 | `png` | 输出格式：`png`、`npy`、`json`、`cache` |
 
-**三种格式的区别**:
+**四种格式的区别**:
 
 #### format=png（默认）
 
@@ -393,6 +403,18 @@ const arrayBuffer = await response.arrayBuffer();
 // 使用 jsnumpy 解析
 ```
 
+#### format=cache
+
+**自动选择可用格式**，优先返回 PNG 图片，没有 PNG 则返回 NPY 二进制。
+
+- **适用场景**：前端不确定某个 Patch 有哪些格式时，让后端自动选择
+- **返回 Content-Type**：根据实际返回的数据决定（`image/png` 或 `application/octet-stream`）
+
+```html
+<!-- 自动选择最佳格式展示 -->
+<img src="/regions/harbin/patches/patch_000000/embedding?format=cache" />
+```
+
 #### format=json
 
 返回 **JSON 统计信息**，Content-Type: `application/json`
@@ -400,7 +422,7 @@ const arrayBuffer = await response.arrayBuffer();
 ```json
 {
   "patch_id": "patch_000000",
-  "shape": [64, 128, 128],
+  "shape": [60, 8],
   "dtype": "float32",
   "min": -0.476,
   "max": 0.404,
@@ -410,13 +432,13 @@ const arrayBuffer = await response.arrayBuffer();
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `shape` | int[] | 数组维度。`[64, 128, 128]` 表示 64 个通道，每个通道 128×128 像素 |
+| `shape` | int[] | 数组维度。实际值因区域和模型版本而异，如 `[60, 8]` 表示 60 个通道 × 8 个特征 |
 | `dtype` | string | 数据类型，`float32` 或 `uint8` |
 | `min` | float | 最小值 |
 | `max` | float | 最大值 |
 | `mean` | float | 平均值 |
 
-**前端提示**: `shape` 的第一个数字是通道数。Embedding 不是普通 RGB 图片，每个通道代表模型提取的一个特征维度。
+**前端提示**: `shape` 的维度含义因模型架构不同而变化。Embedding 不是普通 RGB 图片，每个维度代表模型提取的一个特征分量。如需要具体语义，请联系后端团队获取模型说明。
 
 ---
 
@@ -497,7 +519,7 @@ GET /regions/{region_id}/tasks/{task_type}/summary?version=v1&period=2025-04_vs_
 | 参数 | 类型 | 必填 | 默认值 | 说明 |
 |------|------|------|--------|------|
 | `version` | string | 否 | `v1` | 版本号 |
-| `period` | string | 否 | - | **V2 必填**，时间段，如 `2025-04_vs_2025-06` |
+| `period` | string | 否 | - | 时间周期，部分任务版本需要指定，如 `2025-04_vs_2025-06` |
 
 **成功响应** (200):
 ```json
@@ -554,7 +576,7 @@ GET /regions/{region_id}/patches/{patch_id}/tasks/{task_type}/result?format=png&
 |------|------|------|--------|------|
 | `format` | string | 否 | `png` | `png` 返回图片，`npy` 返回原始数组 |
 | `version` | string | 否 | `v1` | 版本号 |
-| `period` | string | 否 | - | V2 必填 |
+| `period` | string | 否 | - | 时间周期（如 `2025-10`），部分任务版本需要指定 |
 
 **成功响应**:
 - `format=png`: 返回 PNG 图片 (`image/png`)
@@ -590,17 +612,18 @@ GET /regions/{region_id}/patches/{patch_id}/tasks/{task_type}/prediction?version
 
 ### 11. 标签数据
 
-获取某个 Patch 的人工标注或自动生成标签。
+获取某个 Patch 的真实标签（Ground Truth）。标签来源可能是人工标注或自动生成。
 
 ```
 GET /regions/{region_id}/patches/{patch_id}/tasks/{task_type}/label?version=v1&period=...
 ```
 
-**什么时候用**: 对比「模型预测」和「真实标签」，计算准确率。
+**什么时候用**: 对比「模型预测」和「真实标签」，计算准确率或生成混淆矩阵。
 
 **返回**:
-- 如果有 `.npy` 标签文件：返回 NPY 二进制
-- 如果有 `meta.json`：返回 JSON 元数据
+- 如果存在 `.npy` 标签文件：返回 NPY 二进制数组
+- 如果存在 `meta.json` 元数据文件：返回 JSON 元数据
+- 如果两者都不存在：返回 `404`
 
 ---
 
@@ -621,7 +644,7 @@ GET /regions/{region_id}/tasks/{task_type}/tiles?version=v1&period=...
     {"patch_id": "patch_000000", "period": "2025-10", "filename": "patch_000000_2025-10.png"},
     {"patch_id": "patch_000001", "period": "2025-10", "filename": "patch_000001_2025-10.png"}
   ],
-  "total": 424
+  "total": 2
 }
 ```
 
@@ -676,9 +699,13 @@ L.tileLayer(
 | `200` | 成功 | 请求正常处理 |
 | `400` | 请求格式错误 | Patch ID 格式非法、路径穿越尝试 |
 | `404` | 未找到 | 区域/Patch/任务/结果不存在 |
-| `422` | 参数校验失败 | 查询参数格式不正确（如 page=-1、bbox=nan） |
+| `413` | 请求体过大 | 文件超过 1GB 限制或图像超过 5000 万像素 |
+| `422` | 参数校验失败 | 查询参数格式不正确（如 page=-1、bbox=nan、page_size=999） |
 | `500` | 服务器错误 | 内部异常，需联系后端排查 |
 | `501` | 未实现 | 瓦片服务等功能尚未实现 |
+| `503` | 服务不可用 | 服务正在启动中或重启中，稍后重试 |
+
+> **注意**：请求 `/regions/{region_id}/patches/{patch_id}/embedding?format=png` 时，如果该区域该 Patch 只有 `.npy` 格式，响应头会包含 `X-Available-Format: npy`，提示前端可以请求 `format=npy` 获取原始数据。
 
 ### 常见错误场景
 
@@ -773,12 +800,40 @@ regions:
 3. 地图移动时 → GET /.../tiles/{z}/{x}/{y}.png → 动态加载瓦片
 ```
 
-### 3. 性能建议
+### 3. 前端 Fetch 示例
 
-- **分页加载**: Patch 数量多（400+），始终使用分页
-- **bbox 过滤**: 地图移动时只请求可视区域的 Patch
-- **图片缓存**: PNG 结果图可设置浏览器缓存（内容不变）
+```typescript
+// 1. 配置基地址（开发/生产环境切换）
+const API_BASE = process.env.VITE_API_URL || 'http://60.31.21.42:22065';
+
+// 2. 获取带 bbox 过滤的 Patch 列表
+async function fetchPatches(regionId: string, bbox: string, page = 1, pageSize = 20) {
+  const url = new URL(`${API_BASE}/regions/${regionId}/patches`);
+  url.searchParams.set('page', String(page));
+  url.searchParams.set('page_size', String(pageSize));
+  if (bbox) url.searchParams.set('bbox', bbox);
+
+  const resp = await fetch(url.toString());
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: 'Unknown error' }));
+    throw new Error(`API ${resp.status}: ${err.detail}`);
+  }
+  return resp.json(); // { total, page, page_size, patches, has_next }
+}
+
+// 3. 加载任务结果图
+function getResultImageUrl(regionId: string, patchId: string, taskType: string) {
+  return `${API_BASE}/regions/${regionId}/patches/${patchId}/tasks/${taskType}/result?format=png`;
+}
+```
+
+### 4. 性能建议
+
+- **分页加载**: Patch 数量多（400+），始终使用分页，通过 `has_next` 判断是否还有更多数据
+- **bbox 过滤**: 地图移动时只请求可视区域的 Patch，减少数据传输
+- **图片缓存**: PNG 结果图可设置浏览器缓存（内容不变），避免重复请求
 - **懒加载**: 嵌入大图和任务结果图按需加载，不要一次性请求所有 Patch
+- **错误降级**: 遇到 `404` 时不应中断整个应用，而是显示「暂无数据」提示；遇到 `503` 时提示用户稍后重试
 
 ---
 
