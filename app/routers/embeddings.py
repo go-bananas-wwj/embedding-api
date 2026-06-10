@@ -60,6 +60,23 @@ def _load_npy_array(path: str):
     return arr
 
 
+def _load_npz_embedding(path: str):
+    """Load embedding array from .npz archive (used by haidian v1).
+
+    Expects the archive to contain an 'embedding' key with a numpy array.
+    """
+    data = np.load(path, allow_pickle=False)
+    if "embedding" not in data:
+        raise DataServiceError(f"NPZ file missing 'embedding' key: {path}")
+    arr = data["embedding"]
+    elements = arr.size
+    if elements > MAX_NPY_ELEMENTS:
+        raise DataServiceError(
+            f"Array too large: {elements} elements (max {MAX_NPY_ELEMENTS})"
+        )
+    return arr
+
+
 @router.get(
     "/regions/{region_id}/patches/{patch_id}/embedding",
     responses={
@@ -150,50 +167,61 @@ async def get_embedding(
         raise HTTPException(status_code=413, detail=str(e))
 
     if format == "json":
-        if emb_path.endswith(".npy"):
-            try:
+        try:
+            if emb_path.endswith(".npy"):
                 arr = await asyncio.to_thread(_load_npy_array, emb_path)
-            except FileNotFoundError:
-                raise HTTPException(
-                    status_code=404, detail="Embedding file no longer exists"
-                )
-            except (OSError, ValueError, EOFError, DataServiceError) as e:
-                raise HTTPException(
-                    status_code=500, detail=f"Failed to load embedding: {e}"
-                )
-            return EmbeddingStats(
-                patch_id=patch_id,
-                shape=list(arr.shape),
-                dtype=str(arr.dtype),
-                min=float(arr.min()),
-                max=float(arr.max()),
-                mean=float(arr.mean()),
-            )
-        else:
-            try:
+            elif emb_path.endswith(".npz"):
+                arr = await asyncio.to_thread(_load_npz_embedding, emb_path)
+            else:
                 img_arr = await asyncio.to_thread(_load_image_array, emb_path)
-            except FileNotFoundError:
-                raise HTTPException(
-                    status_code=404, detail="Image file no longer exists"
+                return EmbeddingStats(
+                    patch_id=patch_id,
+                    shape=list(img_arr.shape),
+                    dtype=str(img_arr.dtype),
+                    min=float(img_arr.min()),
+                    max=float(img_arr.max()),
+                    mean=float(img_arr.mean()),
                 )
-            except (OSError, ValueError, ImportError, DataServiceError) as e:
-                raise HTTPException(
-                    status_code=500, detail=f"Failed to load image: {e}"
-                )
-            return EmbeddingStats(
-                patch_id=patch_id,
-                shape=list(img_arr.shape),
-                dtype=str(img_arr.dtype),
-                min=float(img_arr.min()),
-                max=float(img_arr.max()),
-                mean=float(img_arr.mean()),
+        except FileNotFoundError:
+            raise HTTPException(
+                status_code=404, detail="Embedding file no longer exists"
             )
+        except (OSError, ValueError, EOFError, DataServiceError) as e:
+            raise HTTPException(
+                status_code=500, detail=f"Failed to load embedding: {e}"
+            )
+        return EmbeddingStats(
+            patch_id=patch_id,
+            shape=list(arr.shape),
+            dtype=str(arr.dtype),
+            min=float(arr.min()),
+            max=float(arr.max()),
+            mean=float(arr.mean()),
+        )
     elif format == "npy":
         if emb_path.endswith(".npy"):
             return FileResponse(
                 emb_path,
                 media_type="application/octet-stream",
                 filename=f"{patch_id}_embedding.npy",
+            )
+        elif emb_path.endswith(".npz"):
+            # Extract embedding from NPZ and return as NPY stream
+            try:
+                arr = await asyncio.to_thread(_load_npz_embedding, emb_path)
+            except (OSError, ValueError, DataServiceError) as e:
+                raise HTTPException(
+                    status_code=500, detail=f"Failed to load NPZ: {e}"
+                )
+            import io
+            buf = io.BytesIO()
+            np.save(buf, arr)
+            buf.seek(0)
+            from fastapi.responses import StreamingResponse
+            return StreamingResponse(
+                buf,
+                media_type="application/octet-stream",
+                headers={"Content-Disposition": f'attachment; filename="{patch_id}_embedding.npy"'},
             )
         # Format not available for this patch — return 404 with hint
         raise HTTPException(
@@ -206,6 +234,13 @@ async def get_embedding(
         if emb_path.endswith((".png", ".jpg", ".jpeg", ".PNG", ".JPG", ".JPEG")):
             media_type = "image/png" if emb_path.lower().endswith(".png") else "image/jpeg"
             return FileResponse(emb_path, media_type=media_type)
+        # For NPZ files, PNG is not pre-generated — return 404 with hint
+        if emb_path.endswith(".npz"):
+            raise HTTPException(
+                status_code=404,
+                detail=f"PNG format not pre-generated for this patch",
+                headers={"X-Available-Format": "npy"},
+            )
         # Format not available — return 404 with hint
         raise HTTPException(
             status_code=404,

@@ -412,17 +412,6 @@ class DataService:
                 # Try meta.json for summary
                 meta_path = _resolve_path(base, "meta.json")
                 return meta_path
-        elif format_type == "label_vis":
-            base = ver.get("label_vis")
-            if base:
-                if period:
-                    period_dir = Path(base) / period
-                    path = _resolve_path(str(period_dir), f"{patch_id}.png")
-                    if path:
-                        return path
-                path = _resolve_path(base, f"{patch_id}.png")
-                if path:
-                    return path
         elif format_type == "tile":
             base = ver.get("results")
             if base:
@@ -545,14 +534,18 @@ class DataService:
         if not _validate_patch_id(patch_id):
             return False
         # Try with explicit month first, then fallback to first available
-        path = DataService.get_embedding_path(region_id, patch_id)
-        if path:
-            return True
+        for fmt in ("png", "npy", "npz"):
+            path = DataService.get_embedding_path(region_id, patch_id, fmt=fmt)
+            if path:
+                return True
         available_months = DataService.get_available_months(region_id, patch_id)
         if available_months:
-            return DataService.get_embedding_path(
-                region_id, patch_id, month=available_months[0]
-            ) is not None
+            for fmt in ("png", "npy", "npz"):
+                path = DataService.get_embedding_path(
+                    region_id, patch_id, fmt=fmt, month=available_months[0]
+                )
+                if path:
+                    return True
         return False
 
     @staticmethod
@@ -581,10 +574,10 @@ class DataService:
                 # Scan month subdirectories
                 for month_dir in base_path.iterdir():
                     if month_dir.is_dir():
-                        npy_file = month_dir / f"{patch_id}.npy"
-                        png_file = month_dir / f"{patch_id}.png"
-                        if npy_file.exists() or png_file.exists():
-                            months.add(month_dir.name)
+                        for ext in (".npy", ".png", ".npz"):
+                            if (month_dir / f"{patch_id}{ext}").exists():
+                                months.add(month_dir.name)
+                                break
         return sorted(months)
 
     @staticmethod

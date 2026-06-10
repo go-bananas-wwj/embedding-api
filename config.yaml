@@ -22,12 +22,10 @@ regions:
             results: "data/harbin/tasks/construction/v1/results"
             predictions: "data/harbin/tasks/construction/v1/predictions"
             labels: "data/harbin/tasks/construction/v1/labels"
-            label_vis: "data/harbin/tasks/construction/v1/label_vis"
           v2:
             results: "data/harbin/tasks/construction/v2/results"
             predictions: "data/harbin/tasks/construction/v2/predictions"
             labels: "data/harbin/tasks/construction/v2/labels"
-            label_vis: "data/harbin/tasks/construction/v2/label_vis"
       building_change:
         name: "建筑变化监测"
         description: "监测建筑物变化情况"
@@ -36,7 +34,6 @@ regions:
             results: "data/harbin/tasks/building_change/v1/results"
             predictions: "data/harbin/tasks/building_change/v1/predictions"
             labels: "data/harbin/tasks/building_change/v1/labels"
-            label_vis: "data/harbin/tasks/building_change/v1/label_vis"
       farmland:
         name: "耕地非农非粮监测"
         description: "监测耕地被非法占用情况"
@@ -45,7 +42,6 @@ regions:
             results: "data/harbin/tasks/farmland/v1/results"
             predictions: "data/harbin/tasks/farmland/v1/predictions"
             labels: "data/harbin/tasks/farmland/v1/labels"
-            label_vis: "data/harbin/tasks/farmland/v1/label_vis"
       land_conversion:
         name: "土地转换监测"
         description: "监测土地用途转换情况"
@@ -54,14 +50,13 @@ regions:
             results: "data/harbin/tasks/land_conversion/v2/results"
             predictions: "data/harbin/tasks/land_conversion/v2/predictions"
             labels: "data/harbin/tasks/land_conversion/v2/labels"
-            label_vis: "data/harbin/tasks/land_conversion/v2/label_vis"
 
   haidian:
     name: "海淀区"
     patches_meta: "data/haidian/patches_meta_v2.json"
     embeddings:
-      v2:
-        path: "data/haidian/embeddings"
-        template: "{patch_id}.npy"
-        formats: ["npy"]
+      v1:
+        path: "data/haidian/embeddings/v1"
+        template: "{month}/{patch_id}.npz"
+        formats: ["npz", "png", "json"]
     tasks: {}
