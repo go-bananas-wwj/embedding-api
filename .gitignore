@@ -29,3 +29,11 @@ env/
 *.swo
 *~
 .DS_Store
+
+# Runtime files
+server.log
+server.pid
+service_watchdog.log
+service_watchdog.pid
+watchdog.log
+watchdog.pid

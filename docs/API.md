@@ -60,15 +60,20 @@ Embedding 是深度学习模型把卫星影像「翻译」成的高维向量。�
 
 ### Base URL
 
+**生产环境**:
 ```
-http://localhost:8000
+http://60.31.21.42:22065
+```
+
+**本地开发**:
+```
+http://localhost:9061
 ```
 
 ### 在线文档
 
-启动服务后访问：
-- **Swagger UI**（交互式调试）: `http://localhost:8000/docs`
-- **ReDoc**（美观文档）: `http://localhost:8000/redoc`
+- **Swagger UI**（交互式调试）: `http://60.31.21.42:22065/docs`
+- **ReDoc**（美观文档）: `http://60.31.21.42:22065/redoc`
 
 ### 启动服务
 
@@ -76,7 +81,7 @@ http://localhost:8000
 # 方式一：直接运行
 cd embedding-api
 pip install -r requirements.txt
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+uvicorn app.main:app --host 0.0.0.0 --port 9061
 
 # 方式二：Docker
 docker-compose up -d
@@ -369,7 +374,7 @@ GET /regions/{region_id}/patches/{patch_id}/embedding?format=png
 **前端用法**: 直接放在 `<img>` 标签里展示。
 
 ```html
-<img src="http://localhost:8000/regions/harbin/patches/patch_000000/embedding?format=png" />
+<img src="http://60.31.21.42:22065/regions/harbin/patches/patch_000000/embedding?format=png" />
 ```
 
 #### format=npy
@@ -807,4 +812,5 @@ regions:
 
 - **GitHub Issues**: [go-bananas-wwj/embedding-api/issues](https://github.com/go-bananas-wwj/embedding-api/issues)
 - **服务监控**: `GET /health`
-- **在线调试**: 启动服务后访问 `http://localhost:8000/docs`
+- **在线调试**: `http://60.31.21.42:22065/docs`
+- **本地调试**: `http://localhost:9061/docs`

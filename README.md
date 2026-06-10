@@ -12,11 +12,18 @@ Unified RESTful API for remote sensing embeddings and downstream task results fr
 
 ## Quick Start
 
+### Production
+
+Service is running at: **http://60.31.21.42:22065**
+
+- Swagger UI: http://60.31.21.42:22065/docs
+- ReDoc: http://60.31.21.42:22065/redoc
+
 ### Local Development
 
 ```bash
 pip install -r requirements.txt
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn app.main:app --reload --host 0.0.0.0 --port 9061
 ```
 
 ### Docker
@@ -27,8 +34,8 @@ docker-compose up -d
 
 ### API Documentation
 
-- Swagger UI: http://localhost:8000/docs
-- ReDoc: http://localhost:8000/redoc
+- Swagger UI: http://localhost:9061/docs
+- ReDoc: http://localhost:9061/redoc
 
 ## API Endpoints
 
