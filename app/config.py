@@ -1,5 +1,6 @@
 """Configuration loading with hot-reload support."""
 
+import copy
 import json
 import logging
 import os
@@ -13,17 +14,19 @@ from watchdog.events import FileSystemEventHandler
 
 logger = logging.getLogger(__name__)
 
-CONFIG_PATH = Path(__file__).parent.parent / "config.yaml"
+DEFAULT_CONFIG_PATH = Path(__file__).parent.parent / "config.yaml"
+CONFIG_PATH = Path(os.environ.get("CONFIG_PATH", DEFAULT_CONFIG_PATH))
 
 
 class ConfigReloadHandler(FileSystemEventHandler):
     """Watchdog handler for config file changes."""
 
-    def __init__(self, config_manager):
+    def __init__(self, config_manager, config_path: Path):
         self.config_manager = config_manager
+        self.config_path = str(config_path.resolve())
 
     def on_modified(self, event):
-        if event.src_path == str(CONFIG_PATH):
+        if event.src_path == self.config_path:
             self.config_manager.reload()
 
 
@@ -53,9 +56,11 @@ class ConfigManager:
 
     def _start_watching(self):
         """Start file watcher for hot-reload."""
-        handler = ConfigReloadHandler(self)
+        handler = ConfigReloadHandler(self, self.config_path)
         self._observer = Observer()
-        self._observer.schedule(handler, str(self.config_path.parent), recursive=False)
+        self._observer.schedule(
+            handler, str(self.config_path.parent), recursive=False
+        )
         self._observer.start()
 
     def get(self, *keys, default=None):
@@ -83,10 +88,13 @@ class ConfigManager:
         return list(self.regions.keys())
 
     def get_patches(self, region_id: str) -> List[Dict[str, Any]]:
-        """Load patches metadata with caching."""
+        """Load patches metadata with caching.
+
+        Returns a deep copy to prevent callers from mutating the cache.
+        """
         with self._lock:
             if region_id in self._patches_cache:
-                return self._patches_cache[region_id]
+                return copy.deepcopy(self._patches_cache[region_id])
 
             region = self.get_region(region_id)
             if not region:
@@ -110,7 +118,7 @@ class ConfigManager:
                     patches = []
 
                 self._patches_cache[region_id] = patches
-                return patches
+                return copy.deepcopy(patches)
             except (json.JSONDecodeError, OSError) as e:
                 logger.error(f"Failed to load patches_meta for {region_id}: {e}")
                 return []
@@ -121,12 +129,15 @@ class ConfigManager:
             self._observer.join()
 
 
-# Global config instance (lazy initialization)
+# Global config instance (lazy initialization with double-checked locking)
 _config_manager: Optional[ConfigManager] = None
+_config_lock = threading.Lock()
 
 
 def get_config() -> ConfigManager:
     global _config_manager
     if _config_manager is None:
-        _config_manager = ConfigManager()
+        with _config_lock:
+            if _config_manager is None:
+                _config_manager = ConfigManager()
     return _config_manager

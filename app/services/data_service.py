@@ -1,12 +1,14 @@
 """Data file path resolution and metadata loading."""
 
+import asyncio
 import json
 import logging
+import math
+import os
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from fastapi import HTTPException
 from app.config import get_config
 
 logger = logging.getLogger(__name__)
@@ -14,21 +16,38 @@ logger = logging.getLogger(__name__)
 # Valid patch_id pattern: patch_000000
 _PATCH_ID_PATTERN = re.compile(r"^patch_\d{6}$")
 
+# Valid period pattern: alphanumeric, hyphen, underscore only (no dots)
+_PERIOD_PATTERN = re.compile(r"^[\w\-]+$")
 
-def _validate_patch_id(patch_id: str) -> None:
+
+class DataServiceError(Exception):
+    """Custom exception for data service errors."""
+    pass
+
+
+def _validate_patch_id(patch_id: str) -> bool:
     """Validate patch_id format to prevent path traversal."""
-    if not _PATCH_ID_PATTERN.match(patch_id):
-        raise HTTPException(status_code=400, detail=f"Invalid patch_id format: '{patch_id}'")
+    return bool(_PATCH_ID_PATTERN.match(patch_id))
+
+
+def _validate_period(period: Optional[str]) -> bool:
+    """Validate period format to prevent path traversal."""
+    if period is None:
+        return True
+    return bool(_PERIOD_PATTERN.match(period))
 
 
 def _resolve_path(base_dir: str, relative: str) -> Optional[str]:
-    """Resolve and validate a path is within the base directory."""
+    """Resolve and validate a path is within the base directory.
+
+    Uses Path.relative_to() to prevent path traversal via prefix matching.
+    """
     try:
         base = Path(base_dir).resolve()
         target = (base / relative).resolve()
-        if not str(target).startswith(str(base)):
-            logger.warning(f"Path traversal attempt blocked: {relative}")
-            return None
+        # Use relative_to to ensure target is actually inside base,
+        # not just sharing a common prefix (e.g., /foo vs /foobar)
+        target.relative_to(base)
         return str(target) if target.exists() else None
     except (OSError, ValueError):
         return None
@@ -40,7 +59,8 @@ class DataService:
     @staticmethod
     def get_patch(region_id: str, patch_id: str) -> Optional[Dict[str, Any]]:
         """Get patch metadata by ID."""
-        _validate_patch_id(patch_id)
+        if not _validate_patch_id(patch_id):
+            raise DataServiceError(f"Invalid patch_id format: '{patch_id}'")
         config = get_config()
         patches = config.get_patches(region_id)
         for p in patches:
@@ -66,6 +86,13 @@ class DataService:
                 if len(parts) != 4:
                     raise ValueError("bbox must have 4 comma-separated values")
                 minx, miny, maxx, maxy = map(float, parts)
+                # Validate bbox values are finite
+                for v, name in [(minx, "minx"), (miny, "miny"), (maxx, "maxx"), (maxy, "maxy")]:
+                    if math.isnan(v) or math.isinf(v):
+                        raise ValueError(f"bbox {name} must be a finite number")
+                # Validate bbox ordering
+                if minx >= maxx or miny >= maxy:
+                    raise ValueError("bbox must satisfy minx < maxx and miny < maxy")
                 filtered = []
                 for p in patches:
                     bounds = p.get("bounds_wgs84", [])
@@ -75,7 +102,7 @@ class DataService:
                             filtered.append(p)
                 patches = filtered
             except ValueError as e:
-                raise HTTPException(status_code=422, detail=f"Invalid bbox format: {e}")
+                raise DataServiceError(f"Invalid bbox format: {e}")
 
         total = len(patches)
         start = (page - 1) * page_size
@@ -85,7 +112,8 @@ class DataService:
     @staticmethod
     def get_embedding_path(region_id: str, patch_id: str, fmt: str = "png") -> Optional[str]:
         """Resolve embedding file path using config-driven templates."""
-        _validate_patch_id(patch_id)
+        if not _validate_patch_id(patch_id):
+            raise DataServiceError(f"Invalid patch_id format: '{patch_id}'")
         config = get_config()
         region = config.get_region(region_id)
         if not region:
@@ -112,7 +140,7 @@ class DataService:
                 if not base:
                     continue
                 supported_formats = emb_config.get("formats", ["png"])
-                if fmt not in supported_formats:
+                if fmt not in supported_formats and fmt != "cache":
                     continue
                 template = emb_config.get("template", "{patch_id}.{fmt}")
                 relative = template.format(patch_id=patch_id, fmt=fmt)
@@ -129,6 +157,17 @@ class DataService:
         return None
 
     @staticmethod
+    def _find_first_file(base_dir: str, pattern: str) -> Optional[str]:
+        """Find first file matching pattern in directory."""
+        try:
+            files = sorted(Path(base_dir).glob(pattern))
+            if files:
+                return str(files[0])
+        except OSError:
+            pass
+        return None
+
+    @staticmethod
     def get_task_result_path(
         region_id: str,
         patch_id: str,
@@ -138,7 +177,11 @@ class DataService:
         period: Optional[str] = None,
     ) -> Optional[str]:
         """Resolve task result file path."""
-        _validate_patch_id(patch_id)
+        if not _validate_patch_id(patch_id):
+            raise DataServiceError(f"Invalid patch_id format: '{patch_id}'")
+        if not _validate_period(period):
+            raise DataServiceError(f"Invalid period format: '{period}'")
+
         config = get_config()
         region = config.get_region(region_id)
         if not region:
@@ -154,37 +197,36 @@ class DataService:
         if not ver:
             return None
 
-        # Validate period to prevent path traversal
-        if period and not re.match(r"^[\w\-_.]+$", period):
-            logger.warning(f"Invalid period format blocked: {period}")
-            return None
-
         if format_type == "png":
             base = ver.get("results")
             if base:
                 if period:
                     path = _resolve_path(base, f"{period}.png")
                     return path
-                # Try common patterns
-                for fname in ["2025-10.png", "result.png"]:
+                # Dynamic discovery: find first PNG instead of hardcoded names
+                path = DataService._find_first_file(base, "*.png")
+                if path:
+                    return path
+                # Fallback to common names
+                for fname in ["result.png"]:
                     path = _resolve_path(base, fname)
                     if path:
                         return path
-                # Check if there's a single PNG
-                try:
-                    pngs = sorted(Path(base).glob("*.png"))
-                    if pngs:
-                        return str(pngs[0])
-                except OSError:
-                    pass
         elif format_type == "npy":
             base = ver.get("predictions") or ver.get("results")
             if base:
                 if period:
                     path = _resolve_path(base, f"{patch_id}_{period}.npy")
                     return path
-                path = _resolve_path(base, f"{patch_id}_2025-10.npy")
-                return path
+                # Dynamic discovery
+                path = DataService._find_first_file(base, f"{patch_id}_*.npy")
+                if path:
+                    return path
+                # Fallback
+                for fname in [f"{patch_id}.npy", "result.npy"]:
+                    path = _resolve_path(base, fname)
+                    if path:
+                        return path
         elif format_type == "label":
             base = ver.get("labels")
             if base:
@@ -205,8 +247,10 @@ class DataService:
                 if period:
                     path = _resolve_path(str(tiles_dir), f"{patch_id}_{period}.png")
                     return path
-                path = _resolve_path(str(tiles_dir), f"{patch_id}_2025-10.png")
-                return path
+                # Dynamic discovery
+                path = DataService._find_first_file(str(tiles_dir), f"{patch_id}_*.png")
+                if path:
+                    return path
         return None
 
     @staticmethod
@@ -214,6 +258,9 @@ class DataService:
         region_id: str, task_type: str, version: str = "v1", period: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """Load task summary from meta.json or summary.json."""
+        if not _validate_period(period):
+            return None
+
         config = get_config()
         region = config.get_region(region_id)
         if not region:
@@ -227,10 +274,6 @@ class DataService:
         versions = task.get("versions", {})
         ver = versions.get(version)
         if not ver:
-            return None
-
-        # Validate period
-        if period and not re.match(r"^[\w\-_.]+$", period):
             return None
 
         # Try labels directory first
@@ -267,7 +310,8 @@ class DataService:
     @staticmethod
     def get_available_tasks(region_id: str, patch_id: str) -> List[str]:
         """Get list of tasks that have data for this patch."""
-        _validate_patch_id(patch_id)
+        if not _validate_patch_id(patch_id):
+            return []
         config = get_config()
         region = config.get_region(region_id)
         if not region:
@@ -280,7 +324,8 @@ class DataService:
             for ver_name, ver_info in versions.items():
                 predictions = ver_info.get("predictions")
                 if predictions:
-                    path = _resolve_path(predictions, f"{patch_id}_2025-10.npy")
+                    # Dynamic discovery instead of hardcoded period
+                    path = DataService._find_first_file(predictions, f"{patch_id}_*.npy")
                     if path:
                         available.append(task_name)
                         break
@@ -295,9 +340,7 @@ class DataService:
     @staticmethod
     def has_embedding(region_id: str, patch_id: str) -> bool:
         """Check if embedding exists for this patch."""
-        try:
-            _validate_patch_id(patch_id)
-        except HTTPException:
+        if not _validate_patch_id(patch_id):
             return False
         return DataService.get_embedding_path(region_id, patch_id) is not None
 

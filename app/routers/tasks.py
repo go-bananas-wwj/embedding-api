@@ -1,12 +1,12 @@
 """Downstream task router."""
 
 from typing import Literal, Optional
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Path as PathParam
 from fastapi.responses import FileResponse
 
 from app.config import get_config
 from app.schemas.models import TasksResponse, TaskInfo, TaskSummary
-from app.services.data_service import DataService
+from app.services.data_service import DataService, DataServiceError
 from app.services.tile_service import TileService
 
 router = APIRouter()
@@ -34,7 +34,7 @@ async def list_tasks(region_id: str):
     return TasksResponse(tasks=tasks)
 
 
-@router.get("/regions/{region_id}/tasks/{task_type}/summary")
+@router.get("/regions/{region_id}/tasks/{task_type}/summary", response_model=TaskSummary)
 async def get_task_summary(
     region_id: str,
     task_type: str,
@@ -52,7 +52,10 @@ async def get_task_summary(
         raise HTTPException(status_code=404, detail=f"Task '{task_type}' not found")
 
     task = tasks[task_type]
-    summary = DataService.load_task_summary(region_id, task_type, version, period)
+    try:
+        summary = DataService.load_task_summary(region_id, task_type, version, period)
+    except DataServiceError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     if not summary:
         raise HTTPException(
@@ -77,38 +80,46 @@ async def get_task_result(
     region_id: str,
     patch_id: str,
     task_type: str,
-    fmt: str = Query("png", description="Format: png, npy"),
+    format: str = Query("png", description="Format: png, npy"),
     version: str = Query("v1"),
     period: Optional[str] = Query(None),
 ):
     """Get task result for a specific patch."""
-    if fmt not in ("png", "npy"):
-        raise HTTPException(status_code=422, detail=f"Invalid format '{fmt}'. Use: png, npy")
+    if format not in ("png", "npy"):
+        raise HTTPException(
+            status_code=422, detail=f"Invalid format '{format}'. Use: png, npy"
+        )
 
     config = get_config()
     if not config.region_exists(region_id):
         raise HTTPException(status_code=404, detail=f"Region '{region_id}' not found")
 
-    patch = DataService.get_patch(region_id, patch_id)
+    try:
+        patch = DataService.get_patch(region_id, patch_id)
+    except DataServiceError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if not patch:
         raise HTTPException(status_code=404, detail=f"Patch '{patch_id}' not found")
 
-    if fmt == "npy":
-        path = DataService.get_task_result_path(
-            region_id, patch_id, task_type, "npy", version, period
-        )
-        if path:
-            return FileResponse(
-                path,
-                media_type="application/octet-stream",
-                filename=f"{patch_id}_{task_type}_prediction.npy",
+    try:
+        if format == "npy":
+            path = DataService.get_task_result_path(
+                region_id, patch_id, task_type, "npy", version, period
             )
-    else:
-        path = DataService.get_task_result_path(
-            region_id, patch_id, task_type, "png", version, period
-        )
-        if path and path.endswith(".png"):
-            return FileResponse(path, media_type="image/png")
+            if path:
+                return FileResponse(
+                    path,
+                    media_type="application/octet-stream",
+                    filename=f"{patch_id}_{task_type}_prediction.npy",
+                )
+        else:
+            path = DataService.get_task_result_path(
+                region_id, patch_id, task_type, "png", version, period
+            )
+            if path and path.endswith(".png"):
+                return FileResponse(path, media_type="image/png")
+    except DataServiceError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     raise HTTPException(
         status_code=404,
@@ -129,13 +140,20 @@ async def get_task_prediction(
     if not config.region_exists(region_id):
         raise HTTPException(status_code=404, detail=f"Region '{region_id}' not found")
 
-    patch = DataService.get_patch(region_id, patch_id)
+    try:
+        patch = DataService.get_patch(region_id, patch_id)
+    except DataServiceError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if not patch:
         raise HTTPException(status_code=404, detail=f"Patch '{patch_id}' not found")
 
-    path = DataService.get_task_result_path(
-        region_id, patch_id, task_type, "npy", version, period
-    )
+    try:
+        path = DataService.get_task_result_path(
+            region_id, patch_id, task_type, "npy", version, period
+        )
+    except DataServiceError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     if path:
         return FileResponse(
             path,
@@ -162,13 +180,20 @@ async def get_task_label(
     if not config.region_exists(region_id):
         raise HTTPException(status_code=404, detail=f"Region '{region_id}' not found")
 
-    patch = DataService.get_patch(region_id, patch_id)
+    try:
+        patch = DataService.get_patch(region_id, patch_id)
+    except DataServiceError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if not patch:
         raise HTTPException(status_code=404, detail=f"Patch '{patch_id}' not found")
 
-    path = DataService.get_task_result_path(
-        region_id, patch_id, task_type, "label", version, period
-    )
+    try:
+        path = DataService.get_task_result_path(
+            region_id, patch_id, task_type, "label", version, period
+        )
+    except DataServiceError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     if path:
         if path.endswith(".npy"):
             return FileResponse(
@@ -200,8 +225,6 @@ async def list_tiles(
     tiles = TileService.list_available_tiles(region_id, task_type, version, period)
     return {"tiles": tiles, "total": len(tiles)}
 
-
-from fastapi import Path as PathParam
 
 @router.get("/regions/{region_id}/tasks/{task_type}/tiles/{z}/{x}/{y}.png")
 async def get_tile(

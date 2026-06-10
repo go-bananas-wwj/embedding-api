@@ -7,11 +7,18 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./config.yaml:/app/config.yaml
+      - ./config.docker.yaml:/app/config.yaml:ro
       # Mount data directories (adjust paths as needed)
       - /workspace/xuannv_show/data/harbin:/data/harbin:ro
       - /workspace/olmo/data/haidian:/data/haidian:ro
       - /workspace/olmo/embeddings_cache:/data/embeddings_cache:ro
     environment:
       - PYTHONUNBUFFERED=1
+      - CONFIG_PATH=/app/config.yaml
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s

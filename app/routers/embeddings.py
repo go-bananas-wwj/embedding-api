@@ -1,5 +1,6 @@
 """Embedding service router."""
 
+import asyncio
 from typing import Literal
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
@@ -7,7 +8,7 @@ import numpy as np
 
 from app.config import get_config
 from app.schemas.models import EmbeddingStats
-from app.services.data_service import DataService
+from app.services.data_service import DataService, DataServiceError
 
 router = APIRouter()
 
@@ -18,7 +19,7 @@ EMB_FORMATS = Literal["png", "npy", "json"]
 async def get_embedding(
     region_id: str,
     patch_id: str,
-    fmt: str = Query("png", description="Output format: png, npy, json"),
+    format: str = Query("png", description="Output format: png, npy, json"),
 ):
     """Get embedding data for a patch.
 
@@ -26,34 +27,51 @@ async def get_embedding(
     - `npy`: Returns raw embedding array (application/octet-stream)
     - `json`: Returns embedding statistics
     """
-    if fmt not in ("png", "npy", "json", "cache"):
-        raise HTTPException(status_code=422, detail=f"Invalid format '{fmt}'. Use: png, npy, json")
+    if format not in ("png", "npy", "json", "cache"):
+        raise HTTPException(
+            status_code=422, detail=f"Invalid format '{format}'. Use: png, npy, json"
+        )
 
     config = get_config()
     if not config.region_exists(region_id):
         raise HTTPException(status_code=404, detail=f"Region '{region_id}' not found")
 
-    patch = DataService.get_patch(region_id, patch_id)
+    try:
+        patch = DataService.get_patch(region_id, patch_id)
+    except DataServiceError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if not patch:
         raise HTTPException(status_code=404, detail=f"Patch '{patch_id}' not found")
 
     # Resolve embedding path
-    emb_path = DataService.get_embedding_path(region_id, patch_id, fmt)
-    if not emb_path:
-        # Try alternative formats
-        for alt_fmt in ("png", "npy", "cache"):
-            emb_path = DataService.get_embedding_path(region_id, patch_id, alt_fmt)
-            if emb_path:
-                break
+    try:
+        emb_path = DataService.get_embedding_path(region_id, patch_id, format)
+        if not emb_path:
+            # Try alternative formats for fallback
+            for alt_fmt in ("png", "npy", "cache"):
+                emb_path = DataService.get_embedding_path(region_id, patch_id, alt_fmt)
+                if emb_path:
+                    break
+    except DataServiceError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     if not emb_path:
         raise HTTPException(
             status_code=404, detail=f"Embedding not found for patch '{patch_id}'"
         )
 
-    if fmt == "json":
+    if format == "json":
         if emb_path.endswith(".npy"):
-            arr = np.load(emb_path, allow_pickle=False)
+            try:
+                arr = await asyncio.to_thread(np.load, emb_path, allow_pickle=False)
+            except FileNotFoundError:
+                raise HTTPException(
+                    status_code=404, detail=f"Embedding file no longer exists"
+                )
+            except Exception as e:
+                raise HTTPException(
+                    status_code=500, detail=f"Failed to load embedding: {e}"
+                )
             return EmbeddingStats(
                 patch_id=patch_id,
                 shape=list(arr.shape),
@@ -64,30 +82,42 @@ async def get_embedding(
             )
         else:
             from PIL import Image
-            img = Image.open(emb_path)
+            try:
+                img = await asyncio.to_thread(Image.open, emb_path)
+                img_arr = np.array(img)
+            except FileNotFoundError:
+                raise HTTPException(
+                    status_code=404, detail=f"Image file no longer exists"
+                )
+            except Exception as e:
+                raise HTTPException(
+                    status_code=500, detail=f"Failed to load image: {e}"
+                )
             return EmbeddingStats(
                 patch_id=patch_id,
-                shape=[img.height, img.width, len(img.getbands())],
-                dtype="uint8",
-                min=0.0,
-                max=255.0,
-                mean=128.0,
+                shape=list(img_arr.shape),
+                dtype=str(img_arr.dtype),
+                min=float(img_arr.min()),
+                max=float(img_arr.max()),
+                mean=float(img_arr.mean()),
             )
-    elif fmt == "npy":
-        npy_path = DataService.get_embedding_path(region_id, patch_id, "npy")
-        if npy_path and npy_path.endswith(".npy"):
+    elif format == "npy":
+        if emb_path.endswith(".npy"):
             return FileResponse(
-                npy_path,
+                emb_path,
                 media_type="application/octet-stream",
                 filename=f"{patch_id}_embedding.npy",
             )
         raise HTTPException(
-            status_code=404, detail=f"NPY embedding not available for patch '{patch_id}'"
+            status_code=404,
+            detail=f"NPY embedding not available for patch '{patch_id}' (found {emb_path})",
         )
     else:
-        png_path = DataService.get_embedding_path(region_id, patch_id, "png")
-        if png_path and png_path.endswith(".png"):
-            return FileResponse(png_path, media_type="image/png")
+        # png or cache or any format - serve as image if possible
+        if emb_path.endswith((".png", ".jpg", ".jpeg")):
+            media_type = "image/png" if emb_path.endswith(".png") else "image/jpeg"
+            return FileResponse(emb_path, media_type=media_type)
         raise HTTPException(
-            status_code=404, detail=f"PNG embedding not available for patch '{patch_id}'"
+            status_code=404,
+            detail=f"Image embedding not available for patch '{patch_id}' (found {emb_path})",
         )

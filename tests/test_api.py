@@ -67,6 +67,14 @@ class TestPatches:
         response = client.get("/regions/harbin/patches?bbox=invalid")
         assert response.status_code == 422
 
+    def test_list_patches_nan_bbox(self):
+        response = client.get("/regions/harbin/patches?bbox=nan,0,1,1")
+        assert response.status_code == 422
+
+    def test_list_patches_swapped_bbox(self):
+        response = client.get("/regions/harbin/patches?bbox=10,10,5,5")
+        assert response.status_code == 422
+
     def test_get_patch(self):
         response = client.get("/regions/harbin/patches/patch_000000")
         assert response.status_code == 200
@@ -85,38 +93,38 @@ class TestPatches:
 
 class TestEmbeddings:
     def test_get_embedding_json_harbin(self):
-        response = client.get("/regions/harbin/patches/patch_000000/embedding?fmt=json")
+        response = client.get("/regions/harbin/patches/patch_000000/embedding?format=json")
         assert response.status_code == 200
         data = response.json()
         assert data["patch_id"] == "patch_000000"
         assert "shape" in data
 
     def test_get_embedding_json_haidian(self):
-        response = client.get("/regions/haidian/patches/patch_000000/embedding?fmt=json")
+        response = client.get("/regions/haidian/patches/patch_000000/embedding?format=json")
         assert response.status_code == 200
         data = response.json()
         assert "shape" in data
 
     def test_get_embedding_npy(self):
-        response = client.get("/regions/haidian/patches/patch_000000/embedding?fmt=npy")
+        response = client.get("/regions/haidian/patches/patch_000000/embedding?format=npy")
         assert response.status_code == 200
         assert response.headers["content-type"] == "application/octet-stream"
 
     def test_get_embedding_png(self):
-        response = client.get("/regions/harbin/patches/patch_000000/embedding?fmt=png")
+        response = client.get("/regions/harbin/patches/patch_000000/embedding?format=png")
         assert response.status_code == 200
         assert response.headers["content-type"] == "image/png"
 
     def test_get_embedding_invalid_format(self):
-        response = client.get("/regions/harbin/patches/patch_000000/embedding?fmt=invalid")
+        response = client.get("/regions/harbin/patches/patch_000000/embedding?format=invalid")
         assert response.status_code == 422
 
     def test_get_embedding_patch_not_found(self):
-        response = client.get("/regions/harbin/patches/patch_999999/embedding?fmt=json")
+        response = client.get("/regions/harbin/patches/patch_999999/embedding?format=json")
         assert response.status_code == 404
 
     def test_get_embedding_path_traversal_blocked(self):
-        response = client.get("/regions/harbin/patches/../../../etc/passwd/embedding?fmt=json")
+        response = client.get("/regions/harbin/patches/../../../etc/passwd/embedding?format=json")
         # Regex validation blocks invalid patch_id before any file access
         assert response.status_code in (400, 404)
 
@@ -144,13 +152,13 @@ class TestTasks:
         assert data["total_patches"] == 424
 
     def test_get_task_result(self):
-        response = client.get("/regions/harbin/patches/patch_000000/tasks/construction/result?fmt=png")
+        response = client.get("/regions/harbin/patches/patch_000000/tasks/construction/result?format=png")
         # May be 200 or 404 depending on data availability
         assert response.status_code in (200, 404)
 
     def test_get_task_result_invalid_format(self):
         response = client.get(
-            "/regions/harbin/patches/patch_000000/tasks/construction/result?fmt=invalid"
+            "/regions/harbin/patches/patch_000000/tasks/construction/result?format=invalid"
         )
         assert response.status_code == 422
 
