@@ -68,7 +68,7 @@ def _load_npy_array(path: str):
             "content": {
                 "image/png": {},
                 "application/octet-stream": {},
-                "application/json": {"model": EmbeddingStats},
+                "application/json": {"schema": EmbeddingStats.model_json_schema()},
             },
         },
         404: {"model": ErrorResponse},
