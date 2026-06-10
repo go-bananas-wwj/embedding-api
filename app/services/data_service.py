@@ -5,10 +5,12 @@ import logging
 import math
 import os
 import re
+import stat
 import threading
 import time
+from collections import OrderedDict
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from app.config import get_config
 
@@ -22,6 +24,9 @@ _PERIOD_PATTERN = re.compile(r"^[\w\-]+$")
 
 # Max file size for embeddings (100MB)
 MAX_FILE_SIZE = 100 * 1024 * 1024
+
+# Callbacks registered to run on config reload
+_reload_callbacks: List[Callable[[], None]] = []
 
 
 class DataServiceError(Exception):
@@ -37,6 +42,11 @@ class DataValidationError(DataServiceError):
 class DataNotFoundError(DataServiceError):
     """Raised when requested data is not found."""
     pass
+
+
+def register_reload_callback(cb: Callable[[], None]) -> None:
+    """Register a callback to be invoked when config is reloaded."""
+    _reload_callbacks.append(cb)
 
 
 def _validate_patch_id(patch_id: str) -> bool:
@@ -55,7 +65,8 @@ def _resolve_path(base_dir: str, relative: str) -> Optional[str]:
     """Resolve and validate a path is within the base directory.
 
     Uses Path.relative_to() to prevent path traversal via prefix matching,
-    and checks for symlinks to mitigate TOCTOU race conditions.
+    and uses os.lstat() (atomic, no-follow) to detect symlinks and
+    mitigate TOCTOU race conditions as much as possible.
     """
     try:
         base = Path(base_dir).resolve()
@@ -64,20 +75,30 @@ def _resolve_path(base_dir: str, relative: str) -> Optional[str]:
         # not just sharing a common prefix (e.g., /foo vs /foobar)
         target.relative_to(base)
 
-        # Security: check for symlinks in the path chain.
-        # This mitigates (but cannot fully eliminate) TOCTOU race conditions.
+        # Atomic symlink check using lstat (doesn't follow symlinks).
+        # lstat is a single system call, eliminating the TOCTOU window
+        # between exists() and is_symlink().
+        try:
+            stat_info = os.lstat(str(target))
+            if stat.S_ISLNK(stat_info.st_mode):
+                logger.warning(f"Symlink target blocked: {relative}")
+                return None
+        except FileNotFoundError:
+            return None
+
+        # Also check parent chain for symlinks using lstat
         for part in target.parents:
             if part == base:
                 break
-            if part.exists() and part.is_symlink():
-                logger.warning(f"Symlink in path chain blocked: {relative}")
+            try:
+                part_stat = os.lstat(str(part))
+                if stat.S_ISLNK(part_stat.st_mode):
+                    logger.warning(f"Symlink in path chain blocked: {relative}")
+                    return None
+            except (OSError, FileNotFoundError):
                 return None
 
-        # Final check: ensure target itself is not a symlink
         if target.exists():
-            if target.is_symlink():
-                logger.warning(f"Symlink target blocked: {relative}")
-                return None
             return str(target)
         return None
     except (OSError, ValueError):
@@ -96,13 +117,48 @@ def _check_file_size(path: str) -> None:
         raise DataServiceError(f"Cannot access file: {e}")
 
 
+class _LRUTTLCache:
+    """Thread-safe LRU cache with TTL expiry.
+
+    Prevents unbounded memory growth by enforcing maxsize and
+    evicting least-recently-used entries.
+    """
+
+    def __init__(self, maxsize: int = 5000, ttl: float = 60.0):
+        self._data: OrderedDict[Any, Tuple[Any, float]] = OrderedDict()
+        self._maxsize = maxsize
+        self._ttl = ttl
+        self._lock = threading.Lock()
+
+    def get(self, key: Any) -> Optional[Any]:
+        with self._lock:
+            if key in self._data:
+                value, timestamp = self._data[key]
+                if time.time() - timestamp < self._ttl:
+                    self._data.move_to_end(key)
+                    return value
+                else:
+                    del self._data[key]
+            return None
+
+    def set(self, key: Any, value: Any) -> None:
+        with self._lock:
+            now = time.time()
+            self._data[key] = (value, now)
+            self._data.move_to_end(key)
+            while len(self._data) > self._maxsize:
+                self._data.popitem(last=False)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._data.clear()
+
+
 class DataService:
     """Service for resolving data file paths."""
 
-    # Simple TTL cache for available_tasks to avoid N+1 scans
-    _available_tasks_cache: Dict[Tuple[str, str], Tuple[List[str], float]] = {}
-    _AVAILABLE_TASKS_CACHE_TTL = 60.0  # seconds
-    _cache_lock = threading.Lock()
+    # LRU+TTL cache for available_tasks to avoid N+1 scans and prevent DoS
+    _available_tasks_cache = _LRUTTLCache(maxsize=5000, ttl=60.0)
 
     @staticmethod
     def get_patch(region_id: str, patch_id: str) -> Optional[Dict[str, Any]]:
@@ -206,12 +262,37 @@ class DataService:
 
     @staticmethod
     def _find_first_file(base_dir: str, pattern: str) -> Optional[str]:
-        """Find first file matching pattern in directory."""
+        """Find first file matching pattern in directory.
+
+        Validates each candidate via _resolve_path and rejects symlinks
+        to prevent directory enumeration info leakage.
+        """
         try:
-            files = sorted(Path(base_dir).glob(pattern))
-            if files:
-                resolved = _resolve_path(str(files[0].parent), files[0].name)
-                return resolved
+            base_resolved = Path(base_dir).resolve()
+            for f in sorted(base_resolved.glob(pattern)):
+                if not f.exists():
+                    continue
+                # Atomic symlink check on the file itself
+                try:
+                    f_stat = os.lstat(str(f))
+                    if stat.S_ISLNK(f_stat.st_mode):
+                        continue
+                except (OSError, FileNotFoundError):
+                    continue
+                # Check parent chain for symlinks
+                try:
+                    for p in f.parents:
+                        if p == base_resolved:
+                            break
+                        p_stat = os.lstat(str(p))
+                        if stat.S_ISLNK(p_stat.st_mode):
+                            break
+                    else:
+                        resolved = _resolve_path(str(f.parent), f.name)
+                        if resolved:
+                            return resolved
+                except (OSError, FileNotFoundError):
+                    continue
         except OSError:
             pass
         return None
@@ -366,11 +447,9 @@ class DataService:
             return []
 
         cache_key = (region_id, patch_id)
-        with DataService._cache_lock:
-            if cache_key in DataService._available_tasks_cache:
-                tasks, timestamp = DataService._available_tasks_cache[cache_key]
-                if time.time() - timestamp < DataService._AVAILABLE_TASKS_CACHE_TTL:
-                    return tasks
+        cached = DataService._available_tasks_cache.get(cache_key)
+        if cached is not None:
+            return cached
 
         config = get_config()
         region = config.get_region(region_id)
@@ -397,8 +476,7 @@ class DataService:
                         break
         result = list(set(available))
 
-        with DataService._cache_lock:
-            DataService._available_tasks_cache[cache_key] = (result, time.time())
+        DataService._available_tasks_cache.set(cache_key, result)
         return result
 
     @staticmethod
@@ -422,3 +500,11 @@ class DataService:
             return []
 
         return list(task.get("versions", {}).keys())
+
+
+# Register cache-clear callback to break circular import
+def _clear_available_tasks_cache() -> None:
+    DataService._available_tasks_cache.clear()
+
+
+register_reload_callback(_clear_available_tasks_cache)

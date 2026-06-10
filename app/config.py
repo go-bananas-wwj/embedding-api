@@ -1,13 +1,12 @@
 """Configuration loading with hot-reload support."""
 
-import atexit
 import copy
 import json
 import logging
 import os
 import threading
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import yaml
 from watchdog.observers import Observer
@@ -17,6 +16,14 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_CONFIG_PATH = Path(__file__).parent.parent / "config.yaml"
 CONFIG_PATH = Path(os.environ.get("CONFIG_PATH", DEFAULT_CONFIG_PATH))
+
+# Callbacks registered to run on config reload (breaks circular imports)
+_reload_callbacks: List[Callable[[], None]] = []
+
+
+def register_reload_callback(cb: Callable[[], None]) -> None:
+    """Register a callback to be invoked when config is reloaded."""
+    _reload_callbacks.append(cb)
 
 
 class ConfigReloadHandler(FileSystemEventHandler):
@@ -51,33 +58,43 @@ class ConfigManager:
         self._patches_cache: Dict[str, List[Dict[str, Any]]] = {}
         self.reload()
         self._start_watching()
-        # Register cleanup on normal process exit
-        atexit.register(self.stop_watching)
 
     def reload(self):
         """Reload configuration from file."""
         with self._lock:
             try:
                 with open(self.config_path, "r", encoding="utf-8") as f:
-                    self._config = yaml.safe_load(f)
+                    new_config = yaml.safe_load(f)
+                if new_config is None:
+                    new_config = {}
+                self._config = new_config
                 # Clear patches cache on config reload
                 self._patches_cache.clear()
-                # Also clear DataService cache since config changed
-                from app.services.data_service import DataService
-                with DataService._cache_lock:
-                    DataService._available_tasks_cache.clear()
+                # Invoke registered callbacks (e.g., clear DataService caches)
+                for cb in _reload_callbacks:
+                    try:
+                        cb()
+                    except Exception as e:
+                        logger.warning(f"Reload callback failed: {e}")
                 logger.info(f"Config reloaded from {self.config_path}")
             except (yaml.YAMLError, OSError) as e:
-                logger.error(f"Failed to reload config: {e}")
+                logger.error(
+                    f"Failed to reload config: {e}. "
+                    f"Previous configuration is retained; service continues running."
+                )
 
     def _start_watching(self):
         """Start file watcher for hot-reload."""
-        handler = ConfigReloadHandler(self, self.config_path)
-        self._observer = Observer()
-        self._observer.schedule(
-            handler, str(self.config_path.parent), recursive=False
-        )
-        self._observer.start()
+        try:
+            handler = ConfigReloadHandler(self, self.config_path)
+            self._observer = Observer()
+            self._observer.schedule(
+                handler, str(self.config_path.parent), recursive=False
+            )
+            self._observer.start()
+        except OSError as e:
+            logger.error(f"Failed to start config file watcher: {e}. "
+                         f"Hot-reload is disabled; restart required for config changes.")
 
     def get(self, *keys, default=None):
         """Get nested config value."""

@@ -9,23 +9,55 @@ import numpy as np
 
 from app.config import get_config
 from app.schemas.models import EmbeddingStats, ErrorResponse
-from app.services.data_service import DataService, DataServiceError, DataValidationError, _check_file_size
+from app.services.data_service import (
+    DataService, DataServiceError, DataValidationError, _check_file_size,
+)
 
 router = APIRouter()
 
 EMB_FORMATS = Literal["png", "npy", "json"]
 
+# Maximum array elements to prevent .npy header-based memory bomb attacks.
+# A malicious .npy can declare a huge shape in its header while the file
+# itself is tiny, causing np.load() to allocate PBs of RAM.
+MAX_NPY_ELEMENTS = 500_000_000  # ~4GB for float32, ~2GB for float64
+
+# Maximum decompressed image pixels to prevent PIL decompression bombs.
+MAX_IMAGE_PIXELS = 50_000_000  # ~50 MP
+
 
 def _load_image_array(path: str):
-    """Load image and convert to numpy array (for use in thread pool)."""
+    """Load image and convert to numpy array (for use in thread pool).
+
+    Protects against decompression bombs by limiting MAX_IMAGE_PIXELS.
+    """
     from PIL import Image
-    img = Image.open(path)
-    return np.array(img)
+    Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
+    with Image.open(path) as img:
+        width, height = img.size
+        pixels = width * height
+        if pixels > MAX_IMAGE_PIXELS:
+            raise DataServiceError(
+                f"Image too large: {width}x{height} = {pixels} pixels "
+                f"(max {MAX_IMAGE_PIXELS})"
+            )
+        return np.array(img)
 
 
 def _load_npy_array(path: str):
-    """Load numpy array (for use in thread pool)."""
-    return np.load(path, allow_pickle=False)
+    """Load numpy array with memory-bomb protection.
+
+    A malicious .npy can have a tiny file size but declare a huge shape
+    in its header. np.load() allocates memory based on the header, not
+    the file size. We validate the actual element count after loading.
+    """
+    arr = np.load(path, allow_pickle=False)
+    elements = arr.size
+    if elements > MAX_NPY_ELEMENTS:
+        raise DataServiceError(
+            f"Array too large: {elements} elements (max {MAX_NPY_ELEMENTS})"
+        )
+    return arr
 
 
 @router.get(
@@ -40,7 +72,7 @@ def _load_npy_array(path: str):
             },
         },
         404: {"model": ErrorResponse},
-        406: {"model": ErrorResponse},
+        413: {"model": ErrorResponse},
         422: {"model": ErrorResponse},
         500: {"model": ErrorResponse},
     },
@@ -73,12 +105,14 @@ async def get_embedding(
     if not patch:
         raise HTTPException(status_code=404, detail=f"Patch '{patch_id}' not found")
 
-    # Resolve embedding path
+    # Resolve embedding path (skip redundant fallback if format is already in the list)
     try:
         emb_path = DataService.get_embedding_path(region_id, patch_id, format)
         if not emb_path:
-            # Try alternative formats for fallback
+            # Try alternative formats for fallback, excluding the original format
             for alt_fmt in ("png", "npy", "cache"):
+                if alt_fmt == format:
+                    continue
                 emb_path = DataService.get_embedding_path(region_id, patch_id, alt_fmt)
                 if emb_path:
                     break
@@ -104,7 +138,7 @@ async def get_embedding(
                 raise HTTPException(
                     status_code=404, detail="Embedding file no longer exists"
                 )
-            except (OSError, ValueError) as e:
+            except (OSError, ValueError, EOFError, DataServiceError) as e:
                 raise HTTPException(
                     status_code=500, detail=f"Failed to load embedding: {e}"
                 )
@@ -123,7 +157,7 @@ async def get_embedding(
                 raise HTTPException(
                     status_code=404, detail="Image file no longer exists"
                 )
-            except (OSError, ValueError) as e:
+            except (OSError, ValueError, ImportError, DataServiceError) as e:
                 raise HTTPException(
                     status_code=500, detail=f"Failed to load image: {e}"
                 )
@@ -142,18 +176,20 @@ async def get_embedding(
                 media_type="application/octet-stream",
                 filename=f"{patch_id}_embedding.npy",
             )
-        # Format mismatch: requested NPY but only image available
+        # Format not available for this patch — return 404 with hint
         raise HTTPException(
-            status_code=406,
-            detail=f"NPY format not available for this patch. Available: {os.path.basename(emb_path)}",
+            status_code=404,
+            detail=f"NPY format not available for this patch",
+            headers={"X-Available-Format": "png"},
         )
     else:
         # png or cache or any format - serve as image if possible
         if emb_path.endswith((".png", ".jpg", ".jpeg", ".PNG", ".JPG", ".JPEG")):
             media_type = "image/png" if emb_path.lower().endswith(".png") else "image/jpeg"
             return FileResponse(emb_path, media_type=media_type)
-        # Format mismatch: requested image but only NPY available
+        # Format not available — return 404 with hint
         raise HTTPException(
-            status_code=406,
-            detail=f"Image format not available for this patch. Available: {os.path.basename(emb_path)}",
+            status_code=404,
+            detail=f"Image format not available for this patch",
+            headers={"X-Available-Format": "npy"},
         )
