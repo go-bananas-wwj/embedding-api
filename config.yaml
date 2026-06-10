@@ -57,6 +57,6 @@ regions:
     embeddings:
       v1:
         path: "data/haidian/embeddings/v1"
-        template: "{month}/{patch_id}.npz"
+        template: "{patch_id}/patch_{patch_id}_{month}.npz"
         formats: ["npz", "png", "json"]
     tasks: {}

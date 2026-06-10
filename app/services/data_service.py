@@ -269,14 +269,15 @@ class DataService:
                 format_kwargs = {"patch_id": patch_id, "fmt": fmt}
                 if month:
                     format_kwargs["month"] = month
+                path = None
                 try:
                     relative = template.format(**format_kwargs)
+                    path = _resolve_path(base, relative)
+                    if path:
+                        return path
                 except KeyError:
-                    # Template requires month but none provided
-                    continue
-                path = _resolve_path(base, relative)
-                if path:
-                    return path
+                    # Template requires month but none provided - try fallback below
+                    pass
                 # Try alternative templates for backward compat
                 alt_templates = emb_config.get("alt_templates", [])
                 for alt in alt_templates:
@@ -287,6 +288,13 @@ class DataService:
                     path = _resolve_path(base, relative)
                     if path:
                         return path
+                # Fallback: for patch-subdir structure (haidian), find first file in patch dir
+                patch_dir = Path(base) / patch_id
+                if patch_dir.is_dir():
+                    for ext in (".npz", ".npy", ".png"):
+                        first = DataService._find_first_file(str(patch_dir), f"*{ext}")
+                        if first:
+                            return first
         return None
 
     @staticmethod
@@ -310,13 +318,15 @@ class DataService:
                     continue
                 # Check parent chain for symlinks
                 try:
+                    valid = True
                     for p in f.parents:
                         if p == base_resolved:
                             break
                         p_stat = os.lstat(str(p))
                         if stat.S_ISLNK(p_stat.st_mode):
+                            valid = False
                             break
-                    else:
+                    if valid:
                         resolved = _resolve_path(str(f.parent), f.name)
                         if resolved:
                             return resolved
@@ -550,9 +560,11 @@ class DataService:
 
     @staticmethod
     def get_available_months(region_id: str, patch_id: str) -> List[str]:
-        """Return list of available embedding months for this patch.
+        """Return list of available embedding months/dates for this patch.
 
-        Scans all configured embedding versions and their month subdirectories.
+        Supports two directory structures:
+        - Month subdirs: base/{month}/patch_id.{ext} (harbin)
+        - Patch subdirs: base/patch_id/patch_id_{date}.{ext} (haidian)
         """
         if not _validate_patch_id(patch_id):
             return []
@@ -571,13 +583,23 @@ class DataService:
                 base_path = Path(base)
                 if not base_path.exists():
                     continue
-                # Scan month subdirectories
+                # Structure 1: month subdirectories (harbin)
                 for month_dir in base_path.iterdir():
-                    if month_dir.is_dir():
+                    if month_dir.is_dir() and not month_dir.name.startswith("patch_"):
                         for ext in (".npy", ".png", ".npz"):
                             if (month_dir / f"{patch_id}{ext}").exists():
                                 months.add(month_dir.name)
                                 break
+                # Structure 2: patch subdirectory (haidian)
+                patch_dir = base_path / patch_id
+                if patch_dir.is_dir():
+                    for f in patch_dir.iterdir():
+                        if f.suffix in (".npy", ".png", ".npz"):
+                            # Extract date from filename like patch_000000_20251201.npz
+                            import re
+                            m = re.search(r'patch_\d+_(\d+)\.\w+$', f.name)
+                            if m:
+                                months.add(m.group(1))
         return sorted(months)
 
     @staticmethod
