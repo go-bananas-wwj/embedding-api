@@ -19,7 +19,7 @@ from tqdm import tqdm
 from train_task_head_v2 import TaskHead, ALL_PERIODS
 
 EMBEDDING_DIR = "/workspace/raw/xuannv_modelscope_upload/embeddings/v5_mixed_scale/monthly_embeddings_2025"
-MODEL_DIR = "/workspace/embedding-api/models/v5/harbin"
+MODEL_DIR = "/workspace/embedding-api/models/harbin/v2"
 OUTPUT_DIR = "/workspace/xuannv_show/data/harbin/predictions_v2"
 
 # 样本极少的任务使用 ensemble 更稳定

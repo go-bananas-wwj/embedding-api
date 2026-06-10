@@ -27,7 +27,7 @@ from tqdm import tqdm
 # ============ 配置 ============
 EMBEDDING_DIR = "/workspace/raw/xuannv_modelscope_upload/embeddings/v5_mixed_scale/monthly_embeddings_2025"
 LABELS_DIR = "/workspace/xuannv_show/data/harbin/labels_v2"
-OUTPUT_DIR = "/workspace/embedding-api/models/v5/harbin"
+OUTPUT_DIR = "/workspace/embedding-api/models/harbin/v2"
 GRID_SIZE = 64
 IN_CHANNELS = 128
 

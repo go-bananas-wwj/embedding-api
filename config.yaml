@@ -1,82 +1,70 @@
-# System-level downstream models (not region-specific)
-# Downloaded from ModelScope dataset WeijieWu/xuannv_embddings
+# Downstream task models organized by region and version (aligned with API v1/v2)
 models:
-  change_detection_v4:
-    name: "变化检测 (V4)"
-    description: "基于 V4 embedding 的两期差分变化检测"
-    path: "models/v4/change_detection/monthly_cd_head_v3_ohem.pt"
-    type: "pytorch"
-  change_detection_v5:
-    name: "变化检测 (V5)"
-    description: "基于 V5 embedding 的两期差分变化检测 (推荐)"
-    path: "models/v5/change_detection/monthly_cd_head_v5_final.pt"
-    type: "pytorch"
-  classification_v4_linear:
-    name: "地物分类 (V4 Linear Probe)"
-    description: "V4 线性分类探针"
-    path: "models/v4/linear_probe"
-    type: "sklearn"
-    tasks:
-      worldcover: {file: "worldcover_linear_probe.pkl", classes: 11}
-      dynamic_world: {file: "dynamic_world_linear_probe.pkl", classes: 10}
-      jrc_water: {file: "jrc_water_linear_probe.pkl", classes: 2}
-      osm_buildings: {file: "osm_buildings_linear_probe.pkl", classes: 2}
-  classification_v4_convhead:
-    name: "地物分类 (V4 ConvHead)"
-    description: "V4 轻量卷积分类头"
-    path: "models/v4/convhead"
-    type: "pytorch"
-    tasks:
-      worldcover: {file: "worldcover_convhead.pt", classes: 11}
-      dynamic_world: {file: "dynamic_world_convhead.pt", classes: 10}
-      jrc_water: {file: "jrc_water_convhead.pt", classes: 2}
-      osm_buildings: {file: "osm_buildings_convhead.pt", classes: 2}
-  classification_v5_linear:
-    name: "地物分类 (V5 Linear Probe)"
-    description: "V5 线性分类探针"
-    path: "models/v5/linear_probe"
-    type: "sklearn"
-    tasks:
-      worldcover: {file: "worldcover_linear_probe.pkl", classes: 11}
-      dynamic_world: {file: "dynamic_world_linear_probe.pkl", classes: 10}
-      jrc_water: {file: "jrc_water_linear_probe.pkl", classes: 2}
-      osm_buildings: {file: "osm_buildings_linear_probe.pkl", classes: 2}
-  classification_v5_linear_v2:
-    name: "地物分类 (V5 Linear Probe v2)"
-    description: "V5 线性分类探针第二版"
-    path: "models/v5/linear_probe_v2"
-    type: "sklearn"
-    tasks:
-      worldcover: {file: "worldcover_linear_probe.pkl", classes: 11}
-      dynamic_world: {file: "dynamic_world_linear_probe.pkl", classes: 10}
-      jrc_water: {file: "jrc_water_linear_probe.pkl", classes: 2}
-      osm_buildings: {file: "osm_buildings_linear_probe.pkl", classes: 2}
-  classification_v5_convhead:
-    name: "地物分类 (V5 ConvHead)"
-    description: "V5 轻量卷积分类头"
-    path: "models/v5/convhead"
-    type: "pytorch"
-    tasks:
-      worldcover: {file: "worldcover_convhead.pt", classes: 11}
-      dynamic_world: {file: "dynamic_world_convhead.pt", classes: 10}
-      jrc_water: {file: "jrc_water_convhead.pt", classes: 2}
-      osm_buildings: {file: "osm_buildings_convhead.pt", classes: 2}
-  # Backward-compatible aliases (default to V5)
-  change_detection:
-    name: "变化检测"
-    description: "系统级两期 embedding 差分变化检测 (ChangeDetectionHeadV3)"
-    path: "models/v5/change_detection/monthly_cd_head_v5_final.pt"
-    type: "pytorch"
-  classification:
-    name: "地物分类"
-    description: "基于 Linear Probe 的地物分类模型集合 (V5)"
-    path: "models/v5/linear_probe"
-    type: "sklearn"
-    tasks:
-      worldcover: {file: "worldcover_linear_probe.pkl", classes: 11}
-      dynamic_world: {file: "dynamic_world_linear_probe.pkl", classes: 10}
-      jrc_water: {file: "jrc_water_linear_probe.pkl", classes: 2}
-      osm_buildings: {file: "osm_buildings_linear_probe.pkl", classes: 2}
+  harbin:
+    v1:
+      change_detection:
+        name: "变化检测"
+        description: "基于 V4 embedding 的两期差分变化检测"
+        path: "models/harbin/v1/change_detection/monthly_cd_head_v3_ohem.pt"
+        type: "pytorch"
+      classification:
+        name: "地物分类 (Linear Probe)"
+        description: "V4 线性分类探针"
+        path: "models/harbin/v1/linear_probe"
+        type: "sklearn"
+        tasks:
+          worldcover: {file: "worldcover_linear_probe.pkl", classes: 11}
+          dynamic_world: {file: "dynamic_world_linear_probe.pkl", classes: 10}
+          jrc_water: {file: "jrc_water_linear_probe.pkl", classes: 2}
+          osm_buildings: {file: "osm_buildings_linear_probe.pkl", classes: 2}
+      classification_convhead:
+        name: "地物分类 (ConvHead)"
+        description: "V4 轻量卷积分类头"
+        path: "models/harbin/v1/convhead"
+        type: "pytorch"
+        tasks:
+          worldcover: {file: "worldcover_convhead.pt", classes: 11}
+          dynamic_world: {file: "dynamic_world_convhead.pt", classes: 10}
+          jrc_water: {file: "jrc_water_convhead.pt", classes: 2}
+          osm_buildings: {file: "osm_buildings_convhead.pt", classes: 2}
+    v2:
+      change_detection:
+        name: "变化检测"
+        description: "基于 V5 embedding 的两期差分变化检测"
+        path: "models/harbin/v2/change_detection/monthly_cd_head_v5_final.pt"
+        type: "pytorch"
+      classification:
+        name: "地物分类 (Linear Probe)"
+        description: "V5 线性分类探针"
+        path: "models/harbin/v2/linear_probe"
+        type: "sklearn"
+        tasks:
+          worldcover: {file: "worldcover_linear_probe.pkl", classes: 11}
+          dynamic_world: {file: "dynamic_world_linear_probe.pkl", classes: 10}
+          jrc_water: {file: "jrc_water_linear_probe.pkl", classes: 2}
+          osm_buildings: {file: "osm_buildings_linear_probe.pkl", classes: 2}
+      classification_v2:
+        name: "地物分类 (Linear Probe v2)"
+        description: "V5 线性分类探针第二版"
+        path: "models/harbin/v2/linear_probe_v2"
+        type: "sklearn"
+        tasks:
+          worldcover: {file: "worldcover_linear_probe.pkl", classes: 11}
+          dynamic_world: {file: "dynamic_world_linear_probe.pkl", classes: 10}
+          jrc_water: {file: "jrc_water_linear_probe.pkl", classes: 2}
+          osm_buildings: {file: "osm_buildings_linear_probe.pkl", classes: 2}
+      classification_convhead:
+        name: "地物分类 (ConvHead)"
+        description: "V5 轻量卷积分类头"
+        path: "models/harbin/v2/convhead"
+        type: "pytorch"
+        tasks:
+          worldcover: {file: "worldcover_convhead.pt", classes: 11}
+          dynamic_world: {file: "dynamic_world_convhead.pt", classes: 10}
+          jrc_water: {file: "jrc_water_convhead.pt", classes: 2}
+          osm_buildings: {file: "osm_buildings_convhead.pt", classes: 2}
+  haidian:
+    v1: {}
 
 regions:
   harbin:
@@ -133,7 +121,7 @@ regions:
       change_detection:
         name: "变化检测"
         description: "系统级两期 embedding 差分变化检测"
-        model: "change_detection"
+        model_version: "v2"
         versions:
           v1:
             results: "data/harbin/tasks/change_detection/v1/results"
