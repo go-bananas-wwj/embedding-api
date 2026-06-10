@@ -1,7 +1,7 @@
 """Region management router."""
 
 from fastapi import APIRouter, HTTPException
-from app.config import get_config, load_patches_meta
+from app.config import get_config
 from app.schemas.models import RegionsResponse, RegionInfo, HealthResponse
 
 router = APIRouter()
@@ -24,7 +24,7 @@ async def list_regions():
     config = get_config()
     regions = []
     for rid, rinfo in config.regions.items():
-        patches = load_patches_meta(rid)
+        patches = config.get_patches(rid)
         tasks = list(rinfo.get("tasks", {}).keys())
         regions.append(
             RegionInfo(
@@ -45,7 +45,7 @@ async def get_region(region_id: str):
         raise HTTPException(status_code=404, detail=f"Region '{region_id}' not found")
 
     region = config.get_region(region_id)
-    patches = load_patches_meta(region_id)
+    patches = config.get_patches(region_id)
     tasks = {
         tid: {
             "name": tinfo.get("name", tid),

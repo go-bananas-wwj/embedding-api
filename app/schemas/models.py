@@ -1,7 +1,7 @@
 """Pydantic models for API request/response schemas."""
 
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
 class HealthResponse(BaseModel):
@@ -19,10 +19,6 @@ class RegionInfo(BaseModel):
 
 class RegionsResponse(BaseModel):
     regions: List[RegionInfo]
-
-
-class SourceInfo(BaseModel):
-    pass
 
 
 class PatchBase(BaseModel):
@@ -76,10 +72,6 @@ class EmbeddingStats(BaseModel):
     min: float
     max: float
     mean: float
-
-
-class EmbeddingFormats(BaseModel):
-    available_formats: List[str]
 
 
 class ErrorResponse(BaseModel):

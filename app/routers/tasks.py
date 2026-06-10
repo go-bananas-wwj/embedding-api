@@ -1,9 +1,8 @@
 """Downstream task router."""
 
-from typing import Optional
+from typing import Literal, Optional
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import FileResponse, JSONResponse
-import numpy as np
+from fastapi.responses import FileResponse
 
 from app.config import get_config
 from app.schemas.models import TasksResponse, TaskInfo, TaskSummary
@@ -11,6 +10,7 @@ from app.services.data_service import DataService
 from app.services.tile_service import TileService
 
 router = APIRouter()
+TASK_FORMATS = Literal["png", "npy"]
 
 
 @router.get("/regions/{region_id}/tasks", response_model=TasksResponse)
@@ -77,11 +77,14 @@ async def get_task_result(
     region_id: str,
     patch_id: str,
     task_type: str,
-    format: str = Query("png", description="Format: png, npy"),
+    fmt: str = Query("png", description="Format: png, npy"),
     version: str = Query("v1"),
     period: Optional[str] = Query(None),
 ):
     """Get task result for a specific patch."""
+    if fmt not in ("png", "npy"):
+        raise HTTPException(status_code=422, detail=f"Invalid format '{fmt}'. Use: png, npy")
+
     config = get_config()
     if not config.region_exists(region_id):
         raise HTTPException(status_code=404, detail=f"Region '{region_id}' not found")
@@ -90,7 +93,7 @@ async def get_task_result(
     if not patch:
         raise HTTPException(status_code=404, detail=f"Patch '{patch_id}' not found")
 
-    if format == "npy":
+    if fmt == "npy":
         path = DataService.get_task_result_path(
             region_id, patch_id, task_type, "npy", version, period
         )
@@ -101,7 +104,6 @@ async def get_task_result(
                 filename=f"{patch_id}_{task_type}_prediction.npy",
             )
     else:
-        # PNG result
         path = DataService.get_task_result_path(
             region_id, patch_id, task_type, "png", version, period
         )
@@ -199,23 +201,20 @@ async def list_tiles(
     return {"tiles": tiles, "total": len(tiles)}
 
 
+from fastapi import Path as PathParam
+
 @router.get("/regions/{region_id}/tasks/{task_type}/tiles/{z}/{x}/{y}.png")
 async def get_tile(
     region_id: str,
     task_type: str,
-    z: int,
-    x: int,
-    y: int,
+    z: int = PathParam(..., ge=0, le=20),
+    x: int = PathParam(..., ge=0),
+    y: int = PathParam(..., ge=0),
     version: str = Query("v1"),
     period: Optional[str] = Query(None),
 ):
     """Serve a map tile image."""
-    config = get_config()
-    if not config.region_exists(region_id):
-        raise HTTPException(status_code=404, detail=f"Region '{region_id}' not found")
-
-    path = TileService.get_tile_path(region_id, task_type, z, x, y, version, period)
-    if path:
-        return FileResponse(path, media_type="image/png")
-
-    raise HTTPException(status_code=404, detail="Tile not found")
+    raise HTTPException(
+        status_code=501,
+        detail="Tile serving is not yet implemented. Use /regions/{region_id}/tasks/{task_type}/tiles for available patch tiles.",
+    )

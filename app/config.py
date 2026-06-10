@@ -1,15 +1,17 @@
 """Configuration loading with hot-reload support."""
 
 import json
+import logging
 import os
 import threading
-import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import yaml
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
+
+logger = logging.getLogger(__name__)
 
 CONFIG_PATH = Path(__file__).parent.parent / "config.yaml"
 
@@ -33,6 +35,7 @@ class ConfigManager:
         self._config: Dict[str, Any] = {}
         self._lock = threading.RLock()
         self._observer: Optional[Observer] = None
+        self._patches_cache: Dict[str, List[Dict[str, Any]]] = {}
         self.reload()
         self._start_watching()
 
@@ -42,9 +45,11 @@ class ConfigManager:
             try:
                 with open(self.config_path, "r", encoding="utf-8") as f:
                     self._config = yaml.safe_load(f)
-                print(f"[Config] Reloaded from {self.config_path}")
-            except Exception as e:
-                print(f"[Config] Failed to reload: {e}")
+                # Clear patches cache on config reload
+                self._patches_cache.clear()
+                logger.info(f"Config reloaded from {self.config_path}")
+            except (yaml.YAMLError, OSError) as e:
+                logger.error(f"Failed to reload config: {e}")
 
     def _start_watching(self):
         """Start file watcher for hot-reload."""
@@ -77,13 +82,46 @@ class ConfigManager:
     def list_regions(self) -> List[str]:
         return list(self.regions.keys())
 
+    def get_patches(self, region_id: str) -> List[Dict[str, Any]]:
+        """Load patches metadata with caching."""
+        with self._lock:
+            if region_id in self._patches_cache:
+                return self._patches_cache[region_id]
+
+            region = self.get_region(region_id)
+            if not region:
+                return []
+
+            meta_path = region.get("patches_meta")
+            if not meta_path or not os.path.exists(meta_path):
+                return []
+
+            try:
+                with open(meta_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, list):
+                    patches = data
+                elif isinstance(data, dict) and "patches" in data:
+                    patches = data["patches"]
+                    if "city" in data:
+                        for p in patches:
+                            p["city"] = data["city"]
+                else:
+                    patches = []
+
+                self._patches_cache[region_id] = patches
+                return patches
+            except (json.JSONDecodeError, OSError) as e:
+                logger.error(f"Failed to load patches_meta for {region_id}: {e}")
+                return []
+
     def stop_watching(self):
         if self._observer:
             self._observer.stop()
             self._observer.join()
 
 
-# Global config instance
+# Global config instance (lazy initialization)
 _config_manager: Optional[ConfigManager] = None
 
 
@@ -92,33 +130,3 @@ def get_config() -> ConfigManager:
     if _config_manager is None:
         _config_manager = ConfigManager()
     return _config_manager
-
-
-def load_patches_meta(region_id: str) -> List[Dict[str, Any]]:
-    """Load patches metadata for a region."""
-    config = get_config()
-    region = config.get_region(region_id)
-    if not region:
-        return []
-
-    meta_path = region.get("patches_meta")
-    if not meta_path or not os.path.exists(meta_path):
-        return []
-
-    try:
-        with open(meta_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        # Handle both formats: harbin (list) and haidian (dict with "patches" key)
-        if isinstance(data, list):
-            return data
-        elif isinstance(data, dict) and "patches" in data:
-            patches = data["patches"]
-            # Add city info if present
-            if "city" in data:
-                for p in patches:
-                    p["city"] = data["city"]
-            return patches
-        return []
-    except Exception as e:
-        print(f"[Config] Failed to load patches_meta for {region_id}: {e}")
-        return []

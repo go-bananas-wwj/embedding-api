@@ -2,7 +2,7 @@
 
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Query
-from app.config import load_patches_meta
+from app.config import get_config
 from app.schemas.models import PaginatedPatchesResponse, PatchDetail
 from app.services.data_service import DataService
 
@@ -17,8 +17,6 @@ async def list_patches(
     bbox: Optional[str] = Query(None, description="Bounding box: minx,miny,maxx,maxy"),
 ):
     """List patches with pagination and optional bbox filtering."""
-    from app.config import get_config
-
     config = get_config()
     if not config.region_exists(region_id):
         raise HTTPException(status_code=404, detail=f"Region '{region_id}' not found")
@@ -49,8 +47,6 @@ async def list_patches(
 @router.get("/regions/{region_id}/patches/{patch_id}")
 async def get_patch(region_id: str, patch_id: str):
     """Get detailed information for a single patch."""
-    from app.config import get_config
-
     config = get_config()
     if not config.region_exists(region_id):
         raise HTTPException(status_code=404, detail=f"Region '{region_id}' not found")

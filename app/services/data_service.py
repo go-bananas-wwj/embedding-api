@@ -1,12 +1,37 @@
 """Data file path resolution and metadata loading."""
 
 import json
-import os
+import logging
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-import numpy as np
-from app.config import get_config, load_patches_meta
+from fastapi import HTTPException
+from app.config import get_config
+
+logger = logging.getLogger(__name__)
+
+# Valid patch_id pattern: patch_000000
+_PATCH_ID_PATTERN = re.compile(r"^patch_\d{6}$")
+
+
+def _validate_patch_id(patch_id: str) -> None:
+    """Validate patch_id format to prevent path traversal."""
+    if not _PATCH_ID_PATTERN.match(patch_id):
+        raise HTTPException(status_code=400, detail=f"Invalid patch_id format: '{patch_id}'")
+
+
+def _resolve_path(base_dir: str, relative: str) -> Optional[str]:
+    """Resolve and validate a path is within the base directory."""
+    try:
+        base = Path(base_dir).resolve()
+        target = (base / relative).resolve()
+        if not str(target).startswith(str(base)):
+            logger.warning(f"Path traversal attempt blocked: {relative}")
+            return None
+        return str(target) if target.exists() else None
+    except (OSError, ValueError):
+        return None
 
 
 class DataService:
@@ -15,7 +40,9 @@ class DataService:
     @staticmethod
     def get_patch(region_id: str, patch_id: str) -> Optional[Dict[str, Any]]:
         """Get patch metadata by ID."""
-        patches = load_patches_meta(region_id)
+        _validate_patch_id(patch_id)
+        config = get_config()
+        patches = config.get_patches(region_id)
         for p in patches:
             if p.get("patch_id") == patch_id:
                 return p
@@ -29,23 +56,26 @@ class DataService:
         bbox: Optional[str] = None,
     ) -> Tuple[List[Dict[str, Any]], int]:
         """List patches with pagination and bbox filtering."""
-        patches = load_patches_meta(region_id)
+        config = get_config()
+        patches = config.get_patches(region_id)
 
         # BBox filtering: bbox=minx,miny,maxx,maxy
         if bbox:
             try:
-                minx, miny, maxx, maxy = map(float, bbox.split(","))
+                parts = bbox.split(",")
+                if len(parts) != 4:
+                    raise ValueError("bbox must have 4 comma-separated values")
+                minx, miny, maxx, maxy = map(float, parts)
                 filtered = []
                 for p in patches:
                     bounds = p.get("bounds_wgs84", [])
                     if len(bounds) == 4:
                         p_minx, p_miny, p_maxx, p_maxy = bounds
-                        # Check overlap
                         if not (p_maxx < minx or p_minx > maxx or p_maxy < miny or p_miny > maxy):
                             filtered.append(p)
                 patches = filtered
-            except (ValueError, IndexError):
-                pass
+            except ValueError as e:
+                raise HTTPException(status_code=422, detail=f"Invalid bbox format: {e}")
 
         total = len(patches)
         start = (page - 1) * page_size
@@ -53,8 +83,9 @@ class DataService:
         return patches[start:end], total
 
     @staticmethod
-    def get_embedding_path(region_id: str, patch_id: str, format_type: str = "png") -> Optional[str]:
-        """Resolve embedding file path."""
+    def get_embedding_path(region_id: str, patch_id: str, fmt: str = "png") -> Optional[str]:
+        """Resolve embedding file path using config-driven templates."""
+        _validate_patch_id(patch_id)
         config = get_config()
         region = config.get_region(region_id)
         if not region:
@@ -62,35 +93,39 @@ class DataService:
 
         embeddings = region.get("embeddings", {})
 
-        if region_id == "harbin":
-            # Harbin: PNG visualization
-            base = embeddings.get("v2")
-            if base:
-                path = Path(base) / f"{patch_id}.png"
-                if path.exists():
-                    return str(path)
-        elif region_id == "haidian":
-            if format_type == "npy":
-                base = embeddings.get("aef")
-                if base:
-                    path = Path(base) / f"{patch_id}.npy"
-                    if path.exists():
-                        return str(path)
-            elif format_type == "png":
-                # Try viz directory for multi-source visualizations
-                base = embeddings.get("viz")
-                if base:
-                    # Look for multisource or timeline images
-                    for suffix in ["_multisource_v2.png", "_timeline.png"]:
-                        path = Path(base) / f"{patch_id}{suffix}"
-                        if path.exists():
-                            return str(path)
-            elif format_type == "cache":
-                base = embeddings.get("cache")
-                if base:
-                    path = Path(base) / patch_id / "planet_img.pt"
-                    if path.exists():
-                        return str(path)
+        # Config-driven path resolution - no hardcoded region logic
+        for emb_name, emb_config in embeddings.items():
+            if isinstance(emb_config, str):
+                # Legacy: direct path string
+                base = emb_config
+                if fmt == "png":
+                    path = _resolve_path(base, f"{patch_id}.png")
+                    if path:
+                        return path
+                elif fmt == "npy":
+                    path = _resolve_path(base, f"{patch_id}.npy")
+                    if path:
+                        return path
+            elif isinstance(emb_config, dict):
+                # New: config with template support
+                base = emb_config.get("path")
+                if not base:
+                    continue
+                supported_formats = emb_config.get("formats", ["png"])
+                if fmt not in supported_formats:
+                    continue
+                template = emb_config.get("template", "{patch_id}.{fmt}")
+                relative = template.format(patch_id=patch_id, fmt=fmt)
+                path = _resolve_path(base, relative)
+                if path:
+                    return path
+                # Try alternative templates for backward compat
+                alt_templates = emb_config.get("alt_templates", [])
+                for alt in alt_templates:
+                    relative = alt.format(patch_id=patch_id)
+                    path = _resolve_path(base, relative)
+                    if path:
+                        return path
         return None
 
     @staticmethod
@@ -103,6 +138,7 @@ class DataService:
         period: Optional[str] = None,
     ) -> Optional[str]:
         """Resolve task result file path."""
+        _validate_patch_id(patch_id)
         config = get_config()
         region = config.get_region(region_id)
         if not region:
@@ -118,58 +154,59 @@ class DataService:
         if not ver:
             return None
 
+        # Validate period to prevent path traversal
+        if period and not re.match(r"^[\w\-_.]+$", period):
+            logger.warning(f"Invalid period format blocked: {period}")
+            return None
+
         if format_type == "png":
             base = ver.get("results")
             if base:
                 if period:
-                    path = Path(base) / f"{period}.png"
-                else:
-                    # Try common patterns
-                    for fname in ["2025-10.png", "result.png"]:
-                        path = Path(base) / fname
-                        if path.exists():
-                            return str(path)
-                    # Check if there's a single PNG
-                    pngs = list(Path(base).glob("*.png"))
+                    path = _resolve_path(base, f"{period}.png")
+                    return path
+                # Try common patterns
+                for fname in ["2025-10.png", "result.png"]:
+                    path = _resolve_path(base, fname)
+                    if path:
+                        return path
+                # Check if there's a single PNG
+                try:
+                    pngs = sorted(Path(base).glob("*.png"))
                     if pngs:
                         return str(pngs[0])
+                except OSError:
+                    pass
         elif format_type == "npy":
             base = ver.get("predictions") or ver.get("results")
             if base:
                 if period:
-                    path = Path(base) / f"{patch_id}_{period}.npy"
-                else:
-                    path = Path(base) / f"{patch_id}_2025-10.npy"
-                if path.exists():
-                    return str(path)
+                    path = _resolve_path(base, f"{patch_id}_{period}.npy")
+                    return path
+                path = _resolve_path(base, f"{patch_id}_2025-10.npy")
+                return path
         elif format_type == "label":
             base = ver.get("labels")
             if base:
                 if period:
-                    # V2 format: labels are organized by period
                     period_dir = Path(base) / period
-                    path = period_dir / f"{patch_id}.npy"
-                    if path.exists():
-                        return str(path)
-                else:
-                    path = Path(base) / f"{patch_id}.npy"
-                    if path.exists():
-                        return str(path)
-                    # Try meta.json for summary
-                    meta_path = Path(base) / "meta.json"
-                    if meta_path.exists():
-                        return str(meta_path)
+                    path = _resolve_path(str(period_dir), f"{patch_id}.npy")
+                    return path
+                path = _resolve_path(base, f"{patch_id}.npy")
+                if path:
+                    return path
+                # Try meta.json for summary
+                meta_path = _resolve_path(base, "meta.json")
+                return meta_path
         elif format_type == "tile":
             base = ver.get("results")
             if base:
                 tiles_dir = Path(base) / "tiles"
-                if tiles_dir.exists():
-                    if period:
-                        path = tiles_dir / f"{patch_id}_{period}.png"
-                    else:
-                        path = tiles_dir / f"{patch_id}_2025-10.png"
-                    if path.exists():
-                        return str(path)
+                if period:
+                    path = _resolve_path(str(tiles_dir), f"{patch_id}_{period}.png")
+                    return path
+                path = _resolve_path(str(tiles_dir), f"{patch_id}_2025-10.png")
+                return path
         return None
 
     @staticmethod
@@ -192,42 +229,45 @@ class DataService:
         if not ver:
             return None
 
+        # Validate period
+        if period and not re.match(r"^[\w\-_.]+$", period):
+            return None
+
         # Try labels directory first
         labels_base = ver.get("labels")
         if labels_base:
             if period:
-                meta_path = Path(labels_base) / period / "meta.json"
+                meta_path = _resolve_path(labels_base, f"{period}/meta.json")
             else:
-                meta_path = Path(labels_base) / "meta.json"
-            if meta_path.exists():
+                meta_path = _resolve_path(labels_base, "meta.json")
+            if meta_path:
                 try:
                     with open(meta_path, "r", encoding="utf-8") as f:
                         return json.load(f)
-                except Exception:
-                    pass
+                except (json.JSONDecodeError, OSError) as e:
+                    logger.warning(f"Failed to load meta.json: {e}")
 
         # Try summary.json in parent directory
-        parent = Path(labels_base).parent if labels_base else None
-        if parent:
-            summary_path = parent / "summary.json"
-            if summary_path.exists():
-                try:
+        try:
+            parent = Path(labels_base).parent if labels_base else None
+            if parent:
+                summary_path = parent / "summary.json"
+                if summary_path.exists():
                     with open(summary_path, "r", encoding="utf-8") as f:
                         data = json.load(f)
-                        # V2 format: nested by period
                         if period and period in data:
                             return data[period].get(task_type)
-                        # V1 format: direct task entry
                         if task_type in data:
                             return data[task_type]
-                except Exception:
-                    pass
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning(f"Failed to load summary.json: {e}")
 
         return None
 
     @staticmethod
     def get_available_tasks(region_id: str, patch_id: str) -> List[str]:
         """Get list of tasks that have data for this patch."""
+        _validate_patch_id(patch_id)
         config = get_config()
         region = config.get_region(region_id)
         if not region:
@@ -238,17 +278,16 @@ class DataService:
         for task_name, task_info in tasks.items():
             versions = task_info.get("versions", {})
             for ver_name, ver_info in versions.items():
-                # Check if any data exists for this patch
                 predictions = ver_info.get("predictions")
                 if predictions:
-                    path = Path(predictions) / f"{patch_id}_2025-10.npy"
-                    if path.exists():
+                    path = _resolve_path(predictions, f"{patch_id}_2025-10.npy")
+                    if path:
                         available.append(task_name)
                         break
                 labels = ver_info.get("labels")
                 if labels:
-                    path = Path(labels) / f"{patch_id}.npy"
-                    if path.exists():
+                    path = _resolve_path(labels, f"{patch_id}.npy")
+                    if path:
                         available.append(task_name)
                         break
         return list(set(available))
@@ -256,6 +295,10 @@ class DataService:
     @staticmethod
     def has_embedding(region_id: str, patch_id: str) -> bool:
         """Check if embedding exists for this patch."""
+        try:
+            _validate_patch_id(patch_id)
+        except HTTPException:
+            return False
         return DataService.get_embedding_path(region_id, patch_id) is not None
 
     @staticmethod
