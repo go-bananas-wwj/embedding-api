@@ -46,6 +46,7 @@ class PatchDetail(PatchBase):
     bounds: Optional[List[float]] = None
     crs: Optional[str] = None
     has_embedding: bool = False
+    available_months: List[str] = []
     available_tasks: List[str] = []
 
 

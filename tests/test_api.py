@@ -133,11 +133,9 @@ class TestEmbeddings:
         assert response.status_code in (200, 404)
 
     def test_get_embedding_format_not_available(self):
-        """Harbin only has PNG embeddings; requesting NPY should return 404 with hint."""
-        response = client.get("/regions/harbin/patches/patch_000000/embedding?format=npy")
+        """Requesting embedding for non-existent month should return 404."""
+        response = client.get("/regions/harbin/patches/patch_000000/embedding?format=npy&month=2099-01")
         assert response.status_code == 404
-        assert "X-Available-Format" in response.headers
-        assert response.headers["X-Available-Format"] == "png"
 
     def test_get_embedding_invalid_format(self):
         response = client.get("/regions/harbin/patches/patch_000000/embedding?format=invalid")

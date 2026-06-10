@@ -214,8 +214,20 @@ class DataService:
         return patches[start:end], total
 
     @staticmethod
-    def get_embedding_path(region_id: str, patch_id: str, fmt: str = "png") -> Optional[str]:
-        """Resolve embedding file path using config-driven templates."""
+    def get_embedding_path(
+        region_id: str,
+        patch_id: str,
+        fmt: str = "png",
+        version: Optional[str] = None,
+        month: Optional[str] = None,
+    ) -> Optional[str]:
+        """Resolve embedding file path using config-driven templates.
+
+        Args:
+            version: Embedding version key from config (e.g., "v1", "v2").
+                     If None, searches all configured versions.
+            month: Month string for time-series embeddings (e.g., "2025-04").
+        """
         if not _validate_patch_id(patch_id):
             raise DataValidationError(f"Invalid patch_id format: '{patch_id}'")
         config = get_config()
@@ -225,8 +237,14 @@ class DataService:
 
         embeddings = region.get("embeddings", {})
 
+        # Filter to specific version if requested
+        if version and version in embeddings:
+            emb_items = [(version, embeddings[version])]
+        else:
+            emb_items = list(embeddings.items())
+
         # Config-driven path resolution - no hardcoded region logic
-        for emb_name, emb_config in embeddings.items():
+        for emb_name, emb_config in emb_items:
             if isinstance(emb_config, str):
                 # Legacy: direct path string
                 base = emb_config
@@ -247,14 +265,25 @@ class DataService:
                 if fmt not in supported_formats and fmt != "cache":
                     continue
                 template = emb_config.get("template", "{patch_id}.{fmt}")
-                relative = template.format(patch_id=patch_id, fmt=fmt)
+                # Build format kwargs - include month if template needs it
+                format_kwargs = {"patch_id": patch_id, "fmt": fmt}
+                if month:
+                    format_kwargs["month"] = month
+                try:
+                    relative = template.format(**format_kwargs)
+                except KeyError:
+                    # Template requires month but none provided
+                    continue
                 path = _resolve_path(base, relative)
                 if path:
                     return path
                 # Try alternative templates for backward compat
                 alt_templates = emb_config.get("alt_templates", [])
                 for alt in alt_templates:
-                    relative = alt.format(patch_id=patch_id)
+                    try:
+                        relative = alt.format(**format_kwargs)
+                    except KeyError:
+                        continue
                     path = _resolve_path(base, relative)
                     if path:
                         return path
@@ -515,7 +544,48 @@ class DataService:
         """Check if embedding exists for this patch."""
         if not _validate_patch_id(patch_id):
             return False
-        return DataService.get_embedding_path(region_id, patch_id) is not None
+        # Try with explicit month first, then fallback to first available
+        path = DataService.get_embedding_path(region_id, patch_id)
+        if path:
+            return True
+        available_months = DataService.get_available_months(region_id, patch_id)
+        if available_months:
+            return DataService.get_embedding_path(
+                region_id, patch_id, month=available_months[0]
+            ) is not None
+        return False
+
+    @staticmethod
+    def get_available_months(region_id: str, patch_id: str) -> List[str]:
+        """Return list of available embedding months for this patch.
+
+        Scans all configured embedding versions and their month subdirectories.
+        """
+        if not _validate_patch_id(patch_id):
+            return []
+        config = get_config()
+        region = config.get_region(region_id)
+        if not region:
+            return []
+
+        embeddings = region.get("embeddings", {})
+        months = set()
+        for emb_name, emb_config in embeddings.items():
+            if isinstance(emb_config, dict):
+                base = emb_config.get("path")
+                if not base:
+                    continue
+                base_path = Path(base)
+                if not base_path.exists():
+                    continue
+                # Scan month subdirectories
+                for month_dir in base_path.iterdir():
+                    if month_dir.is_dir():
+                        npy_file = month_dir / f"{patch_id}.npy"
+                        png_file = month_dir / f"{patch_id}.png"
+                        if npy_file.exists() or png_file.exists():
+                            months.add(month_dir.name)
+        return sorted(months)
 
     @staticmethod
     def list_task_versions(region_id: str, task_type: str) -> List[str]:

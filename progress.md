@@ -6,7 +6,8 @@
 - 完成多轮代码审查和 API 文档编写
 - 完成服务部署、Watchdog、OpenAPI 修复、v2 兼容修复
 - 完成 label_vis 补全（v1 + v2）
-- 收到新需求：整理数据路径，统一管理到 embedding-api 项目下
-- 完成数据路径调研
-- 创建 `task_plan.md`、`findings.md`、`progress.md`
+- 完成数据路径统一迁移（数据 + 模型 + 复现程序）
+- **新需求**：Embedding 按月组织，支持 V4→v1、V5→v2
+- 完成 V4/V5 embedding 数据调研
+- 发现：磁盘上已存在完整月频 embedding，无需重新下载
 - 状态：等待用户确认方案

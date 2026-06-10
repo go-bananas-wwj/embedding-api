@@ -38,6 +38,7 @@ async def list_patches(
                 sources=p.get("sources", {}),
                 time_range=p.get("time_range", []),
                 has_embedding=DataService.has_embedding(region_id, patch_id),
+                available_months=DataService.get_available_months(region_id, patch_id),
                 available_tasks=DataService.get_available_tasks(region_id, patch_id),
             )
         )
@@ -69,5 +70,6 @@ async def get_patch(region_id: str, patch_id: str):
         sources=patch.get("sources", {}),
         time_range=patch.get("time_range", []),
         has_embedding=DataService.has_embedding(region_id, patch_id),
+        available_months=DataService.get_available_months(region_id, patch_id),
         available_tasks=DataService.get_available_tasks(region_id, patch_id),
     )

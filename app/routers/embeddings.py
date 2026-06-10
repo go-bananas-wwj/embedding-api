@@ -2,7 +2,7 @@
 
 import asyncio
 import os
-from typing import Literal
+from typing import Literal, Optional
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 import numpy as np
@@ -81,6 +81,8 @@ async def get_embedding(
     region_id: str,
     patch_id: str,
     format: str = Query("png", description="Output format: png, npy, json, cache"),
+    version: Optional[str] = Query(None, description="Embedding version: v1, v2"),
+    month: Optional[str] = Query(None, description="Month for time-series embedding, e.g. 2025-04"),
 ):
     """Get embedding data for a patch.
 
@@ -88,6 +90,8 @@ async def get_embedding(
     - `npy`: Returns raw embedding array (application/octet-stream)
     - `json`: Returns embedding statistics
     - `cache`: Falls back to available format (PNG preferred)
+    - `version`: v1 (V4 model) or v2 (V5 model)
+    - `month`: Required for harbin time-series embeddings (e.g. 2025-04)
     """
     if format not in ("png", "npy", "json", "cache"):
         raise HTTPException(
@@ -105,24 +109,39 @@ async def get_embedding(
     if not patch:
         raise HTTPException(status_code=404, detail=f"Patch '{patch_id}' not found")
 
-    # Resolve embedding path (skip redundant fallback if format is already in the list)
+    # If month not provided, try first available month (backward compat)
+    effective_month = month
+    if not effective_month:
+        available_months = DataService.get_available_months(region_id, patch_id)
+        if available_months:
+            effective_month = available_months[0]
+
+    # Resolve embedding path
     try:
-        emb_path = DataService.get_embedding_path(region_id, patch_id, format)
+        emb_path = DataService.get_embedding_path(
+            region_id, patch_id, format, version=version, month=effective_month
+        )
         if not emb_path:
-            # Try alternative formats for fallback, excluding the original format
+            # Try alternative formats for fallback
             for alt_fmt in ("png", "npy", "cache"):
                 if alt_fmt == format:
                     continue
-                emb_path = DataService.get_embedding_path(region_id, patch_id, alt_fmt)
-                if emb_path:
+                alt_path = DataService.get_embedding_path(
+                    region_id, patch_id, alt_fmt, version=version, month=effective_month
+                )
+                if alt_path:
+                    emb_path = alt_path
                     break
     except DataValidationError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
     if not emb_path:
-        raise HTTPException(
-            status_code=404, detail=f"Embedding not found for patch '{patch_id}'"
-        )
+        detail_msg = f"Embedding not found for patch '{patch_id}'"
+        if month:
+            detail_msg += f", month '{month}'"
+        if version:
+            detail_msg += f", version '{version}'"
+        raise HTTPException(status_code=404, detail=detail_msg)
 
     # Check file size before loading
     try:

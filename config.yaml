@@ -3,10 +3,16 @@ regions:
     name: "哈尔滨新区"
     patches_meta: "data/harbin/patches_meta.json"
     embeddings:
+      v1:
+        path: "data/harbin/embeddings/v1"
+        template: "{month}/{patch_id}.{fmt}"
+        formats: ["npy", "png", "json"]
+        alt_templates: ["{month}/{patch_id}.png"]
       v2:
-        path: "data/harbin/embeddings"
-        template: "{patch_id}.png"
-        formats: ["png"]
+        path: "data/harbin/embeddings/v2"
+        template: "{month}/{patch_id}.{fmt}"
+        formats: ["npy", "png", "json"]
+        alt_templates: ["{month}/{patch_id}.png"]
     tasks:
       construction:
         name: "建筑工地监测"
