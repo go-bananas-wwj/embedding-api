@@ -159,6 +159,7 @@ class TestTasks:
         task_ids = [t["id"] for t in data["tasks"]]
         assert "construction" in task_ids
         assert "building_change" in task_ids
+        assert "change_detection" in task_ids
 
     def test_list_tasks_haidian(self):
         response = client.get("/regions/haidian/tasks")
@@ -173,10 +174,26 @@ class TestTasks:
         assert data["task"] == "construction"
         assert data["total_patches"] == 424
 
+    def test_get_change_detection_summary(self):
+        response = client.get(
+            "/regions/harbin/tasks/change_detection/summary?version=v1&period=2025-04_vs_2025-06"
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["task"] == "change_detection"
+        assert data["total_patches"] == 424
+
     def test_get_task_result(self):
         response = client.get("/regions/harbin/patches/patch_000000/tasks/construction/result?format=png")
         # May be 200 or 404 depending on data availability
         assert response.status_code in (200, 404)
+
+    def test_get_change_detection_result(self):
+        response = client.get(
+            "/regions/harbin/patches/patch_000000/tasks/change_detection/result?format=png&version=v1&period=2025-04_vs_2025-06"
+        )
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "image/png"
 
     def test_get_task_result_invalid_format(self):
         response = client.get(
