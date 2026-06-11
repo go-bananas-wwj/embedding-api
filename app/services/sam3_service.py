@@ -37,6 +37,7 @@ class SAM3Service:
         self._cache: OrderedDict[str, dict] = OrderedDict()
         self._inference_lock: Optional[asyncio.Lock] = None
         self._model_lock = threading.Lock()
+        self._cache_lock = threading.Lock()
         self._initialized = True
 
     def _get_inference_lock(self) -> asyncio.Lock:
@@ -47,10 +48,10 @@ class SAM3Service:
 
     def _ensure_model(self):
         """Lazy-load SAM3 model. Thread-safe double-checked locking."""
-        if self._model is not None:
+        if self._model is not None and self._processor is not None:
             return
         with self._model_lock:
-            if self._model is not None:
+            if self._model is not None and self._processor is not None:
                 return
             import torch
             from sam3.model_builder import build_sam3_image_model
@@ -64,27 +65,37 @@ class SAM3Service:
             if device == "cuda" and not torch.cuda.is_available():
                 device = "cpu"
 
-            self._device = device
             checkpoint_path = str(Path(checkpoint_path).resolve())
             bpe_path = str(Path(bpe_path).resolve())
 
-            self._model = build_sam3_image_model(
-                bpe_path=bpe_path,
-                checkpoint_path=checkpoint_path,
-                device=device,
-                enable_inst_interactivity=True,
-            )
-            self._model.to(device)
+            try:
+                model = build_sam3_image_model(
+                    bpe_path=bpe_path,
+                    checkpoint_path=checkpoint_path,
+                    device=device,
+                    enable_inst_interactivity=True,
+                )
+                model.to(device)
 
-            # Convert float32 to bfloat16 for autocast compatibility
-            for p in self._model.parameters():
-                if p.dtype == torch.float32:
-                    p.data = p.data.to(torch.bfloat16)
-            for b in self._model.buffers():
-                if b.dtype == torch.float32:
-                    b.data = b.data.to(torch.bfloat16)
+                # Convert float32 to bfloat16 for autocast compatibility
+                for p in model.parameters():
+                    if p.dtype == torch.float32:
+                        p.data = p.data.to(torch.bfloat16)
+                for b in model.buffers():
+                    if b.dtype == torch.float32:
+                        b.data = b.data.to(torch.bfloat16)
 
-            self._processor = Sam3Processor(self._model, device=device)
+                processor = Sam3Processor(model, device=device)
+
+                # Only assign after full success
+                self._device = device
+                self._model = model
+                self._processor = processor
+            except Exception:
+                self._device = None
+                self._model = None
+                self._processor = None
+                raise
 
     def _load_s2_image(self, region_id: str, patch_id: str, month: str) -> Image.Image:
         """Load S2 RGB image for a patch from configured s2_dir.
@@ -103,7 +114,10 @@ class SAM3Service:
         if not s2_dir:
             raise ValueError(f"s2_dir not configured for region '{region_id}'")
 
-        patch_dir = Path(s2_dir) / patch_id
+        s2_dir_path = Path(s2_dir).resolve()
+        patch_dir = (s2_dir_path / patch_id).resolve()
+        if not str(patch_dir).startswith(str(s2_dir_path)):
+            raise ValueError(f"Invalid patch_id: '{patch_id}'")
         if not patch_dir.exists():
             raise FileNotFoundError(f"No S2 image directory found for {patch_id}")
 
@@ -118,12 +132,19 @@ class SAM3Service:
         s2_path = candidates[0]
 
         with rasterio.open(str(s2_path)) as ds:
-            data = ds.read()  # [C, H, W]
+            # Windowed read for large images
+            if ds.height > 1024 or ds.width > 1024:
+                data = ds.read(
+                    out_shape=(ds.count, 256, 256),
+                    resampling=rasterio.enums.Resampling.lanczos,
+                )
+            else:
+                data = ds.read()  # [C, H, W]
 
-        if data.shape[0] >= 4:
+        if data.shape[0] >= 3:
+            # Sentinel-2 bands: B02(0), B03(1), B04(2), B08(3), ...
+            # Always select B04(R), B03(G), B02(B) = indices [2, 1, 0]
             rgb = data[[2, 1, 0]].astype(np.float32)
-        elif data.shape[0] >= 3:
-            rgb = data[:3].astype(np.float32)
         else:
             raise ValueError(f"Not enough bands in {s2_path}")
 
@@ -136,6 +157,26 @@ class SAM3Service:
             img = img.resize((256, 256), Image.Resampling.LANCZOS)
         return img
 
+    def _evict_cache_entry(self, embedding_id: str):
+        """Remove a cache entry and explicitly free GPU tensors."""
+        import torch
+
+        entry = self._cache.pop(embedding_id, None)
+        if entry is None:
+            return
+        state = entry.get("state")
+        if state and isinstance(state, dict):
+            for k, v in list(state.items()):
+                if hasattr(v, "cpu"):
+                    try:
+                        v.cpu()
+                    except Exception:
+                        pass
+                del state[k]
+        del entry
+        if self._device and self._device != "cpu":
+            torch.cuda.empty_cache()
+
     async def embed(self, region_id: str, patch_id: str, month: str) -> dict:
         """Load image, compute SAM3 embedding, cache it, return image + embedding_id."""
         import torch
@@ -145,19 +186,33 @@ class SAM3Service:
             image = self._load_s2_image(region_id, patch_id, month)
 
             device = self._device or "cpu"
-            with torch.autocast(device, dtype=torch.bfloat16):
-                state = self._processor.set_image(image)
+            try:
+                with torch.autocast(device, dtype=torch.bfloat16):
+                    state = self._processor.set_image(image)
+            except torch.cuda.OutOfMemoryError:
+                # Clear cache and retry once
+                with self._cache_lock:
+                    for key in list(self._cache.keys()):
+                        self._evict_cache_entry(key)
+                torch.cuda.empty_cache()
+                with torch.autocast(device, dtype=torch.bfloat16):
+                    state = self._processor.set_image(image)
 
             embedding_id = f"{region_id}_{patch_id}_{month}"
-            self._cache[embedding_id] = {
-                "state": state,
-                "shape": (state["original_height"], state["original_width"]),
-            }
+            with self._cache_lock:
+                self._cache[embedding_id] = {
+                    "state": state,
+                    "shape": (state["original_height"], state["original_width"]),
+                }
 
-            # LRU eviction
-            max_size = get_config().get_sam3_config().get("max_cache_size", 20)
-            while len(self._cache) > max_size:
-                self._cache.popitem(last=False)
+                # LRU eviction
+                max_size = get_config().get_sam3_config().get("max_cache_size", 20)
+                max_size = max(1, int(max_size))
+                while len(self._cache) > max_size:
+                    oldest_id, _ = self._cache.popitem(last=False)
+                    # Re-insert the newest, evict oldest explicitly
+                    self._cache.move_to_end(embedding_id)
+                    self._evict_cache_entry(oldest_id)
 
             # Encode image to base64
             buf = io.BytesIO()
@@ -185,25 +240,31 @@ class SAM3Service:
         """Run instance segmentation on cached embedding."""
         import torch
 
-        if embedding_id not in self._cache:
-            raise ValueError(f"Embedding '{embedding_id}' not found. Call embed first.")
+        with self._cache_lock:
+            if embedding_id not in self._cache:
+                raise ValueError(f"Embedding '{embedding_id}' not found. Call embed first.")
 
         async with self._get_inference_lock():
             self._ensure_model()
-            state = self._cache[embedding_id]["state"]
-            img_h, img_w = self._cache[embedding_id]["shape"]
+            with self._cache_lock:
+                state = self._cache[embedding_id]["state"]
+                img_h, img_w = self._cache[embedding_id]["shape"]
 
             coords = np.array(point_coords) * np.array([[img_w, img_h]])
             labels = np.array(point_labels)
 
             device = self._device or "cpu"
-            with torch.autocast(device, dtype=torch.bfloat16):
-                masks, scores, _ = self._model.predict_inst(
-                    state,
-                    point_coords=coords,
-                    point_labels=labels,
-                    multimask_output=multimask_output,
-                )
+            try:
+                with torch.autocast(device, dtype=torch.bfloat16):
+                    masks, scores, _ = self._model.predict_inst(
+                        state,
+                        point_coords=coords,
+                        point_labels=labels,
+                        multimask_output=multimask_output,
+                    )
+            except torch.cuda.OutOfMemoryError:
+                torch.cuda.empty_cache()
+                raise
 
             results = []
             for mask, score in zip(masks, scores.tolist()):
@@ -232,7 +293,7 @@ class SAM3Service:
         """Return model loading status, GPU memory, and cache info."""
         import torch
 
-        model_loaded = self._model is not None
+        model_loaded = self._model is not None and self._processor is not None
         gpu_mem = {"allocated_mb": 0, "reserved_mb": 0}
 
         if model_loaded and self._device and self._device != "cpu":
@@ -242,13 +303,17 @@ class SAM3Service:
             except RuntimeError:
                 pass
 
+        with self._cache_lock:
+            cache_entries = list(self._cache.keys())
+            cache_size = len(self._cache)
+
         return {
             "model_loaded": model_loaded,
             "device": self._device or "not_loaded",
             "gpu_memory": gpu_mem,
             "cache": {
-                "size": len(self._cache),
+                "size": cache_size,
                 "max_size": get_config().get_sam3_config().get("max_cache_size", 20),
-                "entries": list(self._cache.keys()),
+                "entries": cache_entries,
             },
         }

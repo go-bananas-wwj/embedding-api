@@ -905,6 +905,7 @@ POST /regions/{region_id}/sam3/embed
 | `image.data` | string | S2 RGB 自然色影像的 base64 PNG |
 
 **错误码**:
+- `400` — 请求参数错误（如非法 patch_id、路径穿越尝试）
 - `404` — Patch 或 S2 影像不存在
 - `503` — GPU 内存不足或模型加载失败
 
@@ -999,6 +1000,16 @@ GET /regions/{region_id}/sam3/status
 | `gpu_memory.allocated_mb` | int | 已分配的 GPU 显存（MB） |
 | `cache.size` | int | 当前缓存的 embedding 数量 |
 | `cache.max_size` | int | 缓存上限（默认 20） |
+
+**错误码**:
+- `404` — 区域不存在
+
+**字段说明补充**:
+- `device`: 模型未加载时返回 `"not_loaded"`，加载后返回 `"cuda:N"` 或 `"cpu"`
+- `cache.entries`: 按最近使用顺序排列的 embedding_id 列表，最前面的是最近使用的
+
+**缓存淘汰语义**:
+嵌入缓存采用 LRU（最近最少使用）策略。当 `cache.size` 达到 `max_size` 后，新的嵌入请求会自动淘汰最旧的缓存项，并释放对应的 GPU 张量。缓存项在服务器重启后全部清空。
 
 ---
 

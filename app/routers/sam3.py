@@ -1,5 +1,7 @@
 """SAM3 interactive segmentation router."""
 
+import logging
+
 from fastapi import APIRouter, HTTPException
 
 from app.config import get_config
@@ -13,6 +15,7 @@ from app.schemas.sam3 import (
 from app.services.sam3_service import SAM3Service
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.post("/regions/{region_id}/sam3/embed", response_model=EmbedResponse)
@@ -30,8 +33,9 @@ async def sam3_embed(region_id: str, req: EmbedRequest):
         raise HTTPException(status_code=404, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=503, detail=f"Model inference failed: {e}")
+    except Exception:
+        logger.exception("SAM3 embed failed for %s/%s/%s", region_id, req.patch_id, req.month)
+        raise HTTPException(status_code=503, detail="Model inference temporarily unavailable")
 
 
 @router.post("/regions/{region_id}/sam3/segment", response_model=SegmentResponse)
@@ -52,8 +56,9 @@ async def sam3_segment(region_id: str, req: SegmentRequest):
         return {"masks": masks}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=503, detail=f"Segmentation failed: {e}")
+    except Exception:
+        logger.exception("SAM3 segment failed for embedding_id=%s", req.embedding_id)
+        raise HTTPException(status_code=503, detail="Segmentation temporarily unavailable")
 
 
 @router.get("/regions/{region_id}/sam3/status", response_model=StatusResponse)
