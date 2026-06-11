@@ -90,8 +90,10 @@ class SAM3Service:
         """Load S2 RGB image for a patch from configured s2_dir.
 
         Directory structure: {s2_dir}/{patch_id}/{YYYYMMDD}.tif
-        month format: "2025-10" -> matches files starting with "202510"
+        Uses rasterio to read multi-band GeoTIFF and normalizes reflectance.
         """
+        import rasterio
+
         config = get_config()
         region = config.get_region(region_id)
         if not region:
@@ -115,8 +117,23 @@ class SAM3Service:
 
         s2_path = candidates[0]
 
-        img = Image.open(s2_path).convert("RGB")
-        img = img.resize((256, 256), Image.Resampling.LANCZOS)
+        with rasterio.open(str(s2_path)) as ds:
+            data = ds.read()  # [C, H, W]
+
+        if data.shape[0] >= 4:
+            rgb = data[[2, 1, 0]].astype(np.float32)
+        elif data.shape[0] >= 3:
+            rgb = data[:3].astype(np.float32)
+        else:
+            raise ValueError(f"Not enough bands in {s2_path}")
+
+        rgb = np.clip(rgb / 3500.0, 0, 1)
+        rgb = rgb.transpose(1, 2, 0)
+        rgb = (rgb * 255).astype(np.uint8)
+
+        img = Image.fromarray(rgb)
+        if img.size != (256, 256):
+            img = img.resize((256, 256), Image.Resampling.LANCZOS)
         return img
 
     async def embed(self, region_id: str, patch_id: str, month: str) -> dict:
