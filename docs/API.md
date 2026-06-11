@@ -865,6 +865,143 @@ function getResultImageUrl(regionId: string, patchId: string, taskType: string) 
 
 ---
 
+## 🎯 SAM3 交互式分割
+
+SAM3（Segment Anything with Concepts）是基于 Meta AI 的交互式实例分割模型。前端用户可以在卫星影像上点击点坐标，实时获取分割掩码。
+
+### SAM3 Embed — 预加载影像
+
+预加载 patch 的 S2 RGB 影像，计算 SAM3 embedding，返回影像和 embedding_id。
+
+```
+POST /regions/{region_id}/sam3/embed
+```
+
+**请求体**:
+```json
+{
+  "patch_id": "patch_000000",
+  "month": "2025-10"
+}
+```
+
+**响应**:
+```json
+{
+  "embedding_id": "harbin_patch_000000_2025-10",
+  "status": "ready",
+  "image": {
+    "width": 256,
+    "height": 256,
+    "format": "png",
+    "data": "iVBORw0KGgoAAAANSUhEUgAAAQAAAAEAC..."
+  }
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `embedding_id` | string | 后续 segment 请求的标识符 |
+| `image.data` | string | S2 RGB 自然色影像的 base64 PNG |
+
+**错误码**:
+- `404` — Patch 或 S2 影像不存在
+- `503` — GPU 内存不足或模型加载失败
+
+**前端提示**: `image.data` 可直接解码为 `<img>` 标签显示，让用户在影像上点击。
+
+---
+
+### SAM3 Segment — 点选分割
+
+基于已缓存的 embedding 和用户点击的点坐标，生成分割掩码。
+
+```
+POST /regions/{region_id}/sam3/segment
+```
+
+**请求体**:
+```json
+{
+  "embedding_id": "harbin_patch_000000_2025-10",
+  "point_coords": [[0.52, 0.48]],
+  "point_labels": [1],
+  "multimask_output": true
+}
+```
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `embedding_id` | string | 是 | embed 接口返回的 ID |
+| `point_coords` | float[][] | 是 | 归一化坐标 `[[x, y], ...]`，范围 `[0, 1]` |
+| `point_labels` | int[] | 是 | `1`=正样本（前景），`0`=负样本（背景） |
+| `multimask_output` | bool | 否 | `true` 返回 3 个候选掩码，`false` 返回 1 个 |
+
+**响应**:
+```json
+{
+  "masks": [
+    {
+      "data": "iVBORw0KGgoAAAANSUhEUgAAAQAAAAEAC...",
+      "score": 0.95,
+      "bbox": [120, 110, 35, 42]
+    }
+  ]
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `data` | string | 二值掩码的 base64 PNG（白色=选中区域，黑色=背景） |
+| `score` | float | 模型置信度 `[0, 1]` |
+| `bbox` | int[] | 边界框 `[x, y, width, height]`（像素坐标） |
+
+**错误码**:
+- `404` — embedding_id 不存在（未调用 embed）
+- `422` — 坐标格式错误或越界
+- `503` — GPU 推理失败
+
+**前端提示**: 
+- 掩码 PNG 可叠加在原始影像上显示（白色区域半透明覆盖）
+- `multimask_output=true` 时，前端可让用户从 3 个候选掩码中选择最佳结果
+
+---
+
+### SAM3 Status — 服务状态
+
+查询 SAM3 模型加载状态和 GPU 内存使用情况。
+
+```
+GET /regions/{region_id}/sam3/status
+```
+
+**响应**:
+```json
+{
+  "model_loaded": true,
+  "device": "cuda:0",
+  "gpu_memory": {
+    "allocated_mb": 3842,
+    "reserved_mb": 4096
+  },
+  "cache": {
+    "size": 3,
+    "max_size": 20,
+    "entries": ["harbin_patch_000000_2025-10"]
+  }
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `model_loaded` | bool | 模型是否已加载到 GPU |
+| `device` | string | 当前使用的设备（`cuda:N` 或 `cpu`） |
+| `gpu_memory.allocated_mb` | int | 已分配的 GPU 显存（MB） |
+| `cache.size` | int | 当前缓存的 embedding 数量 |
+| `cache.max_size` | int | 缓存上限（默认 20） |
+
+---
+
 ## 📞 技术支持
 
 - **GitHub Issues**: [go-bananas-wwj/embedding-api/issues](https://github.com/go-bananas-wwj/embedding-api/issues)
