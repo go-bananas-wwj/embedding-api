@@ -54,6 +54,7 @@ class PaginatedPatchesResponse(BaseModel):
     total: int
     page: int
     page_size: int
+    has_next: bool
     patches: List[PatchDetail]
 
 

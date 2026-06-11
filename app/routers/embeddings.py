@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import re
 from typing import Literal, Optional
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
@@ -108,11 +109,16 @@ async def get_embedding(
     - `json`: Returns embedding statistics
     - `cache`: Falls back to available format (PNG preferred)
     - `version`: v1 (V4 model) or v2 (V5 model)
-    - `month`: Required for harbin time-series embeddings (e.g. 2025-04)
+    - `month`: Optional; falls back to first available month if not provided
     """
     if format not in ("png", "npy", "json", "cache"):
         raise HTTPException(
-            status_code=422, detail=f"Invalid format '{format}'. Use: png, npy, json"
+            status_code=422, detail=f"Invalid format '{format}'. Use: png, npy, json, cache"
+        )
+
+    if month is not None and not re.match(r"^[\w\-]{1,32}$", month):
+        raise HTTPException(
+            status_code=422, detail=f"Invalid month format: '{month}'"
         )
 
     config = get_config()

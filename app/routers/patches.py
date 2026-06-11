@@ -43,8 +43,9 @@ async def list_patches(
             )
         )
 
+    has_next = total > page * page_size
     return PaginatedPatchesResponse(
-        total=total, page=page, page_size=page_size, patches=patch_details
+        total=total, page=page, page_size=page_size, has_next=has_next, patches=patch_details
     )
 
 

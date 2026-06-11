@@ -12,6 +12,19 @@ class TileService:
     """
 
     @staticmethod
+    def _validate_period(period: Optional[str]) -> bool:
+        """Validate period string to prevent path traversal."""
+        if period is None:
+            return True
+        import re
+        return bool(re.match(r"^[\w\-]+$", period)) and len(period) <= 64
+
+    @staticmethod
+    def _validate_version(version: str) -> bool:
+        """Validate version string."""
+        return version in ("v1", "v2")
+
+    @staticmethod
     def get_tile_path(
         region_id: str,
         task_type: str,
@@ -34,6 +47,11 @@ class TileService:
     ) -> list:
         """List all available tile files for a task."""
         from app.config import get_config
+
+        if not TileService._validate_version(version):
+            return []
+        if not TileService._validate_period(period):
+            return []
 
         config = get_config()
         region = config.get_region(region_id)

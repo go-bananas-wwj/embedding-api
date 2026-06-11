@@ -44,7 +44,7 @@ Embedding 是深度学习模型把卫星影像「翻译」成的高维向量。�
 | `building_change` | 建筑变化监测 | 哪里新建了楼房 |
 | `farmland` | 耕地非农非粮监测 | 耕地是否被非法占用 |
 | `land_conversion` | 土地转换监测 | 土地用途是否改变 |
-| `demolition` | 拆迁监测 | 哪里在拆除建筑 |
+| `change_detection` | 变化检测 | 基于两期 embedding 差分检测变化区域 |
 
 **版本说明**:
 - **V1**: 单期监测，只有一个时间点的结果
@@ -371,6 +371,8 @@ GET /regions/{region_id}/patches/{patch_id}/embedding?format=png
 | 参数 | 类型 | 必填 | 默认值 | 说明 |
 |------|------|------|--------|------|
 | `format` | string | 否 | `png` | 输出格式：`png`、`npy`、`json`、`cache` |
+| `version` | string | 否 | - | Embedding 版本：`v1`（V4 模型）/`v2`（V5 模型）；不传时依次尝试可用版本 |
+| `month` | string | 否 | - | 时间序列月份，如 `2025-04`（哈尔滨）或 `20251201`（海淀）；不传时自动回退到该 Patch 第一个可用月份 |
 
 **四种格式的区别**:
 
@@ -848,7 +850,7 @@ function getResultImageUrl(regionId: string, patchId: string, taskType: string) 
 | 时间范围 | 2023-01 ~ 2025-10 |
 | 数据源 | Sentinel-2, Sentinel-1, Landsat, DEM, WorldCover 等 |
 | 嵌入格式 | PNG 64×64 RGB |
-| 下游任务 | 5 个（construction, building_change, farmland, land_conversion, demolition） |
+| 下游任务 | 5 个（construction, building_change, farmland, land_conversion, change_detection） |
 
 ### 海淀区 (haidian)
 

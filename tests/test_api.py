@@ -87,6 +87,17 @@ class TestPatches:
         response = client.get("/regions/harbin/patches?page=1&page_size=101")
         assert response.status_code == 422
 
+    def test_list_patches_has_next(self):
+        response = client.get("/regions/harbin/patches?page=1&page_size=2")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["has_next"] is True
+        # Last page should not have next
+        response = client.get("/regions/harbin/patches?page=5&page_size=100")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["has_next"] is False
+
     def test_get_patch(self):
         response = client.get("/regions/harbin/patches/patch_000000")
         assert response.status_code == 200
@@ -140,6 +151,16 @@ class TestEmbeddings:
     def test_get_embedding_invalid_format(self):
         response = client.get("/regions/harbin/patches/patch_000000/embedding?format=invalid")
         assert response.status_code == 422
+        detail = response.json()["detail"]
+        assert "cache" in detail
+
+    def test_get_embedding_month_path_traversal_blocked(self):
+        malicious_months = ["../etc/passwd", "..\\windows\\system32", "a" * 100]
+        for month in malicious_months:
+            response = client.get(
+                f"/regions/harbin/patches/patch_000000/embedding?format=json&month={month}"
+            )
+            assert response.status_code == 422, f"Failed for month={month}"
 
     def test_get_embedding_patch_not_found(self):
         response = client.get("/regions/harbin/patches/patch_999999/embedding?format=json")
@@ -228,3 +249,35 @@ class TestPathTraversal:
         for malicious_id in malicious_ids:
             response = client.get(f"/regions/harbin/patches/{malicious_id}")
             assert response.status_code in (400, 404), f"Failed for {malicious_id}"
+
+    def test_tile_period_path_traversal_blocked(self):
+        """Malicious period parameters should return empty tiles, not file access."""
+        malicious_periods = [
+            "../../../etc/passwd",
+            "..\\..\\windows\\system32",
+            "2025-04_vs_2025-06/../../etc/passwd",
+            "a" * 1000,
+        ]
+        for period in malicious_periods:
+            response = client.get(
+                f"/regions/harbin/tasks/construction/tiles?version=v1&period={period}"
+            )
+            assert response.status_code == 200, f"Failed for period={period}"
+            data = response.json()
+            assert data["tiles"] == []
+
+    def test_tile_version_path_traversal_blocked(self):
+        """Invalid version values should return empty tiles safely."""
+        malicious_versions = [
+            "../../../etc/passwd",
+            "..\\..\\windows\\system32",
+            "v1/../../etc/passwd",
+            "a" * 1000,
+        ]
+        for version in malicious_versions:
+            response = client.get(
+                f"/regions/harbin/tasks/construction/tiles?version={version}"
+            )
+            assert response.status_code == 200, f"Failed for version={version}"
+            data = response.json()
+            assert data["tiles"] == []

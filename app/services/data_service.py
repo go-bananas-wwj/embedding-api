@@ -22,6 +22,10 @@ _PATCH_ID_PATTERN = re.compile(r"^patch_\d{6}$")
 # Valid period pattern: alphanumeric, hyphen, underscore only (no dots)
 _PERIOD_PATTERN = re.compile(r"^[\w\-]+$")
 
+# Valid month pattern: supports 2025-04 (harbin) and 20251201 (haidian)
+_MONTH_PATTERN = re.compile(r"^[\w\-]+$")
+_MAX_MONTH_LEN = 32
+
 # Max file size for embeddings (100MB)
 MAX_FILE_SIZE = 100 * 1024 * 1024
 
@@ -59,6 +63,16 @@ def _validate_period(period: Optional[str]) -> bool:
     if period is None:
         return True
     return bool(_PERIOD_PATTERN.match(period))
+
+
+def _validate_month(month: Optional[str]) -> bool:
+    """Validate month format to prevent path traversal.
+
+    Supports both YYYY-MM (harbin) and YYYYMMDD (haidian) formats.
+    """
+    if month is None:
+        return True
+    return bool(_MONTH_PATTERN.match(month)) and len(month) <= _MAX_MONTH_LEN
 
 
 def _resolve_path(base_dir: str, relative: str) -> Optional[str]:
@@ -230,6 +244,10 @@ class DataService:
         """
         if not _validate_patch_id(patch_id):
             raise DataValidationError(f"Invalid patch_id format: '{patch_id}'")
+        if not _validate_month(month):
+            raise DataValidationError(f"Invalid month format: '{month}'")
+        if version is not None and version not in ("v1", "v2"):
+            raise DataValidationError(f"Invalid version: '{version}'")
         config = get_config()
         region = config.get_region(region_id)
         if not region:
