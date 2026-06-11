@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import regions, patches, embeddings, tasks
+from app.routers import regions, patches, embeddings, tasks, sam3
 
 # Configure logging
 logging.basicConfig(
@@ -59,3 +59,4 @@ app.include_router(regions.router)
 app.include_router(patches.router)
 app.include_router(embeddings.router)
 app.include_router(tasks.router)
+app.include_router(sam3.router)
