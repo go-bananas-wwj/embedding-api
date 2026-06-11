@@ -120,6 +120,10 @@ class ConfigManager:
     def list_regions(self) -> List[str]:
         return list(self.regions.keys())
 
+    def get_sam3_config(self) -> Dict[str, Any]:
+        """Get SAM3 configuration."""
+        return self.get("sam3", default={})
+
     def get_patches(self, region_id: str) -> List[Dict[str, Any]]:
         """Load patches metadata with caching.
 
