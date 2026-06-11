@@ -87,7 +87,11 @@ class SAM3Service:
             self._processor = Sam3Processor(self._model, device=device)
 
     def _load_s2_image(self, region_id: str, patch_id: str, month: str) -> Image.Image:
-        """Load S2 RGB image for a patch from configured s2_dir."""
+        """Load S2 RGB image for a patch from configured s2_dir.
+
+        Directory structure: {s2_dir}/{patch_id}/{YYYYMMDD}.tif
+        month format: "2025-10" -> matches files starting with "202510"
+        """
         config = get_config()
         region = config.get_region(region_id)
         if not region:
@@ -97,11 +101,19 @@ class SAM3Service:
         if not s2_dir:
             raise ValueError(f"s2_dir not configured for region '{region_id}'")
 
-        s2_path = Path(s2_dir) / month / f"{patch_id}.tif"
-        if not s2_path.exists():
-            s2_path = Path(s2_dir) / month / f"{patch_id}.png"
-        if not s2_path.exists():
+        patch_dir = Path(s2_dir) / patch_id
+        if not patch_dir.exists():
+            raise FileNotFoundError(f"No S2 image directory found for {patch_id}")
+
+        # Convert month "2025-10" to prefix "202510"
+        month_prefix = month.replace("-", "")
+        candidates = sorted(patch_dir.glob(f"{month_prefix}*.tif"))
+        if not candidates:
+            candidates = sorted(patch_dir.glob(f"{month_prefix}*.png"))
+        if not candidates:
             raise FileNotFoundError(f"No S2 image found for {patch_id} {month}")
+
+        s2_path = candidates[0]
 
         img = Image.open(s2_path).convert("RGB")
         img = img.resize((256, 256), Image.Resampling.LANCZOS)
