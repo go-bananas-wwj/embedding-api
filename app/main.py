@@ -14,6 +14,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -28,13 +29,16 @@ async def lifespan(app: FastAPI):
     logging.info("[Shutdown] Embedding API stopped")
 
 
-# CORS origins from environment variable, default to wildcard for dev
-_cors_origins = os.environ.get("CORS_ORIGINS", "*")
+# CORS origins from environment variable. Default to empty list for security;
+# explicit origins must be set via CORS_ORIGINS env var.
+_cors_origins = os.environ.get("CORS_ORIGINS", "")
 allow_origins = [o.strip() for o in _cors_origins.split(",") if o.strip()]
+if not allow_origins:
+    logger.warning("CORS_ORIGINS not set; cross-origin requests will be rejected")
 
-# Docs URLs: set to "none" in production to disable Swagger UI
-_docs_url = os.environ.get("DOCS_URL", "/docs")
-_redoc_url = os.environ.get("REDOC_URL", "/redoc")
+# Docs URLs: default to disabled (None). Enable explicitly via env vars.
+_docs_url = os.environ.get("DOCS_URL", "none")
+_redoc_url = os.environ.get("REDOC_URL", "none")
 
 app = FastAPI(
     title="Embedding API",

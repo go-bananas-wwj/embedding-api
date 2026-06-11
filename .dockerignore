@@ -1,0 +1,38 @@
+# Git
+.git/
+.gitignore
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Logs and runtime files
+*.log
+*.pid
+nohup.out
+uvicorn.log
+server.log
+service_watchdog.log
+
+# Test artifacts
+test_output/
+test_output_agent/
+
+# Documentation and planning
+docs/
+findings.md
+progress.md
+task_plan.md
+
+# Data and models (mounted via volumes, not baked into image)
+data/
+models/
+raw/
+outputs/
+
+# Misc
+.DS_Store

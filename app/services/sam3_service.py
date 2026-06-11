@@ -24,21 +24,26 @@ class SAM3Service:
         if cls._instance is None:
             with cls._instance_lock:
                 if cls._instance is None:
-                    cls._instance = super().__new__(cls)
-                    cls._instance._initialized = False
+                    inst = super().__new__(cls)
+                    inst._init_lock = threading.Lock()
+                    inst._initialized = False
+                    cls._instance = inst
         return cls._instance
 
     def __init__(self):
-        if self._initialized:
+        if getattr(self, "_initialized", False):
             return
-        self._model = None
-        self._processor = None
-        self._device: Optional[str] = None
-        self._cache: OrderedDict[str, dict] = OrderedDict()
-        self._inference_lock: Optional[asyncio.Lock] = None
-        self._model_lock = threading.Lock()
-        self._cache_lock = threading.Lock()
-        self._initialized = True
+        with self._init_lock:
+            if getattr(self, "_initialized", False):
+                return
+            self._model = None
+            self._processor = None
+            self._device: Optional[str] = None
+            self._cache: OrderedDict[str, dict] = OrderedDict()
+            self._inference_lock: Optional[asyncio.Lock] = None
+            self._model_lock = threading.Lock()
+            self._cache_lock = threading.Lock()
+            self._initialized = True
 
     def _get_inference_lock(self) -> asyncio.Lock:
         """Lazy-init asyncio lock for Python 3.9 compatibility."""
@@ -209,9 +214,7 @@ class SAM3Service:
                 max_size = get_config().get_sam3_config().get("max_cache_size", 20)
                 max_size = max(1, int(max_size))
                 while len(self._cache) > max_size:
-                    oldest_id, _ = self._cache.popitem(last=False)
-                    # Re-insert the newest, evict oldest explicitly
-                    self._cache.move_to_end(embedding_id)
+                    oldest_id = next(iter(self._cache))
                     self._evict_cache_entry(oldest_id)
 
             # Encode image to base64

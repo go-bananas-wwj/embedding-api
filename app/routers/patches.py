@@ -1,5 +1,6 @@
 """Patch management router."""
 
+import asyncio
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Query
 from app.config import get_config
@@ -26,22 +27,9 @@ async def list_patches(
     except DataServiceError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
-    patch_details = []
-    for p in patches:
-        patch_id = p.get("patch_id", "")
-        patch_details.append(
-            PatchDetail(
-                patch_id=patch_id,
-                bounds_wgs84=p.get("bounds_wgs84", []),
-                bounds=p.get("bounds"),
-                crs=p.get("crs"),
-                sources=p.get("sources", {}),
-                time_range=p.get("time_range", []),
-                has_embedding=DataService.has_embedding(region_id, patch_id),
-                available_months=DataService.get_available_months(region_id, patch_id),
-                available_tasks=DataService.get_available_tasks(region_id, patch_id),
-            )
-        )
+    # Offload batch enrichment to thread pool to avoid blocking the event loop
+    enriched = await asyncio.to_thread(DataService.enrich_patches, region_id, patches)
+    patch_details = [PatchDetail(**p) for p in enriched]
 
     has_next = total > page * page_size
     return PaginatedPatchesResponse(
@@ -63,14 +51,8 @@ async def get_patch(region_id: str, patch_id: str):
     if not patch:
         raise HTTPException(status_code=404, detail=f"Patch '{patch_id}' not found")
 
-    return PatchDetail(
-        patch_id=patch_id,
-        bounds_wgs84=patch.get("bounds_wgs84", []),
-        bounds=patch.get("bounds"),
-        crs=patch.get("crs"),
-        sources=patch.get("sources", {}),
-        time_range=patch.get("time_range", []),
-        has_embedding=DataService.has_embedding(region_id, patch_id),
-        available_months=DataService.get_available_months(region_id, patch_id),
-        available_tasks=DataService.get_available_tasks(region_id, patch_id),
+    # Offload enrichment to thread pool
+    enriched = await asyncio.to_thread(
+        DataService.enrich_patches, region_id, [patch]
     )
+    return PatchDetail(**enriched[0])

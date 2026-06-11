@@ -1,5 +1,8 @@
 """Tile serving utilities."""
 
+import asyncio
+import os
+import stat
 from pathlib import Path
 from typing import Optional
 
@@ -25,6 +28,24 @@ class TileService:
         return version in ("v1", "v2")
 
     @staticmethod
+    def _is_symlink(path: Path) -> bool:
+        """Check if path or any parent is a symlink (no-follow)."""
+        try:
+            st = os.lstat(str(path))
+            if stat.S_ISLNK(st.st_mode):
+                return True
+        except (OSError, FileNotFoundError):
+            return True  # Treat inaccessible as unsafe
+        for parent in path.parents:
+            try:
+                st = os.lstat(str(parent))
+                if stat.S_ISLNK(st.st_mode):
+                    return True
+            except (OSError, FileNotFoundError):
+                return True
+        return False
+
+    @staticmethod
     def get_tile_path(
         region_id: str,
         task_type: str,
@@ -42,10 +63,10 @@ class TileService:
         return None
 
     @staticmethod
-    def list_available_tiles(
+    def _list_tiles_sync(
         region_id: str, task_type: str, version: str = "v1", period: Optional[str] = None
     ) -> list:
-        """List all available tile files for a task."""
+        """Synchronous implementation of tile listing."""
         from app.config import get_config
 
         if not TileService._validate_version(version):
@@ -73,7 +94,6 @@ class TileService:
             return []
 
         # Build list of tiles directories to scan
-        # v2: {base}/{period}/tiles/   v1: {base}/tiles/
         tiles_dirs = []
         if period:
             tiles_dirs.append(Path(base) / period / "tiles")
@@ -82,10 +102,15 @@ class TileService:
         result = []
         seen = set()
         for tiles_dir in tiles_dirs:
-            if not tiles_dir.exists():
+            if TileService._is_symlink(tiles_dir):
                 continue
-            tiles = sorted(tiles_dir.glob("*.png"))
+            try:
+                tiles = sorted(tiles_dir.glob("*.png"))
+            except OSError:
+                continue
             for t in tiles:
+                if TileService._is_symlink(t):
+                    continue
                 if t.name in seen:
                     continue
                 seen.add(t.name)
@@ -113,3 +138,12 @@ class TileService:
                         }
                     )
         return result
+
+    @staticmethod
+    async def list_available_tiles(
+        region_id: str, task_type: str, version: str = "v1", period: Optional[str] = None
+    ) -> list:
+        """List all available tile files for a task (async, non-blocking)."""
+        return await asyncio.to_thread(
+            TileService._list_tiles_sync, region_id, task_type, version, period
+        )
