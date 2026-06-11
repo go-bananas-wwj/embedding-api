@@ -115,7 +115,8 @@ class SAM3Service:
             self._ensure_model()
             image = self._load_s2_image(region_id, patch_id, month)
 
-            with torch.autocast(self._device, dtype=torch.bfloat16):
+            device = self._device or "cpu"
+            with torch.autocast(device, dtype=torch.bfloat16):
                 state = self._processor.set_image(image)
 
             embedding_id = f"{region_id}_{patch_id}_{month}"
@@ -166,7 +167,8 @@ class SAM3Service:
             coords = np.array(point_coords) * np.array([[img_w, img_h]])
             labels = np.array(point_labels)
 
-            with torch.autocast(self._device, dtype=torch.bfloat16):
+            device = self._device or "cpu"
+            with torch.autocast(device, dtype=torch.bfloat16):
                 masks, scores, _ = self._model.predict_inst(
                     state,
                     point_coords=coords,
