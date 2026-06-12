@@ -192,9 +192,10 @@ async def get_embedding(
             raise HTTPException(
                 status_code=404, detail="Embedding file no longer exists"
             )
-        except (OSError, ValueError, EOFError, DataServiceError) as e:
+        except (OSError, ValueError, EOFError, DataServiceError):
+            logger.exception("Failed to load embedding")
             raise HTTPException(
-                status_code=500, detail=f"Failed to load embedding: {e}"
+                status_code=500, detail="Failed to load embedding"
             )
         return EmbeddingStats(
             patch_id=patch_id,

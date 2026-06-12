@@ -244,7 +244,7 @@ async def list_tiles(
     if not config.region_exists(region_id):
         raise HTTPException(status_code=404, detail=f"Region '{region_id}' not found")
 
-    raw_tiles = TileService.list_available_tiles(region_id, task_type, version, period)
+    raw_tiles = await TileService.list_available_tiles(region_id, task_type, version, period)
     tiles = [
         TileInfo(
             patch_id=t.get("patch_id", ""),

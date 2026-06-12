@@ -621,6 +621,28 @@ class DataService:
         return sorted(months)
 
     @staticmethod
+    def enrich_patches(region_id: str, patches: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Batch-enrich patches with embedding/task metadata.
+
+        Prevents N+1 filesystem scans by resolving all metadata in one pass.
+        """
+        result = []
+        for p in patches:
+            patch_id = p.get("patch_id", "")
+            result.append({
+                "patch_id": patch_id,
+                "bounds_wgs84": p.get("bounds_wgs84", []),
+                "bounds": p.get("bounds"),
+                "crs": p.get("crs"),
+                "sources": p.get("sources", {}),
+                "time_range": p.get("time_range", []),
+                "has_embedding": DataService.has_embedding(region_id, patch_id),
+                "available_months": DataService.get_available_months(region_id, patch_id),
+                "available_tasks": DataService.get_available_tasks(region_id, patch_id),
+            })
+        return result
+
+    @staticmethod
     def list_task_versions(region_id: str, task_type: str) -> List[str]:
         """List available versions for a task."""
         config = get_config()
