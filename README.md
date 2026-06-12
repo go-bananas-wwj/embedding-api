@@ -8,18 +8,22 @@ Unified RESTful API for remote sensing embeddings and downstream task results fr
 - **Embedding queries**: PNG visualization, NPY arrays, JSON statistics
 - **Downstream tasks**: Construction, building change, farmland, land conversion, demolition monitoring
 - **Tile service**: Map tile serving for web GIS integration
+- **SAM3 interactive segmentation**: Point-based instance segmentation on Sentinel-2 imagery
 - **Hot-reload config**: Add new regions/tasks without restarting
 
 ## Requirements
 
 - Python >= 3.9
 - Key dependencies:
-  - FastAPI >= 0.100
-  - uvicorn >= 0.20
-  - numpy >= 1.20
-  - Pillow >= 9.0
+  - FastAPI >= 0.104
+  - uvicorn >= 0.24
+  - numpy == 1.26.4
+  - Pillow >= 11.0
   - PyYAML >= 6.0
   - watchdog >= 3.0
+  - torch == 2.5.1
+  - torchvision == 0.20.1
+  - rasterio >= 1.3.0
 
 ```bash
 pip install -r requirements.txt
@@ -37,6 +41,8 @@ pip install -r requirements.txt
 - ReDoc: http://60.31.21.42:22065/redoc
 - OpenAPI JSON: http://60.31.21.42:22065/openapi.json
 
+> **注意**：上述在线文档默认已关闭（`DOCS_URL=none`），如需在线调试需显式开启。
+
 ### Local Development
 
 ```bash
@@ -52,16 +58,16 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 9061
 docker-compose up -d
 ```
 
-Docker 内部使用 `config.docker.yaml`，数据路径映射到容器内的 `/data/`。
+Docker 内部监听 `8000`，`docker-compose.yml` 将宿主机 `8000` 映射到容器 `8000`。
 
 ### Environment Variables
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `CONFIG_PATH` | `./config.yaml` | 配置文件路径 |
-| `CORS_ORIGINS` | `*` | CORS 允许来源，生产环境建议设为具体域名 |
-| `DOCS_URL` | `/docs` | Swagger UI 路径，设为 `none` 禁用 |
-| `REDOC_URL` | `/redoc` | ReDoc 路径，设为 `none` 禁用 |
+| `CORS_ORIGINS` | *(空)* | CORS 允许来源，逗号分隔；默认拒绝跨域请求 |
+| `DOCS_URL` | `none` | Swagger UI 路径，设为 `/docs` 开启，默认关闭 |
+| `REDOC_URL` | `none` | ReDoc 路径，设为 `/redoc` 开启，默认关闭 |
 
 ## Frontend Quick Start
 
@@ -90,12 +96,15 @@ npx openapi-typescript http://60.31.21.42:22065/openapi.json -o api-types.ts
 
 ### CORS
 
-当前版本 CORS 已全局开放（`allow_origins=["*"]`），前端可直接跨域请求。
-生产环境建议通过 `CORS_ORIGINS` 环境变量限制来源。
+CORS 默认**不开放**（`allow_origins=[]`）。如需前端跨域访问，需通过 `CORS_ORIGINS` 环境变量显式设置允许的域名，例如：
+
+```bash
+CORS_ORIGINS="https://your-frontend.com,http://localhost:5173"
+```
 
 ### Authentication
 
-当前版本 **无认证机制**，API 完全开放。公网部署时建议通过 Nginx/反向代理添加 Basic Auth 或 API Key。
+当前版本 **无内置认证机制**。公网部署时建议通过 Nginx/反向代理添加 Basic Auth、API Key 或 OAuth2。
 
 ## API Endpoints
 
@@ -124,6 +133,13 @@ npx openapi-typescript http://60.31.21.42:22065/openapi.json -o api-types.ts
 - `GET /regions/{region_id}/tasks/{task_type}/tiles` - List tiles
 - `GET /regions/{region_id}/tasks/{task_type}/tiles/{z}/{x}/{y}.png` - Map tile
 
+### SAM3 Interactive Segmentation
+- `POST /regions/{region_id}/sam3/embed` - Preload S2 image and compute embedding
+- `POST /regions/{region_id}/sam3/segment` - Segment with point prompts
+- `GET /regions/{region_id}/sam3/status` - Model loading status and cache info
+
+See `docs/API.md` for detailed SAM3 usage.
+
 ## Configuration
 
 Edit `config.yaml` to add new regions or tasks. Changes are detected automatically without restart.
@@ -137,6 +153,8 @@ python service_watchdog.py
 # Stop watchdog
 python service_watchdog.py stop
 ```
+
+Watchdog 直接管理 `uvicorn` 子进程，支持 SIGTERM 优雅关闭和指数退避重试。
 
 ## Data Structure
 
