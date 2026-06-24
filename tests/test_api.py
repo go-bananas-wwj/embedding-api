@@ -180,7 +180,24 @@ class TestTasks:
         task_ids = [t["id"] for t in data["tasks"]]
         assert "construction" in task_ids
         assert "building_change" in task_ids
+        assert "farmland" in task_ids
+        assert "land_conversion" in task_ids
         assert "change_detection" in task_ids
+        assert "demolition" in task_ids
+
+    def test_patch_available_tasks_harbin(self):
+        """Verify v2 period-subdir tasks are surfaced in available_tasks."""
+        response = client.get("/regions/harbin/patches/patch_000010")
+        assert response.status_code == 200
+        data = response.json()
+        available = data["available_tasks"]
+        assert "construction" in available
+
+        response = client.get("/regions/harbin/patches/patch_000040")
+        assert response.status_code == 200
+        data = response.json()
+        available = data["available_tasks"]
+        assert "land_conversion" in available
 
     def test_list_tasks_haidian(self):
         response = client.get("/regions/haidian/tasks")
