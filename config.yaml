@@ -127,6 +127,14 @@ regions:
             results: "data/harbin/tasks/land_conversion/v2/results"
             predictions: "data/harbin/tasks/land_conversion/v2/predictions"
             labels: "data/harbin/tasks/land_conversion/v2/labels"
+      demolition:
+        name: "拆迁监测"
+        description: "监测建筑物拆除情况"
+        versions:
+          v2:
+            results: "data/harbin/tasks/demolition/v2/results"
+            predictions: "data/harbin/tasks/demolition/v2/predictions"
+            labels: "data/harbin/tasks/demolition/v2/labels"
       change_detection:
         name: "变化检测"
         description: "系统级两期 embedding 差分变化检测"

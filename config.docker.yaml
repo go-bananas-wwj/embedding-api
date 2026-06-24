@@ -46,6 +46,7 @@ regions:
         versions:
           v2:
             results: "/data/harbin/results_v2/demolition"
+            predictions: "/data/harbin/predictions_v2/demolition"
             labels: "/data/harbin/labels_v2/demolition"
 
   haidian:
