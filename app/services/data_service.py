@@ -518,6 +518,56 @@ class DataService:
         return None
 
     @staticmethod
+    def _find_patch_prediction(base_dir: str, patch_id: str) -> Optional[str]:
+        """Find a prediction file for a patch.
+
+        Supports both flat layout (``patch_000000_2025-10.npy``) and
+        period-subdir layout (``{period}/patch_000000.npy`` used by v2 tasks).
+        """
+        # Flat layout: predictions are stored directly in the base directory.
+        path = DataService._find_first_file(base_dir, f"{patch_id}_*.npy")
+        if path:
+            return path
+
+        # Period-subdir layout: predictions are grouped by comparison period.
+        base_path = Path(base_dir)
+        try:
+            for subdir in sorted(base_path.iterdir()):
+                if not subdir.is_dir():
+                    continue
+                path = _resolve_path(str(subdir), f"{patch_id}.npy")
+                if path:
+                    return path
+        except OSError:
+            pass
+        return None
+
+    @staticmethod
+    def _find_patch_label(base_dir: str, patch_id: str) -> Optional[str]:
+        """Find a label file for a patch.
+
+        Supports both flat layout (``patch_000000.npy``) and period-subdir
+        layout (``{period}/patch_000000.npy`` used by v2 tasks).
+        """
+        # Flat layout.
+        path = _resolve_path(base_dir, f"{patch_id}.npy")
+        if path:
+            return path
+
+        # Period-subdir layout.
+        base_path = Path(base_dir)
+        try:
+            for subdir in sorted(base_path.iterdir()):
+                if not subdir.is_dir():
+                    continue
+                path = _resolve_path(str(subdir), f"{patch_id}.npy")
+                if path:
+                    return path
+        except OSError:
+            pass
+        return None
+
+    @staticmethod
     def get_available_tasks(region_id: str, patch_id: str) -> List[str]:
         """Get list of tasks that have data for this patch."""
         if not _validate_patch_id(patch_id):
@@ -540,14 +590,13 @@ class DataService:
             for ver_name, ver_info in versions.items():
                 predictions = ver_info.get("predictions")
                 if predictions:
-                    # Dynamic discovery instead of hardcoded period
-                    path = DataService._find_first_file(predictions, f"{patch_id}_*.npy")
+                    path = DataService._find_patch_prediction(predictions, patch_id)
                     if path:
                         available.append(task_name)
                         break
                 labels = ver_info.get("labels")
                 if labels:
-                    path = _resolve_path(labels, f"{patch_id}.npy")
+                    path = DataService._find_patch_label(labels, patch_id)
                     if path:
                         available.append(task_name)
                         break
