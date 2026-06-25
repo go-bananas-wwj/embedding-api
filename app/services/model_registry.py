@@ -35,10 +35,15 @@ class ModelRegistry:
 
     def _save(self) -> None:
         self._models_dir.mkdir(parents=True, exist_ok=True)
-        tmp = self._path.with_suffix(".tmp")
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(self._data, f, ensure_ascii=False, indent=2)
-        tmp.replace(self._path)
+        tmp = self._path.with_suffix(f".tmp.{uuid.uuid4().hex}")
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(self._data, f, ensure_ascii=False, indent=2)
+            tmp.replace(self._path)
+        finally:
+            # Clean up the unique temp file if replace() did not move it.
+            if tmp.exists():
+                tmp.unlink()
 
     def list_models(self) -> List[Dict[str, Any]]:
         return sorted(

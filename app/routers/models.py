@@ -20,6 +20,7 @@ from app.schemas.models import (
 )
 from app.services.annotation_service import get_class_manager
 from app.services.auth_service import get_current_user
+from app.services.data_service import DataValidationError
 from app.services.inference_engine import InferenceEngine
 from app.services.model_registry import get_model_registry
 from app.services.training_engine import (
@@ -80,7 +81,9 @@ async def create_model(
         model_type=req.model_type,
         embedding_version=req.embedding_version,
     )
-    return registry.get_model(model_id)
+    model = registry.get_model(model_id)
+    model["job_id"] = job_id
+    return model
 
 
 @router.get("/{model_id}", response_model=ModelOut)
@@ -135,6 +138,8 @@ async def infer(
         result_path = engine.infer(
             model_id, req.region_id, req.patch_id, req.month
         )
+    except DataValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:

@@ -183,9 +183,6 @@ class ModelCreate(BaseModel):
     task_type: str
     region_id: str
     embedding_version: str = "v2"
-    task_type: str
-    region_id: str
-    embedding_version: str = "v2"
 
 
 class ModelOut(BaseModel):
@@ -203,6 +200,7 @@ class ModelOut(BaseModel):
     n_samples: Optional[int] = None
     model_path: Optional[str] = None
     message: Optional[str] = None
+    job_id: Optional[str] = None
 
 
 class ModelRenameRequest(BaseModel):

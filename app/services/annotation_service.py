@@ -76,9 +76,13 @@ class ClassManager:
         return json.loads(self.path.read_text(encoding="utf-8"))
 
     def _save(self, data: List[Dict[str, Any]]) -> None:
-        tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-        tmp.replace(self.path)
+        tmp = self.path.with_suffix(f".tmp.{uuid.uuid4().hex}")
+        try:
+            tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            tmp.replace(self.path)
+        finally:
+            if tmp.exists():
+                tmp.unlink()
 
     def list_classes(self) -> List[Dict[str, Any]]:
         return self._load()
@@ -129,9 +133,13 @@ class AnnotationStore:
         return json.loads(self.index_path.read_text(encoding="utf-8"))
 
     def _save(self, data: List[Dict[str, Any]]) -> None:
-        tmp = self.index_path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-        tmp.replace(self.index_path)
+        tmp = self.index_path.with_suffix(f".tmp.{uuid.uuid4().hex}")
+        try:
+            tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            tmp.replace(self.index_path)
+        finally:
+            if tmp.exists():
+                tmp.unlink()
 
     def list_annotations(
         self,
@@ -205,10 +213,17 @@ class AnnotationStore:
 
     def delete_annotation(self, ann_id: str) -> bool:
         data = self._load()
-        data = [a for a in data if a.get("id") != ann_id]
-        self._save(data)
-        mask_path = self.masks_dir / f"{ann_id}.npz"
-        if mask_path.exists():
+        filtered = [a for a in data if a.get("id") != ann_id]
+        if len(filtered) == len(data):
+            return False
+        self._save(filtered)
+        mask_path = (self.masks_dir / f"{ann_id}.npz").resolve()
+        masks_dir_resolved = self.masks_dir.resolve()
+        try:
+            mask_path.relative_to(masks_dir_resolved)
+        except ValueError:
+            return True
+        if mask_path.exists() and mask_path.is_file():
             mask_path.unlink()
         return True
 

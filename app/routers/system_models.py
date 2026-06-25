@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse
 
 from app.schemas.models import ErrorResponse
 from app.services.auth_service import get_current_user
+from app.services.data_service import DataValidationError
 from app.services.system_model_service import (
     get_system_model_classes,
     infer_system_model,
@@ -57,6 +58,8 @@ async def infer(
         )
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except DataValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
