@@ -388,23 +388,17 @@ class DataService:
             base = ver.get("results")
             if base:
                 if period:
-                    # v2 structure: {base}/{period}/{period}.png
-                    path = _resolve_path(base, f"{period}/{period}.png")
+                    # Per-patch v2 structure: {base}/{period}/{patch_id}.png
+                    path = _resolve_path(base, f"{period}/{patch_id}.png")
                     if path:
                         return path
-                    # v1 structure: {base}/{period}.png
-                    path = _resolve_path(base, f"{period}.png")
+                    # Per-patch v1 structure: {base}/{patch_id}_{period}.png
+                    path = _resolve_path(base, f"{patch_id}_{period}.png")
                     if path:
                         return path
-                # Dynamic discovery: find first PNG instead of hardcoded names
-                path = DataService._find_first_file(base, "*.png")
-                if path:
-                    return path
-                # Fallback to common names
-                for fname in ["result.png"]:
-                    path = _resolve_path(base, fname)
-                    if path:
-                        return path
+                # No period-wide mosaic fallback; result must be patch-specific.
+                # Client should use /summary or a dedicated /mosaic endpoint for
+                # region-wide overview images.
         elif format_type == "npy":
             base = ver.get("predictions") or ver.get("results")
             if base:
@@ -417,15 +411,14 @@ class DataService:
                     path = _resolve_path(base, f"{patch_id}_{period}.npy")
                     if path:
                         return path
-                # Dynamic discovery
+                # Dynamic discovery of per-patch prediction files
                 path = DataService._find_first_file(base, f"{patch_id}_*.npy")
                 if path:
                     return path
-                # Fallback
-                for fname in [f"{patch_id}.npy", "result.npy"]:
-                    path = _resolve_path(base, fname)
-                    if path:
-                        return path
+                # Per-patch fallback only; no whole-region result.npy fallback
+                path = _resolve_path(base, f"{patch_id}.npy")
+                if path:
+                    return path
         elif format_type == "label":
             base = ver.get("labels")
             if base:
