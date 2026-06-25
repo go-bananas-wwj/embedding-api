@@ -119,6 +119,10 @@ class ClassRenameRequest(BaseModel):
     name: str
 
 
+class StatusOut(BaseModel):
+    status: str
+
+
 class GeometryMask(BaseModel):
     type: str
     mask_b64: str

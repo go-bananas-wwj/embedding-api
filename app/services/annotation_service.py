@@ -102,6 +102,8 @@ class ClassManager:
 
     def delete_class(self, class_id: str) -> bool:
         classes = self._load()
+        if not any(c.get("id") == class_id for c in classes):
+            return False
         classes = [c for c in classes if c.get("id") != class_id]
         self._save(classes)
         return True
@@ -172,14 +174,20 @@ class AnnotationStore:
         mask_path = self.masks_dir / f"{ann_id}.npz"
 
         geom_type = geometry.get("type", "mask")
-        if geom_type == "mask":
-            mask = _base64_to_mask(geometry["mask_b64"])
-        elif geom_type == "polygon":
-            mask = self._rasterize_polygon(geometry["points"])
-        elif geom_type == "polyline":
-            mask = self._rasterize_polyline(geometry["points"])
-        else:
-            raise ValueError(f"Unknown geometry type: {geom_type}")
+        try:
+            if geom_type == "mask":
+                mask = _base64_to_mask(geometry["mask_b64"])
+            elif geom_type == "polygon":
+                mask = self._rasterize_polygon(geometry["points"])
+            elif geom_type == "polyline":
+                mask = self._rasterize_polyline(geometry["points"])
+            else:
+                raise ValueError(f"Unknown geometry type: {geom_type}")
+        except (KeyError, ValueError) as exc:
+            raise ValueError(f"Invalid geometry: {exc}") from exc
+        except Exception as exc:
+            # PIL/binascii errors for malformed base64 or image data.
+            raise ValueError(f"Invalid geometry: {exc}") from exc
 
         np.savez_compressed(mask_path, mask=mask)
 

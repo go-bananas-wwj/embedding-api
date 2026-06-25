@@ -15,6 +15,7 @@ from app.schemas.models import (
     ClassOut,
     ClassRenameRequest,
     ErrorResponse,
+    StatusOut,
 )
 from app.services.annotation_service import (
     get_annotation_store,
@@ -40,7 +41,7 @@ async def create_class(req: ClassCreate, user: dict = Depends(get_current_user))
     return get_class_manager(user["user_id"]).create_class(req.name, req.color)
 
 
-@router.patch("/classes/{class_id}")
+@router.patch("/classes/{class_id}", response_model=StatusOut)
 async def rename_class(
     class_id: str, req: ClassRenameRequest, user: dict = Depends(get_current_user)
 ) -> dict:
@@ -50,11 +51,16 @@ async def rename_class(
     return {"status": "ok"}
 
 
-@router.delete("/classes/{class_id}")
+@router.delete("/classes/{class_id}", response_model=StatusOut)
 async def delete_class(class_id: str, user: dict = Depends(get_current_user)) -> dict:
     """Delete a class and cascade-delete its annotations."""
     mgr = get_class_manager(user["user_id"])
     store = get_annotation_store(user["user_id"])
+
+    # Validate existence before cascading; class may belong to another user.
+    if mgr.get_class(class_id) is None:
+        raise HTTPException(status_code=404, detail="Class not found")
+
     for ann in store.list_annotations():
         if ann.get("class_id") == class_id:
             store.delete_annotation(ann["id"])
@@ -91,17 +97,20 @@ async def create_annotation(
         )
 
     store = get_annotation_store(user["user_id"])
-    return store.create_annotation(
-        region_id=req.region_id,
-        patch_id=req.patch_id,
-        month=req.month,
-        class_id=req.class_id,
-        geometry=req.geometry,
-        task_type=req.task_type,
-        score=req.score,
-        before_month=req.before_month,
-        after_month=req.after_month,
-    )
+    try:
+        return store.create_annotation(
+            region_id=req.region_id,
+            patch_id=req.patch_id,
+            month=req.month,
+            class_id=req.class_id,
+            geometry=req.geometry,
+            task_type=req.task_type,
+            score=req.score,
+            before_month=req.before_month,
+            after_month=req.after_month,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.get("/{ann_id}", response_model=AnnotationOut)

@@ -65,7 +65,7 @@ async def get_task_summary(
         )
 
     return TaskSummary(
-        task=summary.get("task", task_type),
+        task=task_type,
         name=task.get("name", task_type),
         version=version,
         period=summary.get("period") or period,

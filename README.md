@@ -6,7 +6,7 @@ Unified RESTful API for remote sensing embeddings and downstream task results fr
 
 - **Multi-region support**: Harbin (哈尔滨新区) & Haidian (海淀区)
 - **Embedding queries**: PNG visualization, NPY arrays, JSON statistics
-- **Downstream tasks**: Construction, building change, farmland, land conversion, demolition monitoring
+- **Downstream tasks**: 5 unified thematic tasks (change detection, building extraction, land use classification, land cover classification, water extraction)
 - **Tile service**: Map tile serving for web GIS integration
 - **SAM3 interactive segmentation**: Point-based instance segmentation on Sentinel-2 imagery
 - **Hot-reload config**: Add new regions/tasks without restarting
@@ -45,18 +45,19 @@ pip install -r requirements.txt
 
 ### 哈尔滨新区任务说明
 
-哈尔滨新区（`harbin`）当前提供以下下游监测任务：
+哈尔滨新区（`harbin`）当前提供以下统一后的下游监测任务：
 
 | 任务 ID | 名称 | 版本 | 说明 |
 |---------|------|------|------|
-| `construction` | 建筑工地监测 | v1, v2 | v2 按对比期分子目录存储 |
-| `building_change` | 建筑变化监测 | v1 | 平铺存储 |
-| `farmland` | 耕地非农非粮监测 | v1 | 平铺存储 |
-| `land_conversion` | 土地转换监测 | v2 | 按对比期分子目录存储 |
-| `demolition` | 拆迁监测 | v2 | 新增任务，按对比期分子目录存储 |
 | `change_detection` | 变化检测 | v1 | 系统级两期 embedding 差分，按 period 子目录存 summary |
+| `building_extraction` | 建筑物提取 | v1, v2 | v1 平铺；v2 按对比期分子目录 |
+| `land_use_classification` | 土地利用分类 | v1, v2 | v1 平铺；v2 按对比期分子目录 |
+| `land_cover_classification` | 土地覆盖分类 | - | 已配置，待补充数据 |
+| `water_extraction` | 水体提取 | - | 已配置，待补充数据 |
 
-`GET /regions/{region_id}/patches/{patch_id}` 返回的 `available_tasks` 字段只会列出对该 patch **有实际数据** 的任务。`demolition` 和 `change_detection` 目前仅有配置/汇总数据，因此不会出现在 per-patch 的 `available_tasks` 中。
+`GET /regions/{region_id}/patches/{patch_id}` 返回的 `available_tasks` 字段只会列出对该 patch **有实际数据** 的任务。`land_cover_classification` 和 `water_extraction` 目前仅有配置/汇总数据，因此不会出现在 per-patch 的 `available_tasks` 中。
+
+> 旧任务 ID（`construction`、`building_change`、`farmland`、`land_conversion`、`demolition`）已不再暴露给前端，原有数据目录通过 `config.yaml` 中的别名映射到新的统一任务 ID。
 
 ### Local Development
 
@@ -181,8 +182,11 @@ auth:
 ### Annotations
 - `GET /annotations/classes` - List classes
 - `POST /annotations/classes` - Create class
+- `PATCH /annotations/classes/{class_id}` - Rename class
+- `DELETE /annotations/classes/{class_id}` - Delete class (cascades to annotations)
 - `GET /annotations` - List annotations
 - `POST /annotations` - Create annotation
+- `GET /annotations/{ann_id}` - Get annotation
 - `DELETE /annotations/{ann_id}` - Delete annotation
 
 ### Custom Models
@@ -216,15 +220,15 @@ Edit `config.yaml` to add new regions or tasks. Changes are detected automatical
 
 ### 哈尔滨任务目录结构
 
-不同任务版本采用两种目录布局：
+不同任务版本采用两种目录布局，统一任务 ID 通过 `config.yaml` 中的 `versions` 映射到实际目录：
 
-**v1 平铺布局**：
+**v1 平铺布局**（如 `building_extraction` v1）：
 ```text
 data/harbin/tasks/{task}/v1/predictions/patch_000000_2025-10.npy
 data/harbin/tasks/{task}/v1/labels/patch_000000.npy
 ```
 
-**v2 对比期子目录布局**（`construction`、`land_conversion`、`demolition`）：
+**v2 对比期子目录布局**（如 `building_extraction`、`land_use_classification` v2）：
 ```text
 data/harbin/tasks/{task}/v2/predictions/2025-08_vs_2025-09/patch_000000.npy
 data/harbin/tasks/{task}/v2/labels/2025-08_vs_2025-09/patch_000000.npy
@@ -232,13 +236,9 @@ data/harbin/tasks/{task}/v2/labels/2025-08_vs_2025-09/patch_000000.npy
 
 `app/services/data_service.py` 已支持自动识别这两种布局，`available_tasks` 会正确返回 v2 子目录中的任务数据。
 
-### 新增 demolition 任务
+### 旧任务数据映射
 
-`demolition`（拆迁监测）任务在 `config.docker.yaml` 中已存在，但默认 `config.yaml` 中缺失。现已在 `config.yaml` 中补齐，对应目录为：
-```text
-data/harbin/tasks/demolition/v2/{results,predictions,labels}/
-```
-部署时需将真实 demolition 数据放到上述目录，任务才会在 per-patch 的 `available_tasks` 中可见。
+原任务数据目录（`construction`、`building_change`、`farmland`、`land_conversion`、`demolition`）仍保留在磁盘上，`config.yaml` 通过版本别名将其映射到新的统一任务 ID，无需移动或重命名现有数据。
 
 ## Service Watchdog
 
