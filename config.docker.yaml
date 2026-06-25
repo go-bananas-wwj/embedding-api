@@ -5,9 +5,17 @@ regions:
     embeddings:
       v2: "/data/harbin/embeddings/v2"
     tasks:
-      construction:
-        name: "建筑工地监测"
-        description: "监测建筑工地变化情况"
+      change_detection:
+        name: "变化检测"
+        description: "基于两期 embedding 差分的变化检测"
+        embedding_version: "v2"
+        versions:
+          v1:
+            results: "/data/harbin/results/change_detection"
+            labels: "/data/harbin/labels/change_detection"
+      building_extraction:
+        name: "建筑物提取"
+        description: "建筑物提取与建筑工地监测"
         versions:
           v1:
             results: "/data/harbin/results/construction"
@@ -17,37 +25,26 @@ regions:
             results: "/data/harbin/results_v2/construction"
             predictions: "/data/harbin/predictions/construction"
             labels: "/data/harbin/labels_v2/construction"
-      building_change:
-        name: "建筑变化监测"
-        description: "监测建筑物变化情况"
-        versions:
-          v1:
-            results: "/data/harbin/results/building_change"
-            predictions: "/data/harbin/predictions/building_change"
-            labels: "/data/harbin/labels/building_change"
-      farmland:
-        name: "耕地非农非粮监测"
-        description: "监测耕地被非法占用情况"
+      land_use_classification:
+        name: "土地利用分类"
+        description: "土地利用分类与转换监测"
         versions:
           v1:
             results: "/data/harbin/results/farmland"
             predictions: "/data/harbin/predictions/farmland"
             labels: "/data/harbin/labels/farmland"
-      land_conversion:
-        name: "土地转换监测"
-        description: "监测土地用途转换情况"
-        versions:
           v2:
             results: "/data/harbin/results_v2/land_conversion"
+            predictions: "/data/harbin/predictions_v2/land_conversion"
             labels: "/data/harbin/labels_v2/land_conversion"
-      demolition:
-        name: "拆迁监测"
-        description: "监测建筑物拆除情况"
-        versions:
-          v2:
-            results: "/data/harbin/results_v2/demolition"
-            predictions: "/data/harbin/predictions_v2/demolition"
-            labels: "/data/harbin/labels_v2/demolition"
+      land_cover_classification:
+        name: "土地覆盖分类"
+        description: "土地覆盖分类（基于预训练 Linear Probe，结果需实时推理）"
+        versions: {}
+      water_extraction:
+        name: "水体提取"
+        description: "水体提取（基于预训练 Linear Probe，结果需实时推理）"
+        versions: {}
 
   haidian:
     name: "海淀区"
@@ -56,4 +53,24 @@ regions:
       aef: "/data/haidian/aef_embeddings/haidian_2025_patches"
       cache: "/data/embeddings_cache/olmoearth"
       viz: "/data/haidian/viz_multi_source"
-    tasks: {}
+    tasks:
+      change_detection:
+        name: "变化检测"
+        description: "基于两期 embedding 差分的变化检测"
+        versions: {}
+      building_extraction:
+        name: "建筑物提取"
+        description: "建筑物提取"
+        versions: {}
+      land_use_classification:
+        name: "土地利用分类"
+        description: "土地利用分类"
+        versions: {}
+      land_cover_classification:
+        name: "土地覆盖分类"
+        description: "土地覆盖分类"
+        versions: {}
+      water_extraction:
+        name: "水体提取"
+        description: "水体提取"
+        versions: {}

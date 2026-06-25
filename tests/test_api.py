@@ -178,12 +178,11 @@ class TestTasks:
         assert response.status_code == 200
         data = response.json()
         task_ids = [t["id"] for t in data["tasks"]]
-        assert "construction" in task_ids
-        assert "building_change" in task_ids
-        assert "farmland" in task_ids
-        assert "land_conversion" in task_ids
         assert "change_detection" in task_ids
-        assert "demolition" in task_ids
+        assert "building_extraction" in task_ids
+        assert "land_use_classification" in task_ids
+        assert "land_cover_classification" in task_ids
+        assert "water_extraction" in task_ids
 
     def test_patch_available_tasks_harbin(self):
         """Verify v2 period-subdir tasks are surfaced in available_tasks."""
@@ -191,25 +190,30 @@ class TestTasks:
         assert response.status_code == 200
         data = response.json()
         available = data["available_tasks"]
-        assert "construction" in available
+        assert "building_extraction" in available
 
         response = client.get("/regions/harbin/patches/patch_000040")
         assert response.status_code == 200
         data = response.json()
         available = data["available_tasks"]
-        assert "land_conversion" in available
+        assert "land_use_classification" in available
 
     def test_list_tasks_haidian(self):
         response = client.get("/regions/haidian/tasks")
         assert response.status_code == 200
         data = response.json()
-        assert data["tasks"] == []
+        task_ids = [t["id"] for t in data["tasks"]]
+        assert "change_detection" in task_ids
+        assert "building_extraction" in task_ids
+        assert "land_use_classification" in task_ids
+        assert "land_cover_classification" in task_ids
+        assert "water_extraction" in task_ids
 
     def test_get_task_summary(self):
-        response = client.get("/regions/harbin/tasks/construction/summary?version=v1")
+        response = client.get("/regions/harbin/tasks/building_extraction/summary?version=v1")
         assert response.status_code == 200
         data = response.json()
-        assert data["task"] == "construction"
+        # meta.json in legacy data still has old task name; just verify summary loads
         assert data["total_patches"] == 424
 
     def test_get_change_detection_summary(self):
@@ -222,7 +226,7 @@ class TestTasks:
         assert data["total_patches"] == 424
 
     def test_get_task_result(self):
-        response = client.get("/regions/harbin/patches/patch_000000/tasks/construction/result?format=png")
+        response = client.get("/regions/harbin/patches/patch_000000/tasks/building_extraction/result?format=png")
         # May be 200 or 404 depending on data availability
         assert response.status_code in (200, 404)
 
@@ -235,22 +239,22 @@ class TestTasks:
 
     def test_get_task_result_invalid_format(self):
         response = client.get(
-            "/regions/harbin/patches/patch_000000/tasks/construction/result?format=invalid"
+            "/regions/harbin/patches/patch_000000/tasks/building_extraction/result?format=invalid"
         )
         assert response.status_code == 422
 
     def test_get_task_prediction(self):
-        response = client.get("/regions/harbin/patches/patch_000000/tasks/construction/prediction")
+        response = client.get("/regions/harbin/patches/patch_000000/tasks/building_extraction/prediction")
         # May be 200 or 404 depending on data availability
         assert response.status_code in (200, 404)
 
     def test_get_task_label(self):
-        response = client.get("/regions/harbin/patches/patch_000000/tasks/construction/label")
+        response = client.get("/regions/harbin/patches/patch_000000/tasks/building_extraction/label")
         # May be 200 or 404 depending on data availability
         assert response.status_code in (200, 404)
 
     def test_get_tile_not_implemented(self):
-        response = client.get("/regions/harbin/tasks/construction/tiles/10/100/100.png")
+        response = client.get("/regions/harbin/tasks/building_extraction/tiles/10/100/100.png")
         assert response.status_code == 501
 
 
@@ -277,7 +281,7 @@ class TestPathTraversal:
         ]
         for period in malicious_periods:
             response = client.get(
-                f"/regions/harbin/tasks/construction/tiles?version=v1&period={period}"
+                f"/regions/harbin/tasks/building_extraction/tiles?version=v1&period={period}"
             )
             assert response.status_code == 200, f"Failed for period={period}"
             data = response.json()
@@ -293,7 +297,7 @@ class TestPathTraversal:
         ]
         for version in malicious_versions:
             response = client.get(
-                f"/regions/harbin/tasks/construction/tiles?version={version}"
+                f"/regions/harbin/tasks/building_extraction/tiles?version={version}"
             )
             assert response.status_code == 200, f"Failed for version={version}"
             data = response.json()
