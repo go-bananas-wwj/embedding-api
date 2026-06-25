@@ -160,5 +160,89 @@ class AnnotationOut(BaseModel):
     created_at: str
 
 
+class ModelCreate(BaseModel):
+    """Request body for creating a custom model.
+
+    Example:
+    ```bash
+    curl -X POST http://localhost:9061/models \
+      -H 'Content-Type: application/json' \
+      -d '{
+        "name": "my-building-head",
+        "model_type": "classification",
+        "task_type": "building_extraction",
+        "region_id": "harbin",
+        "embedding_version": "v2"
+      }'
+    ```
+    """
+    model_config = {"protected_namespaces": ()}
+
+    name: str
+    model_type: str
+    task_type: str
+    region_id: str
+    embedding_version: str = "v2"
+    task_type: str
+    region_id: str
+    embedding_version: str = "v2"
+
+
+class ModelOut(BaseModel):
+    model_config = {"protected_namespaces": ()}
+
+    id: str
+    name: str
+    type: str
+    task_type: Optional[str] = None
+    status: str
+    created_at: str
+    completed_at: Optional[str] = None
+    classes: List[Dict[str, Any]]
+    accuracy: Optional[float] = None
+    n_samples: Optional[int] = None
+    model_path: Optional[str] = None
+    message: Optional[str] = None
+
+
+class ModelRenameRequest(BaseModel):
+    name: str
+
+
+class InferRequest(BaseModel):
+    model_config = {"protected_namespaces": ()}
+
+    region_id: str
+    patch_id: str
+    month: str
+
+
+class BatchInferRequest(BaseModel):
+    model_config = {"protected_namespaces": ()}
+
+    region_id: str
+    patch_ids: List[str]
+    month: str
+
+
+class BatchInferResult(BaseModel):
+    patch_id: str
+    status: str
+    result_url: Optional[str] = None
+    error: Optional[str] = None
+
+
+class JobStatusOut(BaseModel):
+    model_config = {"protected_namespaces": ()}
+
+    job_id: str
+    status: str
+    model_id: str
+    accuracy: Optional[float] = None
+    n_samples: Optional[int] = None
+    model_path: Optional[str] = None
+    message: Optional[str] = None
+
+
 class ErrorResponse(BaseModel):
     detail: str
