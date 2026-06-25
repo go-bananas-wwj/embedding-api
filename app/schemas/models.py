@@ -101,5 +101,64 @@ class TilesResponse(BaseModel):
     total: int
 
 
+
+# Annotation / Custom Training schemas
+
+class ClassCreate(BaseModel):
+    name: str
+    color: str
+
+
+class ClassOut(BaseModel):
+    id: str
+    name: str
+    color: str
+
+
+class ClassRenameRequest(BaseModel):
+    name: str
+
+
+class GeometryMask(BaseModel):
+    type: str
+    mask_b64: str
+
+
+class GeometryPolygon(BaseModel):
+    type: str
+    points: List[List[float]]
+
+
+class GeometryPolyline(BaseModel):
+    type: str
+    points: List[List[float]]
+
+
+class AnnotationCreate(BaseModel):
+    region_id: str
+    patch_id: str
+    month: str
+    class_id: str
+    geometry: Dict[str, Any]
+    task_type: Optional[str] = None
+    score: float = 1.0
+    before_month: Optional[str] = None
+    after_month: Optional[str] = None
+
+
+class AnnotationOut(BaseModel):
+    id: str
+    region_id: str
+    patch_id: str
+    month: str
+    class_id: str
+    task_type: Optional[str] = None
+    score: float
+    geometry: Dict[str, Any]
+    before_month: Optional[str] = None
+    after_month: Optional[str] = None
+    created_at: str
+
+
 class ErrorResponse(BaseModel):
     detail: str

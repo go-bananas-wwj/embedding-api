@@ -42,6 +42,9 @@ watchdog.pid
 data/
 models/
 
+# User-generated annotations and trained models
+users/
+
 # Test outputs
 test_output/
 test_output_agent/
