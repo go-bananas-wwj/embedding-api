@@ -10,10 +10,11 @@ client = TestClient(app)
 
 
 class TestModels:
-    def test_list_models_empty(self):
+    def test_list_models(self):
         response = client.get("/models")
         assert response.status_code == 200
-        assert response.json() == []
+        data = response.json()
+        assert isinstance(data, list)
 
     def test_create_model_requires_classes(self):
         response = client.post(

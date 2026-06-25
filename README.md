@@ -117,9 +117,41 @@ CORS 默认**不开放**（`allow_origins=[]`）。如需前端跨域访问，�
 CORS_ORIGINS="https://your-frontend.com,http://localhost:5173"
 ```
 
+### Custom Models
+
+```bash
+curl -X POST -H 'Content-Type: application/json' \
+  -d '{"name": "my-building-head", "model_type": "classification", "task_type": "building_extraction", "region_id": "harbin"}' \
+  -H 'X-API-Key: your-api-key' \
+  http://60.31.21.42:22065/models
+```
+
 ### Authentication
 
-当前版本 **无内置认证机制**。公网部署时建议通过 Nginx/反向代理添加 Basic Auth、API Key 或 OAuth2。
+当前版本支持 **API-Key 用户隔离**。如果 `config.yaml` 中配置了 `auth.users`，请求需携带有效 key；未配置时默认使用 `default` 用户。
+
+支持两种传 key 方式：
+
+```bash
+# 方式一：header
+curl -H 'X-API-Key: your-api-key' http://60.31.21.42:22065/models
+
+# 方式二：Bearer token
+curl -H 'Authorization: Bearer your-api-key' http://60.31.21.42:22065/models
+```
+
+`config.yaml` 示例：
+
+```yaml
+auth:
+  type: "api_key"
+  users:
+    key_alice_xxx:
+      user_id: "alice"
+      name: "Alice"
+```
+
+> 当前实现为可插拔依赖 `get_current_user`，后续可替换为 JWT/OAuth2 而不影响路由代码。
 
 ## API Endpoints
 
@@ -138,11 +170,34 @@ CORS_ORIGINS="https://your-frontend.com,http://localhost:5173"
 - `GET /regions/{region_id}/patches/{patch_id}/embedding?format=png|npy|json|cache`
 
 ### Downstream Tasks
-- `GET /regions/{region_id}/tasks` - List tasks
+- `GET /regions/{region_id}/tasks` - List 5 unified thematic tasks
 - `GET /regions/{region_id}/tasks/{task_type}/summary` - Task summary
-- `GET /regions/{region_id}/patches/{patch_id}/tasks/{task_type}/result` - Result image
-- `GET /regions/{region_id}/patches/{patch_id}/tasks/{task_type}/prediction` - Raw prediction
-- `GET /regions/{region_id}/patches/{patch_id}/tasks/{task_type}/label` - Label data
+- `GET /regions/{region_id}/patches/{patch_id}/tasks/{task_type}/result` - Per-patch result image
+- `GET /regions/{region_id}/patches/{patch_id}/tasks/{task_type}/prediction` - Per-patch raw prediction
+- `GET /regions/{region_id}/patches/{patch_id}/tasks/{task_type}/label` - Per-patch label data
+
+> `result` 端点严格返回 patch 级别结果，不再回退到整幅 mosaic/summary。
+
+### Annotations
+- `GET /annotations/classes` - List classes
+- `POST /annotations/classes` - Create class
+- `GET /annotations` - List annotations
+- `POST /annotations` - Create annotation
+- `DELETE /annotations/{ann_id}` - Delete annotation
+
+### Custom Models
+- `GET /models` - List trained models
+- `POST /models` - Create and train a model (async)
+- `GET /models/{model_id}` - Get model status
+- `POST /models/{model_id}/infer` - Single-patch inference
+- `POST /models/{model_id}/infer_batch` - Batch inference (max 100)
+- `GET /models/jobs/{job_id}` - Training job status
+- `GET /models/results/{filename}` - Get inference result image
+
+### System Models
+- `GET /system-models?region_id={region_id}` - List system pre-trained heads
+- `GET /system-models/{task_id}/classes?region_id={region_id}` - Get model classes
+- `POST /system-models/{task_id}/infer?region_id={region_id}&patch_id={patch_id}&month={month}` - Inference
 
 ### Tiles
 - `GET /regions/{region_id}/tasks/{task_type}/tiles` - List tiles

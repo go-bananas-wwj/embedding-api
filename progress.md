@@ -27,6 +27,11 @@
 - 编写 `findings.md` 记录调研结果。
 - 编写 `task_plan.md` 详细实施计划。
 
+: 用户已确认关键决策；开始执行重构。
+- 完成 Phase 1-7：专题统一、per-patch result、认证、标注、训练/推理 API、系统模型。
+- 更新 README.md 和 docs/API.md 文档。
+- 全部非 slow 测试通过（80 passed）。
+
 ### 下一步
 
-等待用户确认 `task_plan.md` 中的方案与待决策问题，再开始执行。
+提交 Phase 8 文档更新，完成最终验证并推送。

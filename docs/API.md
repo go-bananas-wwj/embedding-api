@@ -40,15 +40,19 @@ Embedding 是深度学习模型把卫星影像「翻译」成的高维向量。�
 
 | 任务英文名 | 中文名 | 监测内容 |
 |-----------|--------|---------|
-| `construction` | 建筑工地监测 | 哪里在新建工地 |
-| `building_change` | 建筑变化监测 | 哪里新建了楼房 |
-| `farmland` | 耕地非农非粮监测 | 耕地是否被非法占用 |
-| `land_conversion` | 土地转换监测 | 土地用途是否改变 |
 | `change_detection` | 变化检测 | 基于两期 embedding 差分检测变化区域 |
+| `building_extraction` | 建筑物提取 | 提取建筑物/建筑工地 |
+| `land_use_classification` | 土地利用分类 | 耕地、建设用地等土地利用类型 |
+| `land_cover_classification` | 土地覆盖分类 | WorldCover / Dynamic World 土地覆盖 |
+| `water_extraction` | 水体提取 | JRC 水体提取 |
 
 **版本说明**:
 - **V1**: 单期监测，只有一个时间点的结果
 - **V2**: 变化监测，对比两个时间点的差异（如 `2025-04_vs_2025-06`）
+
+> 哈尔滨现有数据已映射到新专题：`construction` → `building_extraction`，
+> `farmland` / `land_conversion` → `land_use_classification`，
+> `change_detection` / `building_change` / `demolition` → `change_detection`。
 
 ### 什么是瓦片（Tile）？
 
@@ -1010,6 +1014,179 @@ GET /regions/{region_id}/sam3/status
 
 **缓存淘汰语义**:
 嵌入缓存采用 LRU（最近最少使用）策略。当 `cache.size` 达到 `max_size` 后，新的嵌入请求会自动淘汰最旧的缓存项，并释放对应的 GPU 张量。缓存项在服务器重启后全部清空。
+
+---
+
+## 🔐 认证
+
+服务支持 **API-Key 用户隔离**。在 `config.yaml` 中配置：
+
+```yaml
+auth:
+  type: "api_key"
+  users:
+    key_alice_xxx:
+      user_id: "alice"
+      name: "Alice"
+```
+
+请求时携带：
+
+```bash
+curl -H 'X-API-Key: key_alice_xxx' http://localhost:9061/models
+# 或
+curl -H 'Authorization: Bearer key_alice_xxx' http://localhost:9061/models
+```
+
+未配置 `auth` 时，所有请求使用默认用户 `default`。
+
+---
+
+## 🏷️ 标注管理
+
+自定义训练依赖用户标注。流程：
+
+1. 创建类别：`POST /annotations/classes`
+2. 创建标注：`POST /annotations`
+3. 训练模型：`POST /models`
+
+### `GET /annotations/classes`
+
+列出当前用户的所有类别。
+
+### `POST /annotations/classes`
+
+创建类别。
+
+**请求体**:
+```json
+{
+  "name": "Building",
+  "color": "#ff0000"
+}
+```
+
+### `GET /annotations`
+
+查询标注，支持 `region_id`、`patch_id`、`task_type` 过滤。
+
+### `POST /annotations`
+
+创建标注。`geometry` 支持 `mask`（base64 PNG）、`polygon`、`polyline`。
+
+**请求体示例**:
+```json
+{
+  "region_id": "harbin",
+  "patch_id": "patch_000000",
+  "month": "2025-04",
+  "class_id": "cls_xxx",
+  "task_type": "building_extraction",
+  "geometry": {
+    "type": "mask",
+    "mask_b64": "iVBORw0KGgoAAAANSUhEUg..."
+  }
+}
+```
+
+变化检测标注需额外提供 `before_month` 和 `after_month`。
+
+---
+
+## 🤖 自定义模型
+
+### `GET /models`
+
+列出当前用户训练好的模型。
+
+### `POST /models`
+
+创建并异步训练模型。
+
+**请求体**:
+```json
+{
+  "name": "my-building-head",
+  "model_type": "classification",
+  "task_type": "building_extraction",
+  "region_id": "harbin",
+  "embedding_version": "v2"
+}
+```
+
+`model_type` 可选 `classification` 或 `change_detection`。
+
+**响应**:
+```json
+{
+  "id": "model_xxxx",
+  "name": "my-building-head",
+  "status": "training",
+  ...
+}
+```
+
+### `GET /models/{model_id}`
+
+获取模型状态（`training` / `completed` / `failed`）。
+
+### `GET /models/jobs/{job_id}`
+
+查询训练任务状态。
+
+### `POST /models/{model_id}/infer`
+
+单 patch 推理。
+
+**请求体**:
+```json
+{
+  "region_id": "harbin",
+  "patch_id": "patch_000000",
+  "month": "2025-04"
+}
+```
+
+**响应**:
+```json
+{
+  "result_url": "/models/results/infer_model_xxx_harbin_patch_000000_2025-04.png"
+}
+```
+
+### `POST /models/{model_id}/infer_batch`
+
+批量推理，最多 100 个 patch。
+
+**请求体**:
+```json
+{
+  "region_id": "harbin",
+  "patch_ids": ["patch_000000", "patch_000001"],
+  "month": "2025-04"
+}
+```
+
+---
+
+## 🧩 系统预训练模型
+
+### `GET /system-models?region_id=harbin`
+
+列出区域可用的系统预训练模型。
+
+### `GET /system-models/{task_id}/classes?region_id=harbin`
+
+获取模型类别定义，`task_id` 如 `land_cover_classification`。
+
+### `POST /system-models/{task_id}/infer`
+
+使用系统模型对单 patch 推理。
+
+**示例**:
+```bash
+curl -X POST "http://localhost:9061/system-models/land_cover_classification/infer?region_id=harbin&patch_id=patch_000000&month=2025-04"
+```
 
 ---
 
