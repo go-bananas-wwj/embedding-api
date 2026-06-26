@@ -18,7 +18,6 @@ from app.schemas.models import (
     ModelOut,
     ModelRenameRequest,
 )
-from app.services.annotation_service import get_class_manager
 from app.services.auth_service import get_current_user
 from app.services.data_service import DataValidationError
 from app.services.inference_engine import InferenceEngine
@@ -52,12 +51,11 @@ async def create_model(
 ) -> dict:
     """创建模型并启动异步训练任务。
 
-    用于提交基于用户标注的分类或变化检测训练任务。
+    前端提交用户定义的模型名称、分类列表和 GeoJSON 标注数据包；
+    后端解析标注包，提取训练样本并训练下游任务头。
     返回模型信息及训练任务 ID，可在 `/models/jobs/{job_id}` 轮询进度。
     """
     registry = get_model_registry(user["user_id"])
-    mgr = get_class_manager(user["user_id"])
-    classes = mgr.list_classes()
 
     if req.model_type not in ("classification", "change_detection"):
         raise HTTPException(
@@ -65,11 +63,16 @@ async def create_model(
             detail="model_type must be 'classification' or 'change_detection'",
         )
 
+    active_class_ids = req.class_ids or list(
+        {f.properties.class_id for f in req.annotations.features}
+    )
+
     model_id = registry.create_model(
         name=req.name,
         model_type=req.model_type,
-        classes=classes,
+        classes=[c.model_dump() for c in req.classes],
         task_type=req.task_type,
+        region_id=req.region_id,
     )
     job_id = f"job_{uuid.uuid4().hex[:8]}"
     _training_jobs[job_id] = {
@@ -88,6 +91,9 @@ async def create_model(
         task_type=req.task_type,
         model_type=req.model_type,
         embedding_version=req.embedding_version,
+        annotations=req.annotations,
+        classes=req.classes,
+        class_ids=active_class_ids,
     )
     model = registry.get_model(model_id)
     model["job_id"] = job_id
@@ -303,15 +309,32 @@ def _do_training(
     task_type: str,
     model_type: str,
     embedding_version: str,
+    annotations,
+    classes,
+    class_ids,
 ) -> None:
     try:
         if model_type == "change_detection":
             engine = ChangeDetectionTrainingEngine(user_id)
-            result = engine.train(model_id, region_id, embedding_version)
+            result = engine.train(
+                model_id=model_id,
+                region_id=region_id,
+                task_type=task_type,
+                embedding_version=embedding_version,
+                annotations=annotations,
+                classes=classes,
+                class_ids=class_ids,
+            )
         else:
             engine = ClassificationTrainingEngine(user_id)
             result = engine.train(
-                model_id, region_id, task_type, embedding_version
+                model_id=model_id,
+                region_id=region_id,
+                task_type=task_type,
+                embedding_version=embedding_version,
+                annotations=annotations,
+                classes=classes,
+                class_ids=class_ids,
             )
 
         registry = get_model_registry(user_id)

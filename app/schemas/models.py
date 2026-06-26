@@ -1,7 +1,7 @@
 """Pydantic models for API request/response schemas."""
 
-from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field
+from typing import Any, Dict, List, Literal, Optional, Union
+from pydantic import BaseModel, Field, model_validator
 
 
 class HealthResponse(BaseModel):
@@ -101,145 +101,75 @@ class TilesResponse(BaseModel):
     total: int
 
 
+# ── GeoJSON annotation schemas for custom training ──
 
-# Annotation / Custom Training schemas
+class ModelClass(BaseModel):
+    """Class definition submitted by the frontend for training."""
 
-class ClassCreate(BaseModel):
-    name: str = Field(
-        ...,
-        description="Display name for the class.",
-        examples=["Building"],
-    )
-    color: str = Field(
-        ...,
-        description="CSS color string (hex or named color) used to render the class.",
-        examples=["#FF5733"],
-    )
+    id: str = Field(..., description="Class identifier.", examples=["cls_001"])
+    name: str = Field(..., description="Class display name.", examples=["建筑用地"])
+    color: str = Field(..., description="Class color (hex).", examples=["#FF0000"])
 
 
-class ClassOut(BaseModel):
-    id: str = Field(..., description="Class identifier.")
-    name: str = Field(..., description="Class display name.")
-    color: str = Field(..., description="Class color.")
+class GeoJSONProperties(BaseModel):
+    """Properties attached to each GeoJSON annotation feature."""
+
+    patch_id: str = Field(..., description="Patch identifier.", examples=["patch_000000"])
+    region_id: str = Field(..., description="Region identifier.", examples=["harbin"])
+    class_id: str = Field(..., description="Class identifier.", examples=["cls_001"])
+    class_name: Optional[str] = Field(None, description="Human-readable class name.", examples=["建筑用地"])
+    color: Optional[str] = Field(None, description="Class color.", examples=["#FF0000"])
+    task_type: str = Field(..., description="Downstream task type.", examples=["building_extraction"])
+    month: Optional[str] = Field(None, description="Month for single-time tasks.", examples=["2025-04"])
+    before_month: Optional[str] = Field(None, description="Before month for change detection.", examples=["2025-04"])
+    after_month: Optional[str] = Field(None, description="After month for change detection.", examples=["2025-06"])
 
 
-class ClassRenameRequest(BaseModel):
-    name: str = Field(
-        ...,
-        description="New display name for the class.",
-        examples=["Building (renamed)"],
-    )
+class GeoJSONFeature(BaseModel):
+    """A single annotation feature in GeoJSON format."""
 
-
-class StatusOut(BaseModel):
-    status: str
-
-
-class GeometryMask(BaseModel):
-    type: str = Field(..., description="Geometry type. Use 'mask'.")
-    mask_b64: str = Field(..., description="Base64-encoded PNG mask.")
-
-
-class GeometryPolygon(BaseModel):
-    type: str = Field(..., description="Geometry type. Use 'polygon'.")
-    points: List[List[float]] = Field(
-        ...,
-        description="Polygon vertices as normalized [x, y] coordinates (0-1).",
-    )
-
-
-class GeometryPolyline(BaseModel):
-    type: str = Field(..., description="Geometry type. Use 'polyline'.")
-    points: List[List[float]] = Field(
-        ...,
-        description="Polyline vertices as normalized [x, y] coordinates (0-1).",
-    )
-
-
-class AnnotationCreate(BaseModel):
-    region_id: str = Field(
-        ...,
-        description="Region identifier. Use 'harbin' or 'haidian'.",
-        examples=["harbin"],
-    )
-    patch_id: str = Field(
-        ...,
-        description="Patch identifier in the form patch_000000.",
-        examples=["patch_000000"],
-    )
-    month: str = Field(
-        ...,
-        description="Month for the source data, e.g. 2025-04.",
-        examples=["2025-04"],
-    )
-    class_id: str = Field(
-        ...,
-        description="Class ID returned by POST /annotations/classes. Replace with the real ID from the create response.",
-        examples=["cls_abc123"],
-    )
+    type: Literal["Feature"] = "Feature"
+    properties: GeoJSONProperties
     geometry: Dict[str, Any] = Field(
         ...,
-        description="Geometry object. Supported types: 'mask' (mask_b64), 'polygon' (points), 'polyline' (points).",
-        examples=[{"type": "polygon", "points": [[0.2, 0.2], [0.8, 0.2], [0.5, 0.8]]}],
+        description="GeoJSON geometry object. Supported types: Polygon, MultiPolygon. Coordinates must be WGS84 [lon, lat].",
     )
-    task_type: Optional[str] = Field(
-        None,
-        description="Optional downstream task type, e.g. building_extraction.",
-        examples=["building_extraction"],
-    )
-    score: float = Field(
-        1.0,
-        description="Confidence score (0-1).",
-        examples=[1.0],
-    )
-    before_month: Optional[str] = Field(
-        None,
-        description="For change-detection annotations, the 'before' month.",
-        examples=["2025-04"],
-    )
-    after_month: Optional[str] = Field(
-        None,
-        description="For change-detection annotations, the 'after' month.",
-        examples=["2025-06"],
+
+    @model_validator(mode="after")
+    def validate_geometry_type(self):
+        geom_type = self.geometry.get("type")
+        if geom_type not in ("Polygon", "MultiPolygon"):
+            raise ValueError(f"Unsupported geometry type: {geom_type}. Only Polygon and MultiPolygon are allowed.")
+        return self
+
+
+class GeoJSONFeatureCollection(BaseModel):
+    """Annotation package submitted by the frontend when creating a model."""
+
+    type: Literal["FeatureCollection"] = "FeatureCollection"
+    features: List[GeoJSONFeature] = Field(
+        ...,
+        min_length=1,
+        description="List of GeoJSON annotation features.",
     )
 
 
-class AnnotationOut(BaseModel):
-    id: str = Field(..., description="Annotation identifier.")
-    region_id: str = Field(..., description="Region identifier.")
-    patch_id: str = Field(..., description="Patch identifier.")
-    month: str = Field(..., description="Month for the source data.")
-    class_id: str = Field(..., description="Class identifier.")
-    task_type: Optional[str] = Field(None, description="Task type, if provided.")
-    score: float = Field(..., description="Confidence score.")
-    geometry: Dict[str, Any] = Field(..., description="Geometry object.")
-    before_month: Optional[str] = Field(None, description="'Before' month for change detection.")
-    after_month: Optional[str] = Field(None, description="'After' month for change detection.")
-    created_at: str = Field(..., description="ISO timestamp when the annotation was created.")
-
+# ── Custom training schemas ──
 
 class ModelCreate(BaseModel):
     """Request body for creating a custom model.
 
-    Example:
-    ```bash
-    curl -X POST http://localhost:9061/models \
-      -H 'Content-Type: application/json' \
-      -d '{
-        "name": "my-building-head",
-        "model_type": "classification",
-        "task_type": "building_extraction",
-        "region_id": "harbin",
-        "embedding_version": "v2"
-      }'
-    ```
+    The frontend submits a complete annotation package (`annotations` as GeoJSON
+    FeatureCollection plus `classes`). The backend parses the package, extracts
+    training samples from embeddings, and trains a downstream task head.
     """
+
     model_config = {"protected_namespaces": ()}
 
     name: str = Field(
         ...,
-        description="Human-readable model name.",
-        examples=["my-building-head"],
+        description="User-defined model name.",
+        examples=["我的建筑提取模型"],
     )
     model_type: str = Field(
         ...,
@@ -261,6 +191,48 @@ class ModelCreate(BaseModel):
         description="Embedding version used for training. Allowed values: v1, v2.",
         examples=["v2"],
     )
+    epochs: int = Field(
+        20,
+        ge=1,
+        le=1000,
+        description="Number of training epochs.",
+        examples=[20],
+    )
+    class_ids: Optional[List[str]] = Field(
+        None,
+        description="Optional subset of class IDs to use for training. If empty, all classes in annotations are used.",
+        examples=[["cls_001"]],
+    )
+    description: Optional[str] = Field(
+        None,
+        description="Optional model description.",
+        examples=["基于用户标注的建筑提取模型"],
+    )
+    annotations: GeoJSONFeatureCollection = Field(
+        ...,
+        description="GeoJSON FeatureCollection containing user annotations. Coordinates must be WGS84.",
+    )
+    classes: List[ModelClass] = Field(
+        ...,
+        min_length=1,
+        description="Class definitions referenced by the annotations.",
+    )
+
+    @model_validator(mode="after")
+    def validate_model_type_consistency(self):
+        for feature in self.annotations.features:
+            props = feature.properties
+            if self.model_type == "classification":
+                if not props.month:
+                    raise ValueError(f"classification model requires 'month' for patch {props.patch_id}")
+            elif self.model_type == "change_detection":
+                if not props.before_month or not props.after_month:
+                    raise ValueError(
+                        f"change_detection model requires 'before_month' and 'after_month' for patch {props.patch_id}"
+                    )
+            else:
+                raise ValueError(f"Unsupported model_type: {self.model_type}")
+        return self
 
 
 class ModelOut(BaseModel):
