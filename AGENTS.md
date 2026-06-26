@@ -16,8 +16,8 @@ The API provides:
 - Patch metadata, bbox filtering, pagination.
 - Map tile listing (XYZ tile serving is stubbed but not implemented).
 - SAM3 interactive segmentation (embed + segment with point prompts on Sentinel-2 imagery).
-- User-generated annotation storage (classes + geometries) for custom training data.
-- Custom model training and inference (classification and change-detection heads).
+- Custom model training and inference from frontend-submitted GeoJSON annotation packages (classification and change-detection heads).
+- GeoJSON-to-pixel-mask rasterization with WGS84 coordinate support.
 - System pre-trained model inference.
 - Optional API-Key authentication with per-user data isolation.
 - Hot-reload configuration via `watchdog`.
@@ -45,7 +45,6 @@ embedding-api/
 │   │   ├── patches.py
 │   │   ├── embeddings.py
 │   │   ├── tasks.py
-│   │   ├── annotations.py
 │   │   ├── models.py
 │   │   ├── system_models.py
 │   │   └── sam3.py
@@ -57,7 +56,8 @@ embedding-api/
 │       ├── tile_service.py
 │       ├── sam3_service.py
 │       ├── auth_service.py
-│       ├── annotation_service.py
+│       ├── user_paths.py
+│       ├── geojson_adapter.py
 │       ├── model_registry.py
 │       ├── training_engine.py
 │       └── inference_engine.py
@@ -242,8 +242,8 @@ python -m pytest tests/ -v -m slow
 
 - `tests/test_api.py` — Endpoint tests for regions, patches, embeddings, tasks, path traversal.
 - `tests/test_auth.py` — Authentication and user isolation tests.
-- `tests/test_annotations.py` — Annotation and class management tests.
-- `tests/test_models.py` — Custom model CRUD, training, and inference tests.
+- `tests/test_models.py` — Custom model CRUD, GeoJSON-driven training, and inference tests.
+- `tests/test_geojson_adapter.py` — GeoJSON to pixel-mask conversion tests.
 - `tests/test_system_models.py` — System pre-trained model tests.
 - `tests/test_sam3_service.py` — Unit tests for `SAM3Service` with mocked model/image loading.
 - `tests/test_sam3_router.py` — Router-level validation tests for SAM3 endpoints.
@@ -268,7 +268,7 @@ This service serves files from the local filesystem based on user-supplied path 
 4. **Symlink blocking**: `os.lstat()` is used to detect symlinks without following them, mitigating symlink-based escapes and TOCTOU races.
 5. **File size limits**: 100MB max for served files; embedding images are capped at 50M pixels; numpy arrays are capped at 500M elements to prevent memory-bomb attacks via malicious `.npy` headers.
 6. **CORS**: default `allow_origins=[]`; explicit origins are required via `CORS_ORIGINS`.
-7. **Authentication**: API-Key authentication is built-in and optional. When `config.yaml` contains `auth.users`, protected endpoints (`/annotations/*`, `/models/*`, `/system-models/*`) require a valid `X-API-Key` or `Authorization: Bearer <key>` header. Public deployments should still place the service behind a reverse proxy for TLS and additional access control.
+7. **Authentication**: API-Key authentication is built-in and optional. When `config.yaml` contains `auth.users`, protected endpoints (`/models/*`, `/system-models/*`) require a valid `X-API-Key` or `Authorization: Bearer <key>` header. Public deployments should still place the service behind a reverse proxy for TLS and additional access control.
 8. **Docs**: Swagger/ReDoc are disabled by default in production. Enable only via environment variables.
 9. **Docker**: runs as a non-root user (`appuser`, uid 1000); data and models are mounted read-only.
 

@@ -13,9 +13,9 @@
 
 > **说明**：
 > - 基础 URL 统一使用生产环境 `http://60.31.21.42:22065`。
-> - 标注、模型相关接口（`/annotations/*`、`/models/*`、`/system-models/*`）在 `config.yaml` 中未配置 `auth` 时，使用默认用户 `default`，无需 API Key。
+> - 模型相关接口（`/models/*`、`/system-models/*`）在 `config.yaml` 中未配置 `auth` 时，使用默认用户 `default`，无需 API Key。
 > - 若配置了 API Key，请在命令中加上 `-H 'X-API-Key: your_key'` 或 `-H 'Authorization: Bearer your_key'`。
-> - 带 `class_id`、`ann_id`、`model_id`、`job_id`、`filename` 的命令需要先调用创建接口获取真实 ID，再替换示例值。
+> - 带 `model_id`、`job_id`、`filename` 的命令需要先调用创建接口获取真实 ID，再替换示例值。
 
 ```bash
 # 1. 基础接口
@@ -51,41 +51,45 @@ curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/tasks/buil
 curl -s "http://60.31.21.42:22065/regions/harbin/tasks/change_detection/tiles?version=v1&period=2025-04_vs_2025-06"
 curl -s "http://60.31.21.42:22065/regions/harbin/tasks/change_detection/tiles/12/6745/3201.png?version=v1&period=2025-04_vs_2025-06"
 
-# 7. 标注类别（先创建，再使用返回的 class_id）
-curl -s -X POST "http://60.31.21.42:22065/annotations/classes" \
-  -H 'Content-Type: application/json' \
-  -d '{"name": "建筑物", "color": "#ff0000"}'
-curl -s "http://60.31.21.42:22065/annotations/classes"
-curl -s -X PATCH "http://60.31.21.42:22065/annotations/classes/cls_abc123" \
-  -H 'Content-Type: application/json' \
-  -d '{"name": "高层建筑物"}'
-curl -s -X DELETE "http://60.31.21.42:22065/annotations/classes/cls_abc123"
-
-# 8. 标注（先创建类别和标注，再使用返回的 ann_id）
-curl -s "http://60.31.21.42:22065/annotations?region_id=harbin&patch_id=patch_000000&task_type=building_extraction"
-curl -s -X POST "http://60.31.21.42:22065/annotations" \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "region_id": "harbin",
-    "patch_id": "patch_000000",
-    "month": "2025-04",
-    "class_id": "cls_abc123",
-    "task_type": "building_extraction",
-    "geometry": {"type": "mask", "mask_b64": "iVBORw0KGgoAAAANSUhEUgAAAQAAAAEAC..."}
-  }'
-curl -s "http://60.31.21.42:22065/annotations/ann_def456"
-curl -s -X DELETE "http://60.31.21.42:22065/annotations/ann_def456"
-
-# 9. 自定义模型（先创建并训练完成，再使用返回的 model_id / job_id）
+# 7. 自定义模型（先创建并训练完成，再使用返回的 model_id / job_id）
 curl -s "http://60.31.21.42:22065/models"
 curl -s -X POST "http://60.31.21.42:22065/models" \
   -H 'Content-Type: application/json' \
   -d '{
-    "name": "my-building-head",
+    "name": "我的建筑提取模型",
     "model_type": "classification",
     "task_type": "building_extraction",
     "region_id": "harbin",
-    "embedding_version": "v2"
+    "embedding_version": "v2",
+    "epochs": 20,
+    "classes": [
+      {"id": "cls_001", "name": "建筑用地", "color": "#FF0000"}
+    ],
+    "annotations": {
+      "type": "FeatureCollection",
+      "features": [
+        {
+          "type": "Feature",
+          "properties": {
+            "patch_id": "patch_000000",
+            "region_id": "harbin",
+            "class_id": "cls_001",
+            "task_type": "building_extraction",
+            "month": "2025-04"
+          },
+          "geometry": {
+            "type": "Polygon",
+            "coordinates": [[
+              [126.505, 45.742],
+              [126.515, 45.742],
+              [126.515, 45.748],
+              [126.505, 45.748],
+              [126.505, 45.742]
+            ]]
+          }
+        }
+      ]
+    }
   }'
 curl -s "http://60.31.21.42:22065/models/model_ghi789"
 curl -s -X PATCH "http://60.31.21.42:22065/models/model_ghi789" \
@@ -105,13 +109,13 @@ curl -s -X POST "http://60.31.21.42:22065/models/model_ghi789/infer_batch" \
 curl -s "http://60.31.21.42:22065/models/jobs/job_jkl012"
 curl -s "http://60.31.21.42:22065/models/results/infer_model_xxx_harbin_patch_000000_2025-04.png"
 
-# 10. 系统预训练模型
+# 8. 系统预训练模型
 curl -s "http://60.31.21.42:22065/system-models?region_id=harbin"
 curl -s "http://60.31.21.42:22065/system-models/land_cover_classification/classes?region_id=harbin&version=v2"
 curl -s -X POST "http://60.31.21.42:22065/system-models/land_cover_classification/infer?region_id=harbin&patch_id=patch_000000&month=2025-04&version=v2"
 curl -s "http://60.31.21.42:22065/system-models/results/land_cover_classification_harbin_patch_000000_2025-04.png"
 
-# 11. SAM3 交互式分割
+# 9. SAM3 交互式分割
 curl -s "http://60.31.21.42:22065/regions/harbin/sam3/status"
 curl -s -X POST "http://60.31.21.42:22065/regions/harbin/sam3/embed" \
   -H 'Content-Type: application/json' \
@@ -238,9 +242,6 @@ docker-compose up -d
 | **任务** | `/regions/{region_id}/patches/{patch_id}/tasks/{task_type}/label` | GET | 标签数据 |
 | **瓦片** | `/regions/{region_id}/tasks/{task_type}/tiles` | GET | 列出可用瓦片 |
 | **瓦片** | `/regions/{region_id}/tasks/{task_type}/tiles/{z}/{x}/{y}.png` | GET | 标准 XYZ 瓦片（暂未实现） |
-| **标注** | `/annotations/classes` | GET/POST/PATCH/DELETE | 标注类别管理 |
-| **标注** | `/annotations` | GET/POST | 标注查询与创建 |
-| **标注** | `/annotations/{ann_id}` | GET/DELETE | 单条标注 |
 | **自定义模型** | `/models` | GET/POST | 模型列表 / 创建训练 |
 | **自定义模型** | `/models/{model_id}` | GET/PATCH/DELETE | 模型详情 / 重命名 / 删除 |
 | **自定义模型** | `/models/{model_id}/infer` | POST | 单 Patch 推理 |
@@ -1061,370 +1062,26 @@ curl -H 'Authorization: Bearer key_alice_xxx' http://60.31.21.42:22065/models
 未配置 `auth` 时，所有请求使用默认用户 `default`。
 
 受保护的接口包括：
-- `/annotations/*`
 - `/models/*`
 - `/system-models/*`
 
 ---
 
-## 🏷️ 标注管理
+## 🏷️ 自定义训练工作流
 
-自定义训练依赖用户标注。流程：
+前端在本地管理用户标注；当用户确认训练时，一次性将 GeoJSON 标注包通过 `POST /models` 提交给后端，后端解析 GeoJSON、提取训练样本并启动训练。
 
-1. 创建类别：`POST /annotations/classes`
-2. 创建标注：`POST /annotations`
-3. 训练模型：`POST /models`
+流程：
 
-### 14. 列出标注类别
-
-列出当前用户的所有类别。
-
-```
-GET /annotations/classes
-```
-
-**curl 示例**:
-```bash
-curl -s "http://60.31.21.42:22065/annotations/classes"
-```
-
-**成功响应** (200):
-```json
-[
-  {
-    "id": "cls_abc123",
-    "name": "建筑物",
-    "color": "#ff0000"
-  },
-  {
-    "id": "cls_def456",
-    "name": "水体",
-    "color": "#0000ff"
-  }
-]
-```
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `id` | string | 类别唯一 ID |
-| `name` | string | 类别名称 |
-| `color` | string | 颜色，16 进制字符串 |
-
----
-
-### 15. 创建标注类别
-
-创建一个新的类别，用于后续标注。
-
-```
-POST /annotations/classes
-```
-
-**请求体**:
-
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `name` | string | 是 | 类别名称 |
-| `color` | string | 是 | 类别颜色，16 进制，如 `#ff0000` |
-
-**curl 示例**:
-```bash
-curl -s -X POST "http://60.31.21.42:22065/annotations/classes" \
-  -H 'Content-Type: application/json' \
-  -d '{"name": "建筑物", "color": "#ff0000"}'
-```
-
-**成功响应** (200):
-```json
-{
-  "id": "cls_abc123",
-  "name": "建筑物",
-  "color": "#ff0000"
-}
-```
-
----
-
-### 16. 重命名标注类别
-
-修改某个类别的名称。
-
-```
-PATCH /annotations/classes/{class_id}
-```
-
-**路径参数**:
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `class_id` | string | 是 | 类别 ID |
-
-**请求体**:
-
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `name` | string | 是 | 新名称 |
-
-**curl 示例**:
-```bash
-curl -s -X PATCH "http://60.31.21.42:22065/annotations/classes/cls_abc123" \
-  -H 'Content-Type: application/json' \
-  -d '{"name": "高层建筑物"}'
-```
-
-**成功响应** (200):
-```json
-{
-  "status": "ok"
-}
-```
-
----
-
-### 17. 删除标注类别
-
-删除某个类别，并级联删除该类别下的所有标注。
-
-```
-DELETE /annotations/classes/{class_id}
-```
-
-**路径参数**:
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `class_id` | string | 是 | 类别 ID |
-
-**curl 示例**:
-```bash
-curl -s -X DELETE "http://60.31.21.42:22065/annotations/classes/cls_abc123"
-```
-
-**成功响应** (200):
-```json
-{
-  "status": "ok"
-}
-```
-
----
-
-### 18. 列出标注
-
-查询当前用户的所有标注，支持按区域、Patch、任务类型过滤。
-
-```
-GET /annotations?region_id=harbin&patch_id=patch_000000&task_type=building_extraction
-```
-
-**查询参数**:
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `region_id` | string | 否 | 区域 ID |
-| `patch_id` | string | 否 | Patch ID |
-| `task_type` | string | 否 | 任务类型 |
-
-**curl 示例**:
-```bash
-curl -s "http://60.31.21.42:22065/annotations?region_id=harbin&patch_id=patch_000000&task_type=building_extraction"
-```
-
-**成功响应** (200):
-```json
-[
-  {
-    "id": "ann_def456",
-    "region_id": "harbin",
-    "patch_id": "patch_000000",
-    "month": "2025-04",
-    "class_id": "cls_abc123",
-    "task_type": "building_extraction",
-    "score": 1.0,
-    "geometry": {
-      "type": "mask",
-      "mask_b64": "iVBORw0KGgoAAAANSUhEUgAAAQAAAAEAC..."
-    },
-    "before_month": null,
-    "after_month": null,
-    "created_at": "2026-06-26T10:00:00"
-  }
-]
-```
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `id` | string | 标注唯一 ID |
-| `region_id` | string | 区域 ID |
-| `patch_id` | string | Patch ID |
-| `month` | string | 月份 |
-| `class_id` | string | 类别 ID |
-| `task_type` | string | 任务类型 |
-| `score` | float | 置信度/分数 |
-| `geometry` | object | 几何信息，支持 `mask`、`polygon`、`polyline` |
-| `before_month` | string | 变化检测前月份 |
-| `after_month` | string | 变化检测后月份 |
-| `created_at` | string | 创建时间 ISO8601 |
-
----
-
-### 19. 创建标注
-
-创建一条新的标注。`geometry` 支持三种类型：
-- `mask`: base64 编码的 PNG 掩码
-- `polygon`: 多边形点序列 `[[x1,y1], [x2,y2], ...]`
-- `polyline`: 折线点序列 `[[x1,y1], [x2,y2], ...]`
-
-```
-POST /annotations
-```
-
-**请求体**:
-
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `region_id` | string | 是 | 区域 ID |
-| `patch_id` | string | 是 | Patch ID |
-| `month` | string | 是 | 月份，如 `2025-04` |
-| `class_id` | string | 是 | 类别 ID |
-| `geometry` | object | 是 | 几何对象 |
-| `task_type` | string | 否 | 任务类型，如 `building_extraction` |
-| `score` | float | 否 | 置信度，默认 1.0 |
-| `before_month` | string | 否 | 变化检测前月份 |
-| `after_month` | string | 否 | 变化检测后月份 |
-
-**curl 示例 — Mask 标注**:
-```bash
-curl -s -X POST "http://60.31.21.42:22065/annotations" \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "region_id": "harbin",
-    "patch_id": "patch_000000",
-    "month": "2025-04",
-    "class_id": "cls_abc123",
-    "task_type": "building_extraction",
-    "geometry": {
-      "type": "mask",
-      "mask_b64": "iVBORw0KGgoAAAANSUhEUgAAAQAAAAEAC..."
-    }
-  }'
-```
-
-**curl 示例 — Polygon 标注**:
-```bash
-curl -s -X POST "http://60.31.21.42:22065/annotations" \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "region_id": "harbin",
-    "patch_id": "patch_000000",
-    "month": "2025-04",
-    "class_id": "cls_abc123",
-    "task_type": "building_extraction",
-    "geometry": {
-      "type": "polygon",
-      "points": [[0.1, 0.1], [0.5, 0.1], [0.5, 0.5], [0.1, 0.5]]
-    }
-  }'
-```
-
-**curl 示例 — 变化检测标注（需 before_month / after_month）**:
-```bash
-curl -s -X POST "http://60.31.21.42:22065/annotations" \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "region_id": "harbin",
-    "patch_id": "patch_000000",
-    "month": "2025-04",
-    "class_id": "cls_abc123",
-    "task_type": "change_detection",
-    "before_month": "2025-04",
-    "after_month": "2025-06",
-    "geometry": {
-      "type": "mask",
-      "mask_b64": "iVBORw0KGgoAAAANSUhEUgAAAQAAAAEAC..."
-    }
-  }'
-```
-
-**成功响应** (200):
-```json
-{
-  "id": "ann_def456",
-  "region_id": "harbin",
-  "patch_id": "patch_000000",
-  "month": "2025-04",
-  "class_id": "cls_abc123",
-  "task_type": "building_extraction",
-  "score": 1.0,
-  "geometry": {
-    "type": "mask",
-    "mask_b64": "iVBORw0KGgoAAAANSUhEUgAAAQAAAAEAC..."
-  },
-  "before_month": null,
-  "after_month": null,
-  "created_at": "2026-06-26T10:00:00"
-}
-```
-
----
-
-### 20. 获取单条标注
-
-根据 ID 获取单条标注。
-
-```
-GET /annotations/{ann_id}
-```
-
-**路径参数**:
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `ann_id` | string | 是 | 标注 ID |
-
-**curl 示例**:
-```bash
-curl -s "http://60.31.21.42:22065/annotations/ann_def456"
-```
-
-**成功响应** (200): 与创建标注返回的结构相同。
-
-**错误响应**:
-- `404`: 标注不存在
-
----
-
-### 21. 删除标注
-
-删除某条标注及其掩码文件。
-
-```
-DELETE /annotations/{ann_id}
-```
-
-**路径参数**:
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `ann_id` | string | 是 | 标注 ID |
-
-**curl 示例**:
-```bash
-curl -s -X DELETE "http://60.31.21.42:22065/annotations/ann_def456"
-```
-
-**成功响应** (200):
-```json
-{
-  "status": "ok"
-}
-```
+1. 前端本地管理标注，组织为 GeoJSON FeatureCollection。
+2. 调用 `POST /models` 提交模型配置与 GeoJSON 标注包。
+3. 后端解析标注包并训练下游任务头。
 
 ---
 
 ## 🤖 自定义模型
 
-### 22. 列出自定义模型
+### 14. 列出自定义模型
 
 列出当前用户训练好的模型。
 
@@ -1478,9 +1135,9 @@ curl -s "http://60.31.21.42:22065/models"
 
 ---
 
-### 23. 创建并训练模型
+### 15. 创建并训练模型
 
-创建模型并启动异步训练任务。训练完成后才能调用推理接口。
+创建模型并启动异步训练任务。请求体中需要携带完整的 GeoJSON 标注包和类别定义，后端解析后提取训练样本。训练完成后才能调用推理接口。
 
 ```
 POST /models
@@ -1490,22 +1147,104 @@ POST /models
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `name` | string | 是 | 模型名称 |
-| `model_type` | string | 是 | `classification` 或 `change_detection` |
-| `task_type` | string | 是 | 任务类型，如 `building_extraction` |
-| `region_id` | string | 是 | 区域 ID |
+| `name` | string | 是 | 用户自定义模型名称 |
+| `model_type` | string | 是 | 模型头类型：`classification` 或 `change_detection` |
+| `task_type` | string | 是 | 任务类型，如 `building_extraction`、`change_detection` 等 |
+| `region_id` | string | 是 | 区域 ID，如 `harbin` 或 `haidian` |
 | `embedding_version` | string | 否 | 嵌入版本，默认 `v2` |
+| `epochs` | int | 否 | 训练轮数，默认 `20`，范围 `1~1000` |
+| `annotations` | object | 是 | GeoJSON FeatureCollection，坐标为 WGS84，几何类型支持 `Polygon`、`MultiPolygon` |
+| `classes` | object[] | 是 | 类别定义列表，每项包含 `id`、`name`、`color` |
+| `class_ids` | string[] | 否 | 可选，指定参与训练的类别 ID 子集；为空时使用标注中所有类别 |
 
-**curl 示例**:
+**`annotations` 说明**：
+- `type` 固定为 `FeatureCollection`。
+- 每个 `Feature` 的 `properties` 必须包含 `patch_id`、`region_id`、`class_id`、`task_type`。
+- `classification` 模型还需要 `month`；`change_detection` 模型还需要 `before_month` 和 `after_month`。
+- `geometry` 坐标使用 WGS84 `[lon, lat]`。
+
+**curl 示例 — 分类模型**:
 ```bash
 curl -s -X POST "http://60.31.21.42:22065/models" \
   -H 'Content-Type: application/json' \
   -d '{
-    "name": "my-building-head",
+    "name": "我的建筑提取模型",
     "model_type": "classification",
     "task_type": "building_extraction",
     "region_id": "harbin",
-    "embedding_version": "v2"
+    "embedding_version": "v2",
+    "epochs": 20,
+    "classes": [
+      {"id": "cls_001", "name": "建筑用地", "color": "#FF0000"}
+    ],
+    "annotations": {
+      "type": "FeatureCollection",
+      "features": [
+        {
+          "type": "Feature",
+          "properties": {
+            "patch_id": "patch_000000",
+            "region_id": "harbin",
+            "class_id": "cls_001",
+            "task_type": "building_extraction",
+            "month": "2025-04"
+          },
+          "geometry": {
+            "type": "Polygon",
+            "coordinates": [[
+              [126.505, 45.742],
+              [126.515, 45.742],
+              [126.515, 45.748],
+              [126.505, 45.748],
+              [126.505, 45.742]
+            ]]
+          }
+        }
+      ]
+    }
+  }'
+```
+
+**curl 示例 — 变化检测模型**:
+```bash
+curl -s -X POST "http://60.31.21.42:22065/models" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "name": "我的变化检测模型",
+    "model_type": "change_detection",
+    "task_type": "change_detection",
+    "region_id": "harbin",
+    "embedding_version": "v2",
+    "epochs": 30,
+    "classes": [
+      {"id": "cls_002", "name": "新增建筑", "color": "#00FF00"}
+    ],
+    "annotations": {
+      "type": "FeatureCollection",
+      "features": [
+        {
+          "type": "Feature",
+          "properties": {
+            "patch_id": "patch_000000",
+            "region_id": "harbin",
+            "class_id": "cls_002",
+            "task_type": "change_detection",
+            "before_month": "2025-04",
+            "after_month": "2025-06"
+          },
+          "geometry": {
+            "type": "Polygon",
+            "coordinates": [[
+              [126.505, 45.742],
+              [126.515, 45.742],
+              [126.515, 45.748],
+              [126.505, 45.748],
+              [126.505, 45.742]
+            ]]
+          }
+        }
+      ]
+    }
   }'
 ```
 
@@ -1513,14 +1252,14 @@ curl -s -X POST "http://60.31.21.42:22065/models" \
 ```json
 {
   "id": "model_ghi789",
-  "name": "my-building-head",
+  "name": "我的建筑提取模型",
   "type": "classification",
   "task_type": "building_extraction",
   "status": "training",
   "created_at": "2026-06-26T10:00:00",
   "completed_at": null,
   "classes": [
-    {"id": "cls_abc123", "name": "建筑物", "color": "#ff0000"}
+    {"id": "cls_001", "name": "建筑用地", "color": "#FF0000"}
   ],
   "accuracy": null,
   "n_samples": null,
@@ -1532,7 +1271,7 @@ curl -s -X POST "http://60.31.21.42:22065/models" \
 
 ---
 
-### 24. 获取模型详情
+### 16. 获取模型详情
 
 获取单个模型的状态。
 
@@ -1558,7 +1297,7 @@ curl -s "http://60.31.21.42:22065/models/model_ghi789"
 
 ---
 
-### 25. 重命名模型
+### 17. 重命名模型
 
 修改模型名称。
 
@@ -1594,7 +1333,7 @@ curl -s -X PATCH "http://60.31.21.42:22065/models/model_ghi789" \
 
 ---
 
-### 26. 删除模型
+### 18. 删除模型
 
 删除模型及其关联文件。
 
@@ -1622,7 +1361,7 @@ curl -s -X DELETE "http://60.31.21.42:22065/models/model_ghi789"
 
 ---
 
-### 27. 单 Patch 推理
+### 19. 单 Patch 推理
 
 使用训练完成的模型对单个 Patch 进行推理。
 
@@ -1667,7 +1406,7 @@ curl -s -X POST "http://60.31.21.42:22065/models/model_ghi789/infer" \
 
 ---
 
-### 28. 批量推理
+### 20. 批量推理
 
 对最多 100 个 Patch 批量推理。
 
@@ -1727,7 +1466,7 @@ curl -s -X POST "http://60.31.21.42:22065/models/model_ghi789/infer_batch" \
 
 ---
 
-### 29. 查询训练任务状态
+### 21. 查询训练任务状态
 
 获取异步训练任务的状态。
 
@@ -1771,7 +1510,7 @@ curl -s "http://60.31.21.42:22065/models/jobs/job_jkl012"
 
 ---
 
-### 30. 下载推理结果图
+### 22. 下载推理结果图
 
 根据文件名下载自定义模型的推理结果 PNG。
 
@@ -1796,7 +1535,7 @@ curl -s "http://60.31.21.42:22065/models/results/infer_model_ghi789_harbin_patch
 
 ## 🧩 系统预训练模型
 
-### 31. 列出系统预训练模型
+### 23. 列出系统预训练模型
 
 列出某个区域可用的系统预训练模型。
 
@@ -1841,7 +1580,7 @@ curl -s "http://60.31.21.42:22065/system-models?region_id=harbin"
 
 ---
 
-### 32. 获取系统模型类别定义
+### 24. 获取系统模型类别定义
 
 获取系统预训练模型的类别定义（颜色、名称等）。
 
@@ -1878,7 +1617,7 @@ curl -s "http://60.31.21.42:22065/system-models/land_cover_classification/classe
 
 ---
 
-### 33. 系统模型单 Patch 推理
+### 25. 系统模型单 Patch 推理
 
 使用系统预训练模型对单个 Patch 实时推理。
 
@@ -1915,7 +1654,7 @@ curl -s -X POST "http://60.31.21.42:22065/system-models/land_cover_classificatio
 
 ---
 
-### 34. 下载系统模型结果图
+### 26. 下载系统模型结果图
 
 根据文件名下载系统模型推理结果 PNG。
 
@@ -1942,7 +1681,7 @@ curl -s "http://60.31.21.42:22065/system-models/results/land_cover_classificatio
 
 SAM3（Segment Anything with Concepts）是基于 Meta AI 的交互式实例分割模型。前端用户可以在卫星影像上点击点坐标，实时获取分割掩码。
 
-### 35. SAM3 状态查询
+### 27. SAM3 状态查询
 
 查询 SAM3 模型加载状态和 GPU 内存使用情况。
 
@@ -1996,7 +1735,7 @@ curl -s "http://60.31.21.42:22065/regions/harbin/sam3/status"
 
 ---
 
-### 36. SAM3 Embed — 预加载影像
+### 28. SAM3 Embed — 预加载影像
 
 预加载 patch 的 S2 RGB 影像，计算 SAM3 embedding，返回影像和 embedding_id。
 
@@ -2059,7 +1798,7 @@ curl -s -X POST "http://60.31.21.42:22065/regions/harbin/sam3/embed" \
 
 ---
 
-### 37. SAM3 Segment — 点选分割
+### 29. SAM3 Segment — 点选分割
 
 基于已缓存的 embedding 和用户点击的点坐标，生成分割掩码。
 

@@ -181,15 +181,7 @@ auth:
 
 > `result` 端点严格返回 patch 级别结果，不再回退到整幅 mosaic/summary。
 
-### Annotations
-- `GET /annotations/classes` - List classes
-- `POST /annotations/classes` - Create class
-- `PATCH /annotations/classes/{class_id}` - Rename class
-- `DELETE /annotations/classes/{class_id}` - Delete class (cascades to annotations)
-- `GET /annotations` - List annotations
-- `POST /annotations` - Create annotation
-- `GET /annotations/{ann_id}` - Get annotation
-- `DELETE /annotations/{ann_id}` - Delete annotation
+> **标注管理说明**：分类和标注由前端在浏览器 `localStorage` 中自行管理，训练时通过 `POST /models` 把 GeoJSON 标注包传给后端。详见 [`docs/custom-training-workflow.md`](docs/custom-training-workflow.md)。
 
 ### Custom Models
 - `GET /models` - List trained models

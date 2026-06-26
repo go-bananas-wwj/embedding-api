@@ -1,6 +1,6 @@
 # 自定义模型训练工作流（前端接入指南）
 
-> 本文档面向前端开发人员，说明如何调用 `embedding-api` 的自定义训练相关接口，完成从标注 → 训练 → 推理的完整流程。
+> 本文档面向前端开发人员，说明如何调用 `embedding-api` 的自定义训练相关接口，完成从用户标注到模型训练、推理的完整流程。
 >
 > 生产环境 Base URL：`http://60.31.21.42:22065`
 
@@ -10,41 +10,39 @@
 
 1. [整体流程概览](#1-整体流程概览)
 2. [前置准备](#2-前置准备)
-3. [Step 1：创建分类（Class）](#step-1创建分类class)
-4. [Step 2：创建标注（Annotation）](#step-2创建标注annotation)
-5. [Step 3：创建模型并启动训练](#step-3创建模型并启动训练)
-6. [Step 4：轮询训练进度](#step-4轮询训练进度)
-7. [Step 5：单张推理](#step-5单张推理)
-8. [Step 6：批量推理](#step-6批量推理)
-9. [Step 7：展示结果图](#step-7展示结果图)
-10. [状态流转说明](#状态流转说明)
-11. [错误处理](#错误处理)
-12. [完整前端代码示例](#完整前端代码示例)
+3. [Step 1：前端本地管理分类与标注](#step-1前端本地管理分类与标注)
+4. [Step 2：创建模型并启动训练](#step-2创建模型并启动训练)
+5. [Step 3：轮询训练进度](#step-3轮询训练进度)
+6. [Step 4：单张推理](#step-4单张推理)
+7. [Step 5：批量推理](#step-5批量推理)
+8. [Step 6：展示结果图](#step-6展示结果图)
+9. [状态流转说明](#状态流转说明)
+10. [错误处理](#错误处理)
+11. [完整前端代码示例](#完整前端代码示例)
 
 ---
 
 ## 1. 整体流程概览
 
 ```text
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│  1.创建分类  │ ──▶ │  2.创建标注  │ ──▶ │ 3.创建并训练 │
-└─────────────┘     └─────────────┘     └──────┬──────┘
-                                                │
-                                                ▼
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│ 7.展示结果图 │ ◀── │ 5/6.单张/批量│ ◀── │ 4.轮询训练  │
-└─────────────┘     │    推理      │     │    进度     │
-                    └─────────────┘     └─────────────┘
+┌─────────────────────┐     ┌─────────────────────┐     ┌─────────────────────┐
+│ 1. 前端本地管理分类  │     │ 2. 前端本地管理标注  │     │ 3. 前端提交标注包    │
+│    与标注 (localStorage) │    (GeoJSON)         │     │    POST /models      │
+└─────────────────────┘     └─────────────────────┘     └──────────┬──────────┘
+                                                                   │
+                                                                   ▼
+┌─────────────────────┐     ┌─────────────────────┐     ┌─────────────────────┐
+│ 6. 展示结果图        │ ◀── │ 4/5. 单张/批量推理   │ ◀── │ 后端解析标注包、     │
+│                     │     │    POST /models/{id}/infer  │    训练下游任务头    │
+└─────────────────────┘     └─────────────────────┘     └─────────────────────┘
 ```
 
 ### 关键设计
 
-- **用户隔离**：每个用户的数据独立存储在 `users/{user_id}/` 下，通过 `X-API-Key` 或 `Authorization: Bearer <key>` 识别用户。
-- **异步训练**：训练在后台线程执行，创建模型接口立即返回 `job_id`，前端通过 `/models/jobs/{job_id}` 轮询进度。
-- **基于 Embedding 训练**：模型训练不直接读取原始影像，而是读取预生成的 embedding 特征，训练速度快、资源占用低。
-- **支持两类模型**：
-  - `classification`：单期影像分类，适用于 `building_extraction`、`land_use_classification`、`land_cover_classification`、`water_extraction`。
-  - `change_detection`：两期影像变化检测，适用于 `change_detection`。
+- **前端自治**：分类和标注完全由前端在浏览器 `localStorage` / `IndexedDB` 中管理，后端不再提供 `/annotations` 接口。
+- **训练包**：前端在调用 `POST /models` 时，把完整的标注包（GeoJSON FeatureCollection + classes 数组）一次性传给后端。
+- **后端训练**：后端解析 GeoJSON，把 WGS84 多边形栅格化为 256×256 mask，提取 embedding，训练一个轻量级的下游任务头（LogisticRegression）。
+- **模型名称用户定义**：`name` 字段由用户输入，后端只负责生成 `model_id`。
 
 ---
 
@@ -73,152 +71,84 @@ curl -H "Authorization: Bearer your_api_key" http://60.31.21.42:22065/health
 | `region_id` | 区域 ID | `harbin`、`haidian` |
 | `patch_id` | 图块 ID | `patch_000000` |
 | `month` | 影像月份 | `2025-04` |
-| `period` | 对比期 | `2025-04_vs_2025-06` |
+| `before_month` / `after_month` | 变化检测两期 | `2025-04` / `2025-06` |
 | `task_type` | 任务类型 | `change_detection`、`building_extraction`、`land_use_classification` |
 | `model_type` | 模型类型 | `classification`、`change_detection` |
 
 ---
 
-## Step 1：创建分类（Class）
+## Step 1：前端本地管理分类与标注
 
-### 用途
+### 1.1 分类数组（classes）
 
-为标注定义类别。例如「建筑用地」、「水体」、「变化区域」等。
+前端在本地维护分类列表：
 
-### 请求
-
-```http
-POST /annotations/classes
-Content-Type: application/json
+```json
+[
+  { "id": "cls_001", "name": "建筑用地", "color": "#FF0000" },
+  { "id": "cls_002", "name": "水体", "color": "#0000FF" }
+]
 ```
+
+### 1.2 标注 GeoJSON（annotations）
+
+前端把用户在地图上绘制的标注保存为标准 GeoJSON FeatureCollection：
 
 ```json
 {
-  "name": "建筑用地",
-  "color": "#FF0000"
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "patch_id": "patch_000000",
+        "region_id": "harbin",
+        "class_id": "cls_001",
+        "class_name": "建筑用地",
+        "color": "#FF0000",
+        "task_type": "building_extraction",
+        "month": "2025-04"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [126.50, 45.74],
+            [126.52, 45.74],
+            [126.52, 45.76],
+            [126.50, 45.76],
+            [126.50, 45.74]
+          ]
+        ]
+      }
+    }
+  ]
 }
 ```
 
-### 响应
+### 坐标系说明
 
-```json
-{
-  "id": "cls_abc123",
-  "name": "建筑用地",
-  "color": "#FF0000",
-  "created_at": "2025-06-26T10:00:00"
-}
-```
+- 所有 `geometry` 坐标必须是 **WGS84 (EPSG:4326)**，顺序为 `[经度, 纬度]`。
+- 支持的 `geometry.type`：**`Polygon`**、**`MultiPolygon`**。
+- 不支持 `Point`、`LineString`（如需点/线，请前端转成很小的 Polygon）。
 
-### 前端提示
+### GeoJSON Feature 的 properties
 
-- 建议在页面上提供「类别管理」模块，让用户创建/修改/删除类别。
-- 创建标注前，必须先有至少一个类别。
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `patch_id` | string | 是 | 标注所在 Patch |
+| `region_id` | string | 是 | 区域 ID |
+| `class_id` | string | 是 | 分类 ID |
+| `class_name` | string | 否 | 分类名称（展示用） |
+| `color` | string | 否 | 分类颜色 |
+| `task_type` | string | 是 | 任务类型 |
+| `month` | string | 条件 | 单期任务必填 |
+| `before_month` | string | 条件 | 变化检测必填 |
+| `after_month` | string | 条件 | 变化检测必填 |
 
 ---
 
-## Step 2：创建标注（Annotation）
-
-### 用途
-
-用户在 Patch 上绘制掩膜、多边形或折线，保存为训练样本。
-
-### 请求
-
-```http
-POST /annotations
-Content-Type: application/json
-```
-
-#### 2.1 掩膜标注（Mask）
-
-```json
-{
-  "region_id": "harbin",
-  "patch_id": "patch_000000",
-  "month": "2025-04",
-  "class_id": "cls_abc123",
-  "task_type": "building_extraction",
-  "geometry": {
-    "type": "mask",
-    "mask_b64": "iVBORw0KGgoAAAANSUhEUgAA..."
-  }
-}
-```
-
-#### 2.2 多边形标注（Polygon）
-
-```json
-{
-  "region_id": "harbin",
-  "patch_id": "patch_000000",
-  "month": "2025-04",
-  "class_id": "cls_abc123",
-  "task_type": "building_extraction",
-  "geometry": {
-    "type": "polygon",
-    "points": [
-      [50, 50],
-      [200, 50],
-      [200, 200],
-      [50, 200]
-    ]
-  }
-}
-```
-
-#### 2.3 折线标注（Polyline）
-
-```json
-{
-  "region_id": "harbin",
-  "patch_id": "patch_000000",
-  "month": "2025-04",
-  "class_id": "cls_abc123",
-  "task_type": "building_extraction",
-  "geometry": {
-    "type": "polyline",
-    "points": [
-      [50, 50],
-      [150, 100],
-      [200, 200]
-    ]
-  }
-}
-```
-
-### 响应
-
-```json
-{
-  "id": "ann_def456",
-  "region_id": "harbin",
-  "patch_id": "patch_000000",
-  "month": "2025-04",
-  "class_id": "cls_abc123",
-  "task_type": "building_extraction",
-  "geometry": {
-    "type": "mask",
-    "mask_b64": "iVBORw0KGgoAAAANSUhEUgAA...",
-    "mask_path": "users/default/annotations/masks/ann_def456.npz"
-  },
-  "created_at": "2025-06-26T10:05:00"
-}
-```
-
-### 前端提示
-
-- 标注绘制完成后，把 256×256 的 mask 转成 base64 PNG 字符串传给后端。
-- 多边形/折线的 `points` 是像素坐标，范围 `[0, 255]`。
-- 建议给用户提供「撤销/删除」功能，调用 `DELETE /annotations/{ann_id}`。
-
----
-
-## Step 3：创建模型并启动训练
-
-### 用途
-
-用户选择标注数据，创建自定义模型并启动训练任务。
+## Step 2：创建模型并启动训练
 
 ### 请求
 
@@ -227,7 +157,7 @@ POST /models
 Content-Type: application/json
 ```
 
-#### 3.1 分类模型（如建筑提取）
+### 请求体（分类任务示例）
 
 ```json
 {
@@ -235,13 +165,44 @@ Content-Type: application/json
   "model_type": "classification",
   "task_type": "building_extraction",
   "region_id": "harbin",
-  "class_ids": ["cls_abc123"],
+  "embedding_version": "v2",
   "epochs": 20,
-  "description": "基于用户标注训练的建筑提取模型"
+  "annotations": {
+    "type": "FeatureCollection",
+    "features": [
+      {
+        "type": "Feature",
+        "properties": {
+          "patch_id": "patch_000000",
+          "region_id": "harbin",
+          "class_id": "cls_001",
+          "class_name": "建筑用地",
+          "color": "#FF0000",
+          "task_type": "building_extraction",
+          "month": "2025-04"
+        },
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [126.50, 45.74],
+              [126.52, 45.74],
+              [126.52, 45.76],
+              [126.50, 45.76],
+              [126.50, 45.74]
+            ]
+          ]
+        }
+      }
+    ]
+  },
+  "classes": [
+    { "id": "cls_001", "name": "建筑用地", "color": "#FF0000" }
+  ]
 }
 ```
 
-#### 3.2 变化检测模型
+### 请求体（变化检测任务示例）
 
 ```json
 {
@@ -249,9 +210,41 @@ Content-Type: application/json
   "model_type": "change_detection",
   "task_type": "change_detection",
   "region_id": "harbin",
-  "class_ids": ["cls_abc123"],
+  "embedding_version": "v2",
   "epochs": 20,
-  "description": "基于用户标注训练的两期变化检测模型"
+  "annotations": {
+    "type": "FeatureCollection",
+    "features": [
+      {
+        "type": "Feature",
+        "properties": {
+          "patch_id": "patch_000000",
+          "region_id": "harbin",
+          "class_id": "cls_001",
+          "class_name": "变化区域",
+          "color": "#FF0000",
+          "task_type": "change_detection",
+          "before_month": "2025-04",
+          "after_month": "2025-06"
+        },
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [126.50, 45.74],
+              [126.52, 45.74],
+              [126.52, 45.76],
+              [126.50, 45.76],
+              [126.50, 45.74]
+            ]
+          ]
+        }
+      }
+    ]
+  },
+  "classes": [
+    { "id": "cls_001", "name": "变化区域", "color": "#FF0000" }
+  ]
 }
 ```
 
@@ -261,55 +254,53 @@ Content-Type: application/json
 {
   "id": "model_xyz789",
   "name": "哈尔滨建筑提取模型",
-  "model_type": "classification",
+  "type": "classification",
   "task_type": "building_extraction",
   "status": "training",
-  "region_id": "harbin",
-  "class_ids": ["cls_abc123"],
-  "created_at": "2025-06-26T10:10:00",
-  "job_id": "job_jkl012"
+  "created_at": "2025-06-26T10:00:00",
+  "completed_at": null,
+  "classes": [
+    { "id": "cls_001", "name": "建筑用地", "color": "#FF0000" }
+  ],
+  "accuracy": null,
+  "n_samples": null,
+  "model_path": "users/default/models/model_xyz789.pkl",
+  "message": null,
+  "job_id": "job_def456"
 }
 ```
 
-### 后端做了什么
+### 后端处理流程
 
-1. 读取该用户的所有标注数据。
-2. 根据 `model_type` 选择训练引擎：
-   - `classification`：用单期 embedding + mask 训练 `LogisticRegression`。
-   - `change_detection`：用两期 embedding 差分 + 变化 mask 训练 `LogisticRegression`。
-3. 保存模型文件到 `users/{user_id}/models/model_xyz789/model.pkl`。
-4. 保存模型元数据到 `users/{user_id}/models/registry.json`。
-5. 启动后台训练线程，返回 `job_id`。
-
-### 前端提示
-
-- 创建模型后，立即拿到 `job_id`，进入轮询状态。
-- 如果 `class_ids` 为空数组，系统默认使用所有类别。
+1. 校验 `annotations` 和 `classes` 格式。
+2. 按 `patch_id` 分组 GeoJSON features。
+3. 读取每个 Patch 的 WGS84 bbox。
+4. 使用 `shapely` + `rasterio` 把 Polygon 栅格化为 256×256 mask。
+5. 加载对应月份的 embedding。
+6. 提取正负样本，训练 `LogisticRegression`。
+7. 保存 `model.pkl`，更新模型状态。
 
 ---
 
-## Step 4：轮询训练进度
-
-### 用途
-
-训练是异步的，前端需要轮询 `/models/jobs/{job_id}` 获取进度。
+## Step 3：轮询训练进度
 
 ### 请求
 
 ```http
-GET /models/jobs/job_jkl012
+GET /models/jobs/{job_id}
 ```
 
 ### 响应（训练中）
 
 ```json
 {
-  "job_id": "job_jkl012",
+  "job_id": "job_def456",
   "status": "running",
-  "progress": 0.6,
-  "message": "Training classifier...",
-  "started_at": "2025-06-26T10:10:01",
-  "updated_at": "2025-06-26T10:10:05"
+  "model_id": "model_xyz789",
+  "accuracy": null,
+  "n_samples": null,
+  "model_path": null,
+  "message": null
 }
 ```
 
@@ -317,12 +308,13 @@ GET /models/jobs/job_jkl012
 
 ```json
 {
-  "job_id": "job_jkl012",
+  "job_id": "job_def456",
   "status": "completed",
-  "progress": 1.0,
-  "message": "Training completed",
-  "started_at": "2025-06-26T10:10:01",
-  "updated_at": "2025-06-26T10:10:10"
+  "model_id": "model_xyz789",
+  "accuracy": 0.95,
+  "n_samples": 1200,
+  "model_path": "users/default/models/model_xyz789.pkl",
+  "message": null
 }
 ```
 
@@ -330,37 +322,32 @@ GET /models/jobs/job_jkl012
 
 ```json
 {
-  "job_id": "job_jkl012",
+  "job_id": "job_def456",
   "status": "failed",
-  "progress": 0.0,
-  "message": "No training samples found for class cls_abc123",
-  "started_at": "2025-06-26T10:10:01",
-  "updated_at": "2025-06-26T10:10:03"
+  "model_id": "model_xyz789",
+  "accuracy": null,
+  "n_samples": null,
+  "model_path": null,
+  "message": "No valid training samples after filtering"
 }
 ```
 
 ### 前端提示
 
 - 建议每隔 2-3 秒轮询一次。
-- 状态为 `completed` 后，可以调用 `GET /models/{model_id}` 查看最新模型信息。
+- 状态为 `completed` 后，可以调用推理接口。
 - 状态为 `failed` 时，展示 `message` 给用户。
 
 ---
 
-## Step 5：单张推理
-
-### 用途
-
-对指定 Patch 运行模型推理，生成结果图。
+## Step 4：单张推理
 
 ### 请求
 
 ```http
-POST /models/model_xyz789/infer
+POST /models/{model_id}/infer
 Content-Type: application/json
 ```
-
-#### 5.1 分类任务
 
 ```json
 {
@@ -370,99 +357,59 @@ Content-Type: application/json
 }
 ```
 
-#### 5.2 变化检测任务
-
-```json
-{
-  "region_id": "harbin",
-  "patch_id": "patch_000001",
-  "before_month": "2025-04",
-  "after_month": "2025-06"
-}
-```
-
 ### 响应
 
 ```json
 {
-  "status": "success",
-  "result_file": "infer_model_xyz789_harbin_patch_000001_2025-04.png",
-  "region_id": "harbin",
-  "patch_id": "patch_000001",
-  "task_type": "building_extraction"
+  "result_url": "/models/results/infer_model_xyz789_harbin_patch_000001_2025-04.png"
 }
 ```
 
-### 前端提示
-
-- 模型状态必须为 `ready` 才能推理。
-- 结果图会自动保存到 `users/{user_id}/results/` 目录。
-
 ---
 
-## Step 6：批量推理
-
-### 用途
-
-一次推理多个 Patch，最多支持 100 个。
+## Step 5：批量推理
 
 ### 请求
 
 ```http
-POST /models/model_xyz789/infer_batch
+POST /models/{model_id}/infer_batch
 Content-Type: application/json
 ```
 
 ```json
 {
-  "requests": [
-    {"region_id": "harbin", "patch_id": "patch_000000", "month": "2025-04"},
-    {"region_id": "harbin", "patch_id": "patch_000001", "month": "2025-04"},
-    {"region_id": "harbin", "patch_id": "patch_000002", "month": "2025-04"}
-  ]
+  "region_id": "harbin",
+  "patch_ids": [
+    "patch_000000",
+    "patch_000001",
+    "patch_000002"
+  ],
+  "month": "2025-04"
 }
 ```
 
 ### 响应
 
 ```json
-{
-  "status": "success",
-  "results": [
-    {
-      "region_id": "harbin",
-      "patch_id": "patch_000000",
-      "month": "2025-04",
-      "result_file": "infer_model_xyz789_harbin_patch_000000_2025-04.png"
-    },
-    {
-      "region_id": "harbin",
-      "patch_id": "patch_000001",
-      "month": "2025-04",
-      "result_file": "infer_model_xyz789_harbin_patch_000001_2025-04.png"
-    },
-    {
-      "region_id": "harbin",
-      "patch_id": "patch_000002",
-      "month": "2025-04",
-      "result_file": "infer_model_xyz789_harbin_patch_000002_2025-04.png"
-    }
-  ]
-}
+[
+  {
+    "patch_id": "patch_000000",
+    "status": "success",
+    "result_url": "/models/results/infer_model_xyz789_harbin_patch_000000_2025-04.png",
+    "error": null
+  },
+  {
+    "patch_id": "patch_000001",
+    "status": "success",
+    "result_url": "/models/results/infer_model_xyz789_harbin_patch_000001_2025-04.png",
+    "error": null
+  }
+]
 ```
-
-### 前端提示
-
-- 批量推理适合地图可视化工况：用户框选一片区域，一次性推理所有 Patch。
-- 如果某个 Patch 失败，`results` 中对应条目会包含 `error` 字段。
 
 ---
 
-## Step 7：展示结果图
-
-### 用途
-
-获取推理生成的 PNG 结果图，用于前端展示。
+## Step 6：展示结果图
 
 ### 请求
 
@@ -472,7 +419,7 @@ GET /models/results/infer_model_xyz789_harbin_patch_000001_2025-04.png
 
 ### 响应
 
-直接返回 PNG 图片，Content-Type 为 `image/png`。
+直接返回 PNG 图片。
 
 ### 前端展示方式
 
@@ -480,10 +427,9 @@ GET /models/results/infer_model_xyz789_harbin_patch_000001_2025-04.png
 <img src="http://60.31.21.42:22065/models/results/infer_model_xyz789_harbin_patch_000001_2025-04.png" alt="推理结果" />
 ```
 
-或者把图片叠加在地图上作为图层：
+或在地图上叠加为图层：
 
 ```javascript
-// 以 Leaflet 为例
 L.imageOverlay(
   'http://60.31.21.42:22065/models/results/infer_model_xyz789_harbin_patch_000001_2025-04.png',
   [[45.74, 126.5], [45.76, 126.55]]
@@ -497,27 +443,17 @@ L.imageOverlay(
 ### 模型状态
 
 ```text
-pending ──▶ training ──▶ ready
-              │
-              ▼
-           failed
+training ──▶ completed
+    │
+    ▼
+ failed
 ```
 
 | 状态 | 含义 | 可执行操作 |
 |------|------|------------|
-| `pending` | 已创建，等待训练 | 可删除 |
-| `training` | 训练中 | 可查看进度 |
-| `ready` | 训练完成，可使用 | 可推理、可删除 |
-| `failed` | 训练失败 | 可查看错误信息、可删除 |
-
-### 训练任务状态
-
-```text
-queued ──▶ running ──▶ completed
-             │
-             ▼
-           failed
-```
+| `training` | 训练中 | 查看进度 |
+| `completed` | 训练完成 | 推理、删除 |
+| `failed` | 训练失败 | 查看错误、删除 |
 
 ---
 
@@ -527,44 +463,41 @@ queued ──▶ running ──▶ completed
 
 | HTTP 状态码 | 场景 | 前端处理 |
 |-------------|------|----------|
-| 400 | 请求参数错误，如缺少字段、无效 geometry | 展示具体错误信息 |
+| 400 | 请求参数错误 | 展示具体错误信息 |
 | 401 | API Key 无效或缺失 | 提示用户登录或检查 API Key |
-| 404 | 模型/标注/类别不存在 | 检查 ID 是否正确 |
-| 409 | 模型正在训练中，无法重复训练 | 等待当前训练完成 |
+| 404 | 模型/任务不存在 | 检查 ID 是否正确 |
 | 422 | Pydantic 校验失败 | 根据返回 detail 修正字段 |
 | 500 | 服务器内部错误 | 联系后端排查 |
 
 ### 典型错误示例
 
-**没有训练样本**
+**GeoJSON geometry 类型不支持**
 
 ```json
 {
-  "detail": "No training samples found for class cls_abc123"
+  "detail": "Unsupported geometry type: Point. Only Polygon and MultiPolygon are allowed."
 }
 ```
 
-**模型未就绪**
+**分类任务缺少 month**
 
 ```json
 {
-  "detail": "Model model_xyz789 is not ready (status: training)"
+  "detail": "classification model requires 'month' for patch patch_000000"
 }
 ```
 
-**批量推理超限**
+**没有有效训练样本**
 
 ```json
 {
-  "detail": "Batch size exceeds maximum of 100"
+  "detail": "No valid training samples after filtering"
 }
 ```
 
 ---
 
 ## 完整前端代码示例
-
-以下是一个简化的 Vue/React 风格伪代码，展示完整流程。
 
 ```javascript
 const BASE_URL = 'http://60.31.21.42:22065';
@@ -584,40 +517,53 @@ async function request(path, method = 'GET', body = null) {
   return res.json();
 }
 
-// 1. 创建分类
-const cls = await request('/annotations/classes', 'POST', {
-  name: '建筑用地',
-  color: '#FF0000',
-});
+// 1. 前端本地存储分类和标注（示例）
+const classes = [
+  { id: 'cls_001', name: '建筑用地', color: '#FF0000' }
+];
 
-// 2. 创建标注（mask 为例）
-const maskBase64 = getMaskBase64FromCanvas(); // 前端 Canvas 导出
-const ann = await request('/annotations', 'POST', {
-  region_id: 'harbin',
-  patch_id: 'patch_000000',
-  month: '2025-04',
-  class_id: cls.id,
-  task_type: 'building_extraction',
-  geometry: {
-    type: 'mask',
-    mask_b64: maskBase64,
-  },
-});
+const annotations = {
+  type: 'FeatureCollection',
+  features: [
+    {
+      type: 'Feature',
+      properties: {
+        patch_id: 'patch_000000',
+        region_id: 'harbin',
+        class_id: 'cls_001',
+        task_type: 'building_extraction',
+        month: '2025-04'
+      },
+      geometry: {
+        type: 'Polygon',
+        coordinates: [[
+          [126.50, 45.74],
+          [126.52, 45.74],
+          [126.52, 45.76],
+          [126.50, 45.76],
+          [126.50, 45.74]
+        ]]
+      }
+    }
+  ]
+};
 
-// 3. 创建模型并训练
+// 2. 创建模型并启动训练
 const model = await request('/models', 'POST', {
-  name: '哈尔滨建筑提取模型',
+  name: '我的建筑提取模型',  // 用户自定义名称
   model_type: 'classification',
   task_type: 'building_extraction',
   region_id: 'harbin',
-  class_ids: [cls.id],
+  embedding_version: 'v2',
   epochs: 20,
+  annotations: annotations,
+  classes: classes
 });
 
-// 4. 轮询训练进度
+// 3. 轮询训练进度
 const pollTraining = setInterval(async () => {
   const job = await request(`/models/jobs/${model.job_id}`);
-  updateProgress(job.progress);
+  updateProgress(job.status, job.accuracy, job.n_samples);
   if (job.status === 'completed') {
     clearInterval(pollTraining);
     runInference(model.id);
@@ -627,15 +573,14 @@ const pollTraining = setInterval(async () => {
   }
 }, 2000);
 
-// 5. 单张推理
+// 4. 单张推理
 async function runInference(modelId) {
   const result = await request(`/models/${modelId}/infer`, 'POST', {
     region_id: 'harbin',
     patch_id: 'patch_000001',
-    month: '2025-04',
+    month: '2025-04'
   });
-  // 6. 展示结果图
-  const imgUrl = `${BASE_URL}/models/results/${result.result_file}`;
+  const imgUrl = `${BASE_URL}${result.result_url}`;
   document.getElementById('result-image').src = imgUrl;
 }
 ```
@@ -646,13 +591,11 @@ async function runInference(modelId) {
 
 | 步骤 | 方法 | 路径 | 说明 |
 |------|------|------|------|
-| 创建分类 | POST | `/annotations/classes` | 创建训练类别 |
-| 创建标注 | POST | `/annotations` | 保存标注样本 |
-| 创建模型 | POST | `/models` | 创建模型并启动训练 |
+| 创建模型 | POST | `/models` | 提交名称 + GeoJSON 标注包 + classes |
 | 查看进度 | GET | `/models/jobs/{job_id}` | 轮询训练状态 |
 | 查看模型 | GET | `/models/{model_id}` | 获取模型信息 |
 | 单张推理 | POST | `/models/{model_id}/infer` | 推理一个 Patch |
-| 批量推理 | POST | `/models/{model_id}/infer_batch` | 批量推理 |
+| 批量推理 | POST | `/models/{model_id}/infer_batch` | 批量推理（最多 100） |
 | 获取结果图 | GET | `/models/results/{filename}` | 下载 PNG 结果 |
 
 ---
@@ -661,4 +604,5 @@ async function runInference(modelId) {
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
-| v1.0 | 2025-06-26 | 初稿，覆盖自定义训练完整工作流 |
+| v2.0 | 2025-06-26 | 改为 GeoJSON 标注包模式，删除后端 annotation 接口 |
+| v1.0 | 2025-06-26 | 初稿，基于后端 AnnotationStore |
