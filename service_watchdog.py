@@ -35,6 +35,13 @@ UVICORN_CMD = [
     "--port", "9061",
     "--workers", "1",
 ]
+
+# Enable Swagger/ReDoc in production by default.
+UVICORN_ENV = {
+    **os.environ,
+    "DOCS_URL": "/docs",
+    "REDOC_URL": "/redoc",
+}
 RESTART_BACKOFFS = [5, 10, 30, 60, 120]  # seconds
 
 
@@ -65,6 +72,7 @@ class ServiceWatchdog:
         self._process = subprocess.Popen(
             UVICORN_CMD,
             cwd=PROJECT_DIR,
+            env=UVICORN_ENV,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
