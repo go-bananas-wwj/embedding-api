@@ -132,14 +132,11 @@ async def get_embedding(
         examples=["2025-04"],
     ),
 ):
-    """Get embedding data for a patch.
+    """获取指定 Patch 的嵌入数据。
 
-    - `png`: Returns visualization image
-    - `npy`: Returns raw embedding array (application/octet-stream)
-    - `json`: Returns embedding statistics
-    - `cache`: Falls back to available format (PNG preferred)
-    - `version`: v1 (V4 model) or v2 (V5 model)
-    - `month`: Optional; falls back to first available month if not provided
+    用于模型可视化、特征分析或作为下游任务的输入。
+    支持 `png`、`npy`、`json`、`cache` 四种格式，分别返回图片、原始数组、统计信息或缓存回退结果。
+    注意：`png`/`npy` 为二进制响应，Swagger UI 可能无法直接渲染，建议使用 curl、浏览器或 `<img>` 标签访问。
     """
     if format not in ("png", "npy", "json", "cache"):
         raise HTTPException(

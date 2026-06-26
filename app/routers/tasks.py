@@ -36,7 +36,11 @@ async def list_tasks(
         examples=["harbin"],
     )
 ):
-    """List available downstream tasks for a region."""
+    """列出指定区域支持的所有下游监测任务。
+
+    用于前端任务选择面板，展示该区域可执行的变化检测、建筑物提取等任务。
+    返回任务 ID、名称、描述及可用版本的 JSON 列表。
+    """
     config = get_config()
     if not config.region_exists(region_id):
         raise HTTPException(status_code=404, detail=f"Region '{region_id}' not found")
@@ -80,7 +84,11 @@ async def get_task_summary(
         examples=["2025-04_vs_2025-06"],
     ),
 ):
-    """Get task summary statistics."""
+    """获取某任务的全局统计摘要。
+
+    用于仪表板展示任务覆盖 Patch 数、正负样本数等概览信息。
+    返回包含任务名称、版本、统计指标及对比周期的 JSON。
+    """
     config = get_config()
     if not config.region_exists(region_id):
         raise HTTPException(status_code=404, detail=f"Region '{region_id}' not found")
@@ -166,7 +174,12 @@ async def get_task_result(
         examples=["2025-04_vs_2025-06"],
     ),
 ):
-    """Get task result for a specific patch."""
+    """获取某个 Patch 在指定任务下的结果。
+
+    用于在地图上点击 Patch 后展示变化检测、建筑物提取等监测结果图片。
+    支持 `png` 和 `npy` 两种格式，返回 PNG 图片或二进制 NumPy 数组。
+    注意：Swagger UI 对二进制响应支持有限，建议在浏览器或 `<img>` 标签中查看图片。
+    """
     if format not in ("png", "npy"):
         raise HTTPException(
             status_code=422, detail=f"Invalid format '{format}'. Use: png, npy"
@@ -246,7 +259,11 @@ async def get_task_prediction(
         examples=["2025-04_vs_2025-06"],
     ),
 ):
-    """Get raw prediction array (.npy) for a patch."""
+    """获取某个 Patch 的原始预测数组（.npy）。
+
+    用于将模型输出接入自定义分析或后处理流程。
+    返回二进制 NumPy 数组，建议使用 curl 或程序代码下载处理。
+    """
     config = get_config()
     if not config.region_exists(region_id):
         raise HTTPException(status_code=404, detail=f"Region '{region_id}' not found")
@@ -308,7 +325,11 @@ async def get_task_label(
         examples=["2025-04_vs_2025-06"],
     ),
 ):
-    """Get label array (.npy) or metadata for a patch."""
+    """获取某个 Patch 的标签数据（.npy 或 .json）。
+
+    用于对比模型预测与真值、计算精度或制作训练样本。
+    返回二进制 NumPy 数组或 JSON 元数据，具体取决于标签文件的存储格式。
+    """
     config = get_config()
     if not config.region_exists(region_id):
         raise HTTPException(status_code=404, detail=f"Region '{region_id}' not found")
@@ -368,7 +389,11 @@ async def list_tiles(
         examples=["2025-04_vs_2025-06"],
     ),
 ):
-    """List available tiles for a task."""
+    """列出某任务下可用的瓦片文件。
+
+    用于前端构建瓦片图层索引，如结果大图叠加在地图上。
+    返回瓦片文件名、所属 Patch 及对比期信息的 JSON 列表。
+    """
     config = get_config()
     if not config.region_exists(region_id):
         raise HTTPException(status_code=404, detail=f"Region '{region_id}' not found")
@@ -420,7 +445,11 @@ async def get_tile(
         examples=["2025-04_vs_2025-06"],
     ),
 ):
-    """Serve a map tile image."""
+    """获取指定坐标的地图瓦片图片。
+
+    当前端点尚未实现，仅返回 HTTP 501。
+    后续可用于 Leaflet、Mapbox 等地图库叠加任务结果瓦片图层。
+    """
     raise HTTPException(
         status_code=501,
         detail="Tile serving is not yet implemented. Use /regions/{region_id}/tasks/{task_type}/tiles for available patch tiles.",

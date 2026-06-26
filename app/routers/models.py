@@ -36,7 +36,11 @@ _training_jobs: dict[str, dict] = {}
 
 @router.get("", response_model=List[ModelOut])
 async def list_models(user: dict = Depends(get_current_user)) -> List[dict]:
-    """List trained models for the current user."""
+    """获取当前用户训练好的自定义模型列表。
+
+    用于模型管理页展示模型名称、类型、状态、精度等信息。
+    返回 JSON 列表。
+    """
     return get_model_registry(user["user_id"]).list_models()
 
 
@@ -46,7 +50,11 @@ async def create_model(
     background_tasks: BackgroundTasks,
     user: dict = Depends(get_current_user),
 ) -> dict:
-    """Create a model and start asynchronous training."""
+    """创建模型并启动异步训练任务。
+
+    用于提交基于用户标注的分类或变化检测训练任务。
+    返回模型信息及训练任务 ID，可在 `/models/jobs/{job_id}` 轮询进度。
+    """
     registry = get_model_registry(user["user_id"])
     mgr = get_class_manager(user["user_id"])
     classes = mgr.list_classes()
@@ -95,7 +103,11 @@ async def get_model(
     ),
     user: dict = Depends(get_current_user),
 ) -> dict:
-    """Get a single model status by ID."""
+    """获取单个自定义模型的状态。
+
+    用于在模型详情页查看训练进度、精度、完成时间等信息。
+    返回模型状态的 JSON 详情。
+    """
     model = get_model_registry(user["user_id"]).get_model(model_id)
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")
@@ -112,7 +124,11 @@ async def rename_model(
     req: ModelRenameRequest = Body(...),
     user: dict = Depends(get_current_user),
 ) -> dict:
-    """Rename a model."""
+    """重命名指定模型。
+
+    用于模型管理页修改显示名称。
+    返回操作是否成功的状态 JSON。
+    """
     if not get_model_registry(user["user_id"]).rename_model(model_id, req.name):
         raise HTTPException(status_code=404, detail="Model not found")
     return {"status": "ok"}
@@ -127,7 +143,11 @@ async def delete_model(
     ),
     user: dict = Depends(get_current_user),
 ) -> dict:
-    """Delete a model and its artifact."""
+    """删除指定模型及其产物。
+
+    用于清理失败或不再使用的模型以释放空间。
+    返回操作是否成功的状态 JSON。
+    """
     if not get_model_registry(user["user_id"]).delete_model(model_id):
         raise HTTPException(status_code=404, detail="Model not found")
     return {"status": "ok"}
@@ -143,7 +163,11 @@ async def infer(
     req: InferRequest = Body(...),
     user: dict = Depends(get_current_user),
 ) -> dict:
-    """Run single-patch inference with a trained model."""
+    """对单个 Patch 运行自定义模型推理。
+
+    用于获取某个 Patch 的预测结果图片，通常在模型训练完成后调用。
+    返回结果图片的访问 URL。
+    """
     registry = get_model_registry(user["user_id"])
     model = registry.get_model(model_id)
     if not model or model.get("status") != "completed":
@@ -177,7 +201,11 @@ async def infer_batch(
     req: BatchInferRequest = Body(...),
     user: dict = Depends(get_current_user),
 ) -> List[dict]:
-    """Run inference for up to 100 patches."""
+    """对最多 100 个 Patch 批量运行自定义模型推理。
+
+    用于一次性对多个 Patch 生成预测结果，提高处理效率。
+    返回每个 Patch 的推理状态及结果图片 URL。
+    """
     if len(req.patch_ids) > 100:
         raise HTTPException(
             status_code=422, detail="Batch size exceeds 100 patches"
@@ -216,7 +244,11 @@ async def get_job_status(
     ),
     user: dict = Depends(get_current_user),
 ) -> dict:
-    """Get training job status."""
+    """查询训练任务状态。
+
+    用于前端轮询训练进度，显示当前训练阶段、准确率、样本数等信息。
+    返回任务状态、模型路径及统计指标的 JSON。
+    """
     job = _training_jobs.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -242,7 +274,11 @@ async def get_result(
     ),
     user: dict = Depends(get_current_user),
 ) -> FileResponse:
-    """Serve an inference result PNG."""
+    """下载自定义模型推理结果图片（PNG）。
+
+    用于在页面中展示自定义模型对 Patch 的预测结果。
+    返回 PNG 图片文件；Swagger UI 可能无法直接预览，建议使用 `<img>` 标签或浏览器访问。
+    """
     results_dir = InferenceEngine(user["user_id"]).results_dir
     file_path = results_dir / filename
 

@@ -35,7 +35,11 @@ async def list_patches(
         examples=["126.5,45.74,126.55,45.76"],
     ),
 ):
-    """List patches with pagination and optional bbox filtering."""
+    """分页查询指定区域的所有 Patch。
+
+    用于地图或列表页按页加载 Patch，支持可选的 bbox 空间过滤。
+    返回包含 Patch 详情、分页信息及是否有下一页的 JSON。
+    """
     config = get_config()
     if not config.region_exists(region_id):
         raise HTTPException(status_code=404, detail=f"Region '{region_id}' not found")
@@ -68,7 +72,11 @@ async def get_patch(
         examples=["patch_000000"],
     ),
 ):
-    """Get detailed information for a single patch."""
+    """获取单个 Patch 的详细信息。
+
+    用于在地图上点击某个 Patch 后展示其边界、中心点及元数据。
+    返回该 Patch 的 JSON 详情。
+    """
     config = get_config()
     if not config.region_exists(region_id):
         raise HTTPException(status_code=404, detail=f"Region '{region_id}' not found")

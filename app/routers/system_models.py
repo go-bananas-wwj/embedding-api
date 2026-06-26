@@ -34,7 +34,11 @@ async def get_system_models(
     ),
     user: dict = Depends(get_current_user),
 ) -> List[dict]:
-    """List system pre-trained models available for a region."""
+    """列出某区域可用的系统预训练模型。
+
+    用于前端展示可选的官方模型列表，如建筑物提取、土地覆盖分类等。
+    返回模型任务及版本信息的 JSON 列表。
+    """
     return list_system_models(region_id)
 
 
@@ -62,7 +66,11 @@ async def get_classes(
     ),
     user: dict = Depends(get_current_user),
 ) -> List[dict]:
-    """Get class definitions for a system model."""
+    """获取系统预训练模型的类别定义。
+
+    用于在结果可视化时生成图例，或在前端显示类别名称与颜色对应关系。
+    返回类别 ID、名称和调色板等 JSON 列表。
+    """
     try:
         return get_system_model_classes(region_id, task_id, version)
     except FileNotFoundError as e:
@@ -105,7 +113,11 @@ async def infer(
     ),
     user: dict = Depends(get_current_user),
 ) -> dict:
-    """Run a system pre-trained model on a single patch."""
+    """调用系统预训练模型对单个 Patch 进行推理。
+
+    用于快速获取建筑物提取、水体提取、土地覆盖分类等官方结果。
+    返回结果图片的访问 URL。
+    """
     results_dir = Path(f"users/{user['user_id']}/system_model_results")
     try:
         result_path = infer_system_model(
@@ -131,7 +143,11 @@ async def get_result(
     ),
     user: dict = Depends(get_current_user),
 ) -> FileResponse:
-    """Serve a system model inference result PNG."""
+    """下载系统模型推理结果图片（PNG）。
+
+    用于在页面中展示官方预训练模型对 Patch 的预测结果。
+    返回 PNG 图片文件；Swagger UI 可能无法直接预览，建议使用 `<img>` 标签或浏览器访问。
+    """
     results_dir = Path(f"users/{user['user_id']}/system_model_results")
     file_path = results_dir / filename
 

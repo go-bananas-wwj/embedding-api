@@ -31,13 +31,21 @@ router = APIRouter(prefix="/annotations", tags=["annotations"])
 
 @router.get("/classes", response_model=List[ClassOut])
 async def list_classes(user: dict = Depends(get_current_user)) -> List[dict]:
-    """List user-defined classification classes."""
+    """获取当前用户自定义的所有分类类别。
+
+    用于标注面板填充类别下拉框或图例配置。
+    返回类别 ID、名称和颜色等信息的 JSON 列表。
+    """
     return get_class_manager(user["user_id"]).list_classes()
 
 
 @router.post("/classes", response_model=ClassOut)
 async def create_class(req: ClassCreate, user: dict = Depends(get_current_user)) -> dict:
-    """Create a new class for annotations."""
+    """创建一个新的标注类别。
+
+    用于在标注前定义土地覆盖、变化类型等自定义类别。
+    返回新创建类别的 ID、名称和颜色。
+    """
     return get_class_manager(user["user_id"]).create_class(req.name, req.color)
 
 
@@ -51,7 +59,11 @@ async def rename_class(
     req: ClassRenameRequest = Body(...),
     user: dict = Depends(get_current_user),
 ) -> dict:
-    """Rename an existing class."""
+    """重命名指定类别。
+
+    用于前端修改类别名称，级联保留该类别下所有标注。
+    返回操作是否成功的状态 JSON。
+    """
     if not get_class_manager(user["user_id"]).rename_class(class_id, req.name):
         raise HTTPException(status_code=404, detail="Class not found")
     return {"status": "ok"}
@@ -66,7 +78,11 @@ async def delete_class(
     ),
     user: dict = Depends(get_current_user),
 ) -> dict:
-    """Delete a class and cascade-delete its annotations."""
+    """删除指定类别。
+
+    用于清理不再使用的类别，会同时级联删除该类别下的所有标注。
+    返回操作是否成功的状态 JSON。
+    """
     mgr = get_class_manager(user["user_id"])
     store = get_annotation_store(user["user_id"])
 
@@ -103,7 +119,11 @@ async def list_annotations(
     ),
     user: dict = Depends(get_current_user),
 ) -> List[dict]:
-    """List annotations, optionally filtered by region/patch/task."""
+    """列出当前用户的所有标注。
+
+    用于在个人标注管理页展示历史标注数据。
+    支持按区域、Patch、任务类型过滤，返回 JSON 列表。
+    """
     return get_annotation_store(user["user_id"]).list_annotations(
         region_id=region_id, patch_id=patch_id, task_type=task_type
     )
@@ -113,7 +133,11 @@ async def list_annotations(
 async def create_annotation(
     req: AnnotationCreate, user: dict = Depends(get_current_user)
 ) -> dict:
-    """Create a new annotation from a mask, polygon, or polyline geometry."""
+    """创建一条新的标注。
+
+    用于在 Patch 上绘制掩膜、多边形或折线并保存为训练样本。
+    返回包含几何、类别和元数据的标注详情 JSON。
+    """
     mgr = get_class_manager(user["user_id"])
     classes = mgr.list_classes()
     if req.class_id not in {c["id"] for c in classes}:
@@ -147,7 +171,11 @@ async def get_annotation(
     ),
     user: dict = Depends(get_current_user),
 ) -> dict:
-    """Get a single annotation by ID."""
+    """获取单条标注详情。
+
+    用于点击标注列表某一行时展示完整信息。
+    返回该标注的 JSON 详情。
+    """
     ann = get_annotation_store(user["user_id"]).get_annotation(ann_id)
     if not ann:
         raise HTTPException(status_code=404, detail="Annotation not found")
@@ -163,7 +191,11 @@ async def delete_annotation(
     ),
     user: dict = Depends(get_current_user),
 ) -> dict:
-    """Delete an annotation and its mask file."""
+    """删除单条标注及其掩膜文件。
+
+    用于撤销误标或清理训练数据。
+    返回操作是否成功的状态 JSON。
+    """
     if not get_annotation_store(user["user_id"]).delete_annotation(ann_id):
         raise HTTPException(status_code=404, detail="Annotation not found")
     return {"status": "ok"}

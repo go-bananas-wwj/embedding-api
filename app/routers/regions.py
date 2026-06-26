@@ -11,7 +11,11 @@ router = APIRouter()
 
 @router.get("/health", response_model=HealthResponse)
 async def health_check():
-    """Health check endpoint."""
+    """健康检查端点。
+
+    用于前端页面初始化或服务心跳监控确认 API 是否可用。
+    返回服务状态、版本号以及当前已配置的区域列表。
+    """
     config = get_config()
     return HealthResponse(
         status="ok",
@@ -22,7 +26,11 @@ async def health_check():
 
 @router.get("/regions", response_model=RegionsResponse)
 async def list_regions():
-    """List all available regions with patch counts and tasks."""
+    """获取所有可用区域列表。
+
+    用于前端页面初始化时加载区域选择下拉框。
+    返回每个区域的 ID、名称、Patch 数量以及支持的下游任务列表。
+    """
     config = get_config()
     regions = []
     for rid, rinfo in config.regions.items():
@@ -51,7 +59,11 @@ async def get_region(
         },
     )
 ):
-    """Get region details."""
+    """获取指定区域的详细信息。
+
+    用于用户选择某个区域后展示该区域的任务列表、嵌入版本及 Patch 数量。
+    返回区域元数据的 JSON 详情。
+    """
     config = get_config()
     if not config.region_exists(region_id):
         raise HTTPException(status_code=404, detail=f"Region '{region_id}' not found")

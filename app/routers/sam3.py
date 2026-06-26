@@ -27,7 +27,11 @@ async def sam3_embed(
     ),
     req: EmbedRequest = Body(...),
 ):
-    """Preload patch image and compute SAM3 embedding."""
+    """为指定 Patch 预计算 SAM3 图像嵌入。
+
+    用于交互式分割前加载 Sentinel-2 影像并缓存图像嵌入。
+    返回嵌入 ID 及缓存键，供后续 `/sam3/segment` 调用。
+    """
     config = get_config()
     if not config.region_exists(region_id):
         raise HTTPException(status_code=404, detail=f"Region '{region_id}' not found")
@@ -54,7 +58,11 @@ async def sam3_segment(
     ),
     req: SegmentRequest = Body(...),
 ):
-    """Segment instance using cached embedding and point prompts."""
+    """基于缓存的嵌入和点提示进行 SAM3 实例分割。
+
+    用于用户在前端点击影像上的点后获取对应地物的分割掩膜。
+    返回一个或多个掩膜数组，可用于叠加显示或导出标注。
+    """
     config = get_config()
     if not config.region_exists(region_id):
         raise HTTPException(status_code=404, detail=f"Region '{region_id}' not found")
@@ -83,7 +91,11 @@ async def sam3_status(
         examples=["harbin"],
     )
 ):
-    """Get SAM3 model loading status and cache info."""
+    """获取 SAM3 模型加载状态及缓存信息。
+
+    用于页面初始化时检查模型是否就绪、当前缓存命中情况。
+    返回模型状态、缓存大小和设备信息的 JSON。
+    """
     config = get_config()
     if not config.region_exists(region_id):
         raise HTTPException(status_code=404, detail=f"Region '{region_id}' not found")
