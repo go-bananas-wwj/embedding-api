@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from app.services.annotation_service import _get_users_dir
+from app.services.user_paths import get_users_dir
 
 
 class ModelRegistry:
@@ -111,7 +111,7 @@ _registries: Dict[str, ModelRegistry] = {}
 
 def get_model_registry(user_id: str = "default") -> ModelRegistry:
     if user_id not in _registries:
-        user_dir = _get_users_dir() / user_id
+        user_dir = get_users_dir() / user_id
         _registries[user_id] = ModelRegistry(
             user_dir / "models_index.json", user_dir / "models"
         )

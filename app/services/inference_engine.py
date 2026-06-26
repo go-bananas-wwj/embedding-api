@@ -9,9 +9,9 @@ import joblib
 import numpy as np
 from PIL import Image
 
-from app.services.annotation_service import _get_user_dir
 from app.services.data_service import DataService
 from app.services.model_registry import get_model_registry
+from app.services.user_paths import get_user_dir
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +43,7 @@ class InferenceEngine:
 
     def __init__(self, user_id: str = "default") -> None:
         self._user_id = user_id
-        self._user_dir = _get_user_dir(user_id)
+        self._user_dir = get_user_dir(user_id)
         self.results_dir = self._user_dir / "results"
         self.results_dir.mkdir(parents=True, exist_ok=True)
         self._cache: Dict[str, Dict[str, Any]] = {}
