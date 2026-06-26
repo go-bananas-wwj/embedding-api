@@ -1,15 +1,136 @@
-# Embedding API 接口文档 v1.0
+# Embedding API 接口文档 v2.0
 
-> **文档版本**: 1.0  
+> **文档版本**: 2.0  
 > **服务版本**: 0.1.0  
-> **最后更新**: 2026-06-10  
+> **最后更新**: 2026-06-26  
 > **GitHub**: [go-bananas-wwj/embedding-api](https://github.com/go-bananas-wwj/embedding-api)
+
+---
+
+## ✅ 快速测试清单
+
+下面列出本文档中所有接口的 `curl` 命令，按顺序排列。复制粘贴即可逐条测试。
+
+> **说明**：
+> - 基础 URL 统一使用生产环境 `http://60.31.21.42:22065`。
+> - 标注、模型相关接口（`/annotations/*`、`/models/*`、`/system-models/*`）在 `config.yaml` 中未配置 `auth` 时，使用默认用户 `default`，无需 API Key。
+> - 若配置了 API Key，请在命令中加上 `-H 'X-API-Key: your_key'` 或 `-H 'Authorization: Bearer your_key'`。
+> - 带 `class_id`、`ann_id`、`model_id`、`job_id`、`filename` 的命令需要先调用创建接口获取真实 ID，再替换示例值。
+
+```bash
+# 1. 基础接口
+curl -s "http://60.31.21.42:22065/health"
+curl -s "http://60.31.21.42:22065/regions"
+curl -s "http://60.31.21.42:22065/regions/harbin"
+
+# 2. Patch 列表与详情
+curl -s "http://60.31.21.42:22065/regions/harbin/patches?page=1&page_size=5"
+curl -s "http://60.31.21.42:22065/regions/harbin/patches?page=1&page_size=20&bbox=126.5,45.74,126.55,45.76"
+curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000"
+
+# 3. Embedding（多种格式）
+curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/embedding?format=png&version=v2&month=2025-04" -o /tmp/emb_patch_000000.png
+curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/embedding?format=npy&version=v2&month=2025-04" -o /tmp/emb_patch_000000.npy
+curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/embedding?format=json&version=v2&month=2025-04"
+curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/embedding?format=cache&version=v2&month=2025-04" -o /tmp/emb_patch_000000_cache.png
+
+# 4. 下游任务
+curl -s "http://60.31.21.42:22065/regions/harbin/tasks"
+curl -s "http://60.31.21.42:22065/regions/harbin/tasks/change_detection/summary?version=v1&period=2025-04_vs_2025-06"
+curl -s "http://60.31.21.42:22065/regions/harbin/tasks/building_extraction/summary?version=v1"
+curl -s "http://60.31.21.42:22065/regions/harbin/tasks/land_use_classification/summary?version=v1"
+
+# 5. 单 Patch 任务结果 / 预测 / 标签
+curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/tasks/change_detection/result?format=png&version=v1&period=2025-04_vs_2025-06" -o /tmp/cd_patch_000000.png
+curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/tasks/building_extraction/result?format=png&version=v1" -o /tmp/be_patch_000000.png
+curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/tasks/land_use_classification/result?format=png&version=v1" -o /tmp/lu_patch_000000.png
+curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/tasks/building_extraction/prediction?version=v1" -o /tmp/be_pred_patch_000000.npy
+curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/tasks/building_extraction/label?version=v1"
+
+# 6. 瓦片
+curl -s "http://60.31.21.42:22065/regions/harbin/tasks/change_detection/tiles?version=v1&period=2025-04_vs_2025-06"
+curl -s "http://60.31.21.42:22065/regions/harbin/tasks/change_detection/tiles/12/6745/3201.png?version=v1&period=2025-04_vs_2025-06"
+
+# 7. 标注类别（先创建，再使用返回的 class_id）
+curl -s -X POST "http://60.31.21.42:22065/annotations/classes" \
+  -H 'Content-Type: application/json' \
+  -d '{"name": "建筑物", "color": "#ff0000"}'
+curl -s "http://60.31.21.42:22065/annotations/classes"
+curl -s -X PATCH "http://60.31.21.42:22065/annotations/classes/cls_abc123" \
+  -H 'Content-Type: application/json' \
+  -d '{"name": "高层建筑物"}'
+curl -s -X DELETE "http://60.31.21.42:22065/annotations/classes/cls_abc123"
+
+# 8. 标注（先创建类别和标注，再使用返回的 ann_id）
+curl -s "http://60.31.21.42:22065/annotations?region_id=harbin&patch_id=patch_000000&task_type=building_extraction"
+curl -s -X POST "http://60.31.21.42:22065/annotations" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "region_id": "harbin",
+    "patch_id": "patch_000000",
+    "month": "2025-04",
+    "class_id": "cls_abc123",
+    "task_type": "building_extraction",
+    "geometry": {"type": "mask", "mask_b64": "iVBORw0KGgoAAAANSUhEUgAAAQAAAAEAC..."}
+  }'
+curl -s "http://60.31.21.42:22065/annotations/ann_def456"
+curl -s -X DELETE "http://60.31.21.42:22065/annotations/ann_def456"
+
+# 9. 自定义模型（先创建并训练完成，再使用返回的 model_id / job_id）
+curl -s "http://60.31.21.42:22065/models"
+curl -s -X POST "http://60.31.21.42:22065/models" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "name": "my-building-head",
+    "model_type": "classification",
+    "task_type": "building_extraction",
+    "region_id": "harbin",
+    "embedding_version": "v2"
+  }'
+curl -s "http://60.31.21.42:22065/models/model_ghi789"
+curl -s -X PATCH "http://60.31.21.42:22065/models/model_ghi789" \
+  -H 'Content-Type: application/json' \
+  -d '{"name": "my-building-head-v2"}'
+curl -s -X DELETE "http://60.31.21.42:22065/models/model_ghi789"
+curl -s -X POST "http://60.31.21.42:22065/models/model_ghi789/infer" \
+  -H 'Content-Type: application/json' \
+  -d '{"region_id": "harbin", "patch_id": "patch_000000", "month": "2025-04"}'
+curl -s -X POST "http://60.31.21.42:22065/models/model_ghi789/infer_batch" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "region_id": "harbin",
+    "patch_ids": ["patch_000000", "patch_000001"],
+    "month": "2025-04"
+  }'
+curl -s "http://60.31.21.42:22065/models/jobs/job_jkl012"
+curl -s "http://60.31.21.42:22065/models/results/infer_model_xxx_harbin_patch_000000_2025-04.png"
+
+# 10. 系统预训练模型
+curl -s "http://60.31.21.42:22065/system-models?region_id=harbin"
+curl -s "http://60.31.21.42:22065/system-models/land_cover_classification/classes?region_id=harbin&version=v2"
+curl -s -X POST "http://60.31.21.42:22065/system-models/land_cover_classification/infer?region_id=harbin&patch_id=patch_000000&month=2025-04&version=v2"
+curl -s "http://60.31.21.42:22065/system-models/results/land_cover_classification_harbin_patch_000000_2025-04.png"
+
+# 11. SAM3 交互式分割
+curl -s "http://60.31.21.42:22065/regions/harbin/sam3/status"
+curl -s -X POST "http://60.31.21.42:22065/regions/harbin/sam3/embed" \
+  -H 'Content-Type: application/json' \
+  -d '{"patch_id": "patch_000000", "month": "2025-10"}'
+curl -s -X POST "http://60.31.21.42:22065/regions/harbin/sam3/segment" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "embedding_id": "harbin_patch_000000_2025-10",
+    "point_coords": [[0.52, 0.48]],
+    "point_labels": [1],
+    "multimask_output": true
+  }'
+```
 
 ---
 
 ## 📖 阅读指南
 
-本文档面向**前端开发团队**，用通俗语言解释每一个接口的用途、参数和返回值。如果你遇到不理解的术语，先看下面的「核心概念」章节。
+本文档面向**前端开发团队**和**测试人员**，用通俗语言解释每一个接口的用途、参数和返回值。所有示例均已填充真实值，复制粘贴即可运行。如果你遇到不理解的术语，先看下面的「核心概念」章节。
 
 ---
 
@@ -29,34 +150,32 @@ Patch（图块）是我们把一整块大区域切分成的小方块。每个 Pa
 
 Embedding 是深度学习模型把卫星影像「翻译」成的高维向量。可以理解为：模型「看懂」了这张图，并用一串数字记录了它的特征。
 
-- **哈尔滨**: 嵌入以 **PNG 图片**形式存储（64×64 像素，RGB 三通道），便于直接展示
-- **海淀**: 嵌入以 **NPY 数组**形式存储（64 通道 × 128×128），是原始数学向量
+- **哈尔滨**: 嵌入以 **PNG 图片**形式存储（64×64 像素，RGB 三通道），便于直接展示；同时提供 `.npy` 原始数组
+- **海淀**: 嵌入以 **NPZ/NPY 数组**形式存储（多通道 × 128×128），是原始数学向量
 
 **类比**: 如果卫星影像是一篇文章，Embedding 就是这篇文章的「摘要」—— 浓缩了关键信息，但不可直接阅读。
 
 ### 什么是下游任务？
 
-下游任务是在 Embedding 基础上做的「具体监测」，比如：
+下游任务是在 Embedding 基础上做的「具体监测」。当前 API 已统一为 **5 个任务 ID**，无论你之前使用的是什么别名，现在都应该用这 5 个 ID：
 
-| 任务英文名 | 中文名 | 监测内容 |
-|-----------|--------|---------|
-| `change_detection` | 变化检测 | 基于两期 embedding 差分检测变化区域 |
-| `building_extraction` | 建筑物提取 | 提取建筑物/建筑工地 |
-| `land_use_classification` | 土地利用分类 | 耕地、建设用地等土地利用类型 |
-| `land_cover_classification` | 土地覆盖分类 | WorldCover / Dynamic World 土地覆盖 |
-| `water_extraction` | 水体提取 | JRC 水体提取 |
+| 任务英文名 | 中文名 | 监测内容 | 对应老任务（已废弃） |
+|-----------|--------|---------|---------------------|
+| `change_detection` | 变化检测 | 基于两期 embedding 差分检测变化区域 | `building_change`、`demolition` |
+| `building_extraction` | 建筑物提取 | 提取建筑物、建筑工地 | `construction` |
+| `land_use_classification` | 土地利用分类 | 耕地、建设用地等土地利用类型 | `farmland`、`land_conversion` |
+| `land_cover_classification` | 土地覆盖分类 | WorldCover / Dynamic World 土地覆盖 | 无 |
+| `water_extraction` | 水体提取 | JRC 水体提取 | 无 |
 
 **版本说明**:
-- **V1**: 单期监测，只有一个时间点的结果
-- **V2**: 变化监测，对比两个时间点的差异（如 `2025-04_vs_2025-06`）
+- **V1**: 单期监测，只有一个时间点的结果，需指定 `month`（如 `2025-04`）
+- **V2**: 变化监测，对比两个时间点的差异，需指定 `period`（如 `2025-04_vs_2025-06`）
 
-> 哈尔滨现有数据已映射到新专题：`construction` → `building_extraction`，
-> `farmland` / `land_conversion` → `land_use_classification`，
-> `change_detection` / `building_change` / `demolition` → `change_detection`。
+> ⚠️ **旧任务 ID 已废弃**：`construction`、`building_change`、`farmland`、`land_conversion`、`demolition` 这些名称已从 API 和配置中移除。请统一使用上表中的 5 个新 ID。服务端通过配置映射保证老数据仍然可用（例如请求 `building_extraction` 会自动读取原 `construction` 目录的数据）。
 
 ### 什么是瓦片（Tile）？
 
-瓦片是切成小片的 PNG 图片，前端地图库（如 Leaflet、Mapbox）可以直接叠加到地图上显示监测结果。
+瓦片是切成小片的 PNG 图片，前端地图库（如 Leaflet、Mapbox）可以直接叠加到地图上显示监测结果。注意当前版本的 `/tiles/{z}/{x}/{y}.png` 返回 `501 Not Implemented`，请使用 `/tiles` 列表接口获取按 Patch 切分的结果图。
 
 ---
 
@@ -79,6 +198,8 @@ http://localhost:9061
 - **Swagger UI**（交互式调试）: `http://60.31.21.42:22065/docs`
 - **ReDoc**（美观文档）: `http://60.31.21.42:22065/redoc`
 
+> 默认情况下 Swagger / ReDoc 是关闭的，需要通过环境变量 `DOCS_URL=/docs` 和 `REDOC_URL=/redoc` 开启。
+
 ### 启动服务
 
 ```bash
@@ -92,31 +213,47 @@ docker-compose up -d
 ```
 
 > **环境变量配置**（可选，生产环境建议设置）：
-> - `CONFIG_FILE` — 指定配置文件路径，默认 `./config.yaml`
-> - `LOG_LEVEL` — 日志级别，默认 `INFO`
-> - `TZ` — 时区，默认 `Asia/Shanghai`
+> - `CONFIG_PATH` — 指定配置文件路径，默认 `./config.yaml`
+> - `CORS_ORIGINS` — 逗号分隔的允许跨域来源，为空则拒绝跨域请求
+> - `DOCS_URL` / `REDOC_URL` — 在线文档路径
 >
-> **CORS**：服务已配置跨域，前端可直接从浏览器调用。如需限制特定域名，修改 `app/main.py` 中的 `CORSMiddleware` 配置。
+> **CORS**：服务默认 `allow_origins=[]`，前端浏览器调用前必须在服务端设置 `CORS_ORIGINS`。
 
 ---
 
 ## 📡 接口总览
 
-| 分类 | 接口 | 说明 |
-|------|------|------|
-| **基础** | `GET /health` | 服务健康检查 |
-| **区域** | `GET /regions` | 列出所有区域 |
-| **区域** | `GET /regions/{region_id}` | 区域详情 |
-| **Patch** | `GET /regions/{region_id}/patches` | Patch 列表（支持分页+地理过滤） |
-| **Patch** | `GET /regions/{region_id}/patches/{patch_id}` | 单个 Patch 详情 |
-| **嵌入** | `GET /.../embedding?format=png\|npy\|json` | 查询嵌入数据 |
-| **任务** | `GET /regions/{region_id}/tasks` | 列出下游任务 |
-| **任务** | `GET /.../tasks/{task_type}/summary` | 任务统计摘要 |
-| **任务** | `GET /.../tasks/{task_type}/result` | 单 Patch 结果图 |
-| **任务** | `GET /.../tasks/{task_type}/prediction` | 原始预测数据 |
-| **任务** | `GET /.../tasks/{task_type}/label` | 标签数据 |
-| **瓦片** | `GET /.../tasks/{task_type}/tiles` | 列出可用瓦片 |
-| **瓦片** | `GET /.../tiles/{z}/{x}/{y}.png` | 地图瓦片 |
+| 分类 | 接口 | 方法 | 说明 |
+|------|------|------|------|
+| **基础** | `/health` | GET | 服务健康检查 |
+| **区域** | `/regions` | GET | 列出所有区域 |
+| **区域** | `/regions/{region_id}` | GET | 区域详情 |
+| **Patch** | `/regions/{region_id}/patches` | GET | Patch 列表（支持分页+地理过滤） |
+| **Patch** | `/regions/{region_id}/patches/{patch_id}` | GET | 单个 Patch 详情 |
+| **嵌入** | `/regions/{region_id}/patches/{patch_id}/embedding` | GET | 查询嵌入数据 |
+| **任务** | `/regions/{region_id}/tasks` | GET | 列出下游任务 |
+| **任务** | `/regions/{region_id}/tasks/{task_type}/summary` | GET | 任务统计摘要 |
+| **任务** | `/regions/{region_id}/patches/{patch_id}/tasks/{task_type}/result` | GET | 单 Patch 结果图 |
+| **任务** | `/regions/{region_id}/patches/{patch_id}/tasks/{task_type}/prediction` | GET | 原始预测数据 |
+| **任务** | `/regions/{region_id}/patches/{patch_id}/tasks/{task_type}/label` | GET | 标签数据 |
+| **瓦片** | `/regions/{region_id}/tasks/{task_type}/tiles` | GET | 列出可用瓦片 |
+| **瓦片** | `/regions/{region_id}/tasks/{task_type}/tiles/{z}/{x}/{y}.png` | GET | 标准 XYZ 瓦片（暂未实现） |
+| **标注** | `/annotations/classes` | GET/POST/PATCH/DELETE | 标注类别管理 |
+| **标注** | `/annotations` | GET/POST | 标注查询与创建 |
+| **标注** | `/annotations/{ann_id}` | GET/DELETE | 单条标注 |
+| **自定义模型** | `/models` | GET/POST | 模型列表 / 创建训练 |
+| **自定义模型** | `/models/{model_id}` | GET/PATCH/DELETE | 模型详情 / 重命名 / 删除 |
+| **自定义模型** | `/models/{model_id}/infer` | POST | 单 Patch 推理 |
+| **自定义模型** | `/models/{model_id}/infer_batch` | POST | 批量推理 |
+| **自定义模型** | `/models/jobs/{job_id}` | GET | 训练任务状态 |
+| **自定义模型** | `/models/results/{filename}` | GET | 下载推理结果图 |
+| **系统模型** | `/system-models` | GET | 列出系统预训练模型 |
+| **系统模型** | `/system-models/{task_id}/classes` | GET | 系统模型类别定义 |
+| **系统模型** | `/system-models/{task_id}/infer` | POST | 系统模型单 Patch 推理 |
+| **系统模型** | `/system-models/results/{filename}` | GET | 下载系统模型结果图 |
+| **SAM3** | `/regions/{region_id}/sam3/status` | GET/POST | 状态查询 |
+| **SAM3** | `/regions/{region_id}/sam3/embed` | POST | 预加载影像并计算 embedding |
+| **SAM3** | `/regions/{region_id}/sam3/segment` | POST | 点选分割 |
 
 ---
 
@@ -133,6 +270,11 @@ GET /health
 **什么时候用**: 页面加载时检查后端可用性，或服务监控心跳。
 
 **请求参数**: 无
+
+**curl 示例**:
+```bash
+curl -s "http://60.31.21.42:22065/health"
+```
 
 **成功响应** (200):
 ```json
@@ -163,6 +305,11 @@ GET /regions
 
 **请求参数**: 无
 
+**curl 示例**:
+```bash
+curl -s "http://60.31.21.42:22065/regions"
+```
+
 **成功响应** (200):
 ```json
 {
@@ -172,18 +319,24 @@ GET /regions
       "name": "哈尔滨新区",
       "patch_count": 424,
       "tasks": [
-        "construction",
-        "building_change",
-        "farmland",
-        "land_conversion",
-        "demolition"
+        "change_detection",
+        "building_extraction",
+        "land_use_classification",
+        "land_cover_classification",
+        "water_extraction"
       ]
     },
     {
       "id": "haidian",
       "name": "海淀区",
       "patch_count": 320,
-      "tasks": []
+      "tasks": [
+        "change_detection",
+        "building_extraction",
+        "land_use_classification",
+        "land_cover_classification",
+        "water_extraction"
+      ]
     }
   ]
 }
@@ -196,7 +349,7 @@ GET /regions
 | `patch_count` | int | 该区域包含的 Patch 总数 |
 | `tasks` | string[] | 该区域支持的下游任务列表 |
 
-**注意**: 海淀区 `tasks` 为空，因为下游任务尚未完成。后续添加任务后自动更新。
+**注意**: 海淀区虽然列出了 5 个任务，但当前 `versions` 为空，因此任务结果、预测、标签等接口会返回 `404`，仅 Embedding 接口可用。
 
 ---
 
@@ -216,6 +369,11 @@ GET /regions/{region_id}
 |------|------|------|------|
 | `region_id` | string | 是 | 区域 ID，如 `harbin` 或 `haidian` |
 
+**curl 示例**:
+```bash
+curl -s "http://60.31.21.42:22065/regions/harbin"
+```
+
 **成功响应** (200):
 ```json
 {
@@ -223,18 +381,33 @@ GET /regions/{region_id}
   "name": "哈尔滨新区",
   "patch_count": 424,
   "tasks": {
-    "construction": {
-      "name": "建筑工地监测",
-      "description": "监测建筑工地变化情况",
+    "change_detection": {
+      "name": "变化检测",
+      "description": "基于两期 embedding 差分的变化检测",
+      "versions": ["v1"]
+    },
+    "building_extraction": {
+      "name": "建筑物提取",
+      "description": "建筑物提取与建筑工地监测（映射原 construction 任务）",
       "versions": ["v1", "v2"]
     },
-    "building_change": {
-      "name": "建筑变化监测",
-      "description": "监测建筑物变化情况",
-      "versions": ["v1"]
+    "land_use_classification": {
+      "name": "土地利用分类",
+      "description": "土地利用分类与转换监测（映射原 farmland / land_conversion 任务）",
+      "versions": ["v1", "v2"]
+    },
+    "land_cover_classification": {
+      "name": "土地覆盖分类",
+      "description": "土地覆盖分类（基于预训练 Linear Probe，结果需实时推理）",
+      "versions": []
+    },
+    "water_extraction": {
+      "name": "水体提取",
+      "description": "水体提取（基于预训练 Linear Probe，结果需实时推理）",
+      "versions": []
     }
   },
-  "embeddings": ["v2"]
+  "embeddings": ["v1", "v2"]
 }
 ```
 
@@ -272,10 +445,13 @@ GET /regions/{region_id}/patches?page=1&page_size=20&bbox=minx,miny,maxx,maxy
 
 **坐标顺序**：`minx,miny,maxx,maxy` 分别对应 **最小经度、最小纬度、最大经度、最大纬度**。
 
-**bbox 示例**:
-```
-# 过滤哈尔滨新区中心区域
-bbox=126.5,45.74,126.55,45.76
+**curl 示例**:
+```bash
+# 不分页获取前 5 个 Patch
+curl -s "http://60.31.21.42:22065/regions/harbin/patches?page=1&page_size=5"
+
+# 使用 bbox 过滤哈尔滨新区中心区域
+curl -s "http://60.31.21.42:22065/regions/harbin/patches?page=1&page_size=20&bbox=126.5,45.74,126.55,45.76"
 ```
 
 **成功响应** (200):
@@ -284,6 +460,7 @@ bbox=126.5,45.74,126.55,45.76
   "total": 424,
   "page": 1,
   "page_size": 20,
+  "has_next": true,
   "patches": [
     {
       "patch_id": "patch_000000",
@@ -303,7 +480,8 @@ bbox=126.5,45.74,126.55,45.76
       },
       "time_range": ["2023-01", "2025-10"],
       "has_embedding": true,
-      "available_tasks": ["construction", "building_change", "farmland"]
+      "available_months": ["2025-04", "2025-06", "2025-08", "2025-09", "2025-10"],
+      "available_tasks": ["change_detection", "building_extraction", "land_use_classification"]
     }
   ]
 }
@@ -314,13 +492,14 @@ bbox=126.5,45.74,126.55,45.76
 | `total` | int | 符合条件的 Patch 总数 |
 | `page` | int | 当前页码 |
 | `page_size` | int | 每页数量 |
-| `has_next` | bool | 是否有下一页（`total > page * page_size` 时为 `true`） |
+| `has_next` | bool | 是否有下一页 |
 | `patch_id` | string | Patch 唯一标识 |
 | `bounds_wgs84` | float[4] | 经纬度范围 `[min_lng, min_lat, max_lng, max_lat]` |
-| `sources` | object | 各数据源包含的影像/样本数量（如 `s2: 182` 表示 Sentinel-2 有 182 个时间切片） |
+| `sources` | object | 各数据源包含的影像/样本数量 |
 | `time_range` | string[2] | 数据时间范围 `[开始年月, 结束年月]`，格式为 `YYYY-MM` |
 | `has_embedding` | bool | 是否有嵌入数据 |
-| `available_tasks` | string[] | 该 Patch 有结果的下游任务（前端可用此字段动态渲染「查看任务」按钮，只显示有数据的任务） |
+| `available_months` | string[] | 该 Patch 有 Embedding 的月份列表 |
+| `available_tasks` | string[] | 该 Patch 有结果的下游任务（前端可用此字段动态渲染「查看任务」按钮） |
 
 **前端提示**: `bounds_wgs84` 可以直接用于在地图上绘制矩形框，表示 Patch 的位置。前端可通过 `has_next` 判断是否需要显示「加载更多」按钮。
 
@@ -343,6 +522,11 @@ GET /regions/{region_id}/patches/{patch_id}
 | `region_id` | string | 是 | 区域 ID |
 | `patch_id` | string | 是 | Patch ID，如 `patch_000000` |
 
+**curl 示例**:
+```bash
+curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000"
+```
+
 **成功响应**: 与「列出 Patch」中的单个 Patch 结构相同。
 
 **错误响应**:
@@ -352,7 +536,7 @@ GET /regions/{region_id}/patches/{patch_id}
 
 ### 6. 获取嵌入数据
 
-获取某个 Patch 的 Embedding（嵌入向量）。支持三种返回格式。
+获取某个 Patch 的 Embedding（嵌入向量）。支持四种返回格式。
 
 ```
 GET /regions/{region_id}/patches/{patch_id}/embedding?format=png
@@ -362,6 +546,7 @@ GET /regions/{region_id}/patches/{patch_id}/embedding?format=png
 - `format=png`: 前端展示嵌入的可视化热图
 - `format=npy`: 下载原始数据用于进一步分析
 - `format=json`: 快速查看嵌入的统计信息
+- `format=cache`: 自动选择可用格式（优先 PNG）
 
 **路径参数**:
 
@@ -378,8 +563,6 @@ GET /regions/{region_id}/patches/{patch_id}/embedding?format=png
 | `version` | string | 否 | - | Embedding 版本：`v1`（V4 模型）/`v2`（V5 模型）；不传时依次尝试可用版本 |
 | `month` | string | 否 | - | 时间序列月份，如 `2025-04`（哈尔滨）或 `20251201`（海淀）；不传时自动回退到该 Patch 第一个可用月份 |
 
-**四种格式的区别**:
-
 #### format=png（默认）
 
 返回 **PNG 图片**，Content-Type: `image/png`
@@ -387,10 +570,14 @@ GET /regions/{region_id}/patches/{patch_id}/embedding?format=png
 - **哈尔滨**: 64×64 像素的 RGB 可视化图
 - **海淀**: 如果有可视化图则返回，否则尝试返回多源数据合成图
 
-**前端用法**: 直接放在 `<img>` 标签里展示。
+**curl 示例**:
+```bash
+curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/embedding?format=png&version=v2&month=2025-04" -o /tmp/emb_patch_000000.png
+```
 
+**前端用法**: 直接放在 `<img>` 标签里展示。
 ```html
-<img src="http://60.31.21.42:22065/regions/harbin/patches/patch_000000/embedding?format=png" />
+<img src="http://60.31.21.42:22065/regions/harbin/patches/patch_000000/embedding?format=png&version=v2&month=2025-04" />
 ```
 
 #### format=npy
@@ -398,16 +585,14 @@ GET /regions/{region_id}/patches/{patch_id}/embedding?format=png
 返回 **NPY 二进制文件**，Content-Type: `application/octet-stream`
 
 - **哈尔滨**: 如果存在 `.npy` 文件则返回
-- **海淀**: 返回 64×128×128 的 float32 数组
+- **海淀**: 返回 NPZ 中解压出的 embedding 数组
+
+**curl 示例**:
+```bash
+curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/embedding?format=npy&version=v2&month=2025-04" -o /tmp/emb_patch_000000.npy
+```
 
 **前端用法**: 需要在前端用 JavaScript 解析 numpy 格式（可用 `jsnumpy` 库），或下载后交给 Python 后端处理。
-
-```javascript
-// 下载并解析 NPY
-const response = await fetch('/regions/haidian/patches/patch_000000/embedding?format=npy');
-const arrayBuffer = await response.arrayBuffer();
-// 使用 jsnumpy 解析
-```
 
 #### format=cache
 
@@ -416,29 +601,40 @@ const arrayBuffer = await response.arrayBuffer();
 - **适用场景**：前端不确定某个 Patch 有哪些格式时，让后端自动选择
 - **返回 Content-Type**：根据实际返回的数据决定（`image/png` 或 `application/octet-stream`）
 
+**curl 示例**:
+```bash
+curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/embedding?format=cache&version=v2&month=2025-04" -o /tmp/emb_patch_000000_cache
+```
+
 ```html
 <!-- 自动选择最佳格式展示 -->
-<img src="/regions/harbin/patches/patch_000000/embedding?format=cache" />
+<img src="http://60.31.21.42:22065/regions/harbin/patches/patch_000000/embedding?format=cache&version=v2&month=2025-04" />
 ```
 
 #### format=json
 
 返回 **JSON 统计信息**，Content-Type: `application/json`
 
+**curl 示例**:
+```bash
+curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/embedding?format=json&version=v2&month=2025-04"
+```
+
+**成功响应**:
 ```json
 {
   "patch_id": "patch_000000",
-  "shape": [60, 8],
-  "dtype": "float32",
-  "min": -0.476,
-  "max": 0.404,
-  "mean": -0.005
+  "shape": [64, 64, 3],
+  "dtype": "uint8",
+  "min": 0.0,
+  "max": 255.0,
+  "mean": 112.5
 }
 ```
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `shape` | int[] | 数组维度。实际值因区域和模型版本而异，如 `[60, 8]` 表示 60 个通道 × 8 个特征 |
+| `shape` | int[] | 数组维度。PNG 格式通常为 `[H, W, 3]`；NPY 格式因模型版本而异 |
 | `dtype` | string | 数据类型，`float32` 或 `uint8` |
 | `min` | float | 最小值 |
 | `max` | float | 最大值 |
@@ -464,27 +660,44 @@ GET /regions/{region_id}/tasks
 |------|------|------|------|
 | `region_id` | string | 是 | 区域 ID |
 
+**curl 示例**:
+```bash
+curl -s "http://60.31.21.42:22065/regions/harbin/tasks"
+```
+
 **成功响应** (200):
 ```json
 {
   "tasks": [
     {
-      "id": "construction",
-      "name": "建筑工地监测",
-      "description": "监测建筑工地变化情况",
+      "id": "change_detection",
+      "name": "变化检测",
+      "description": "基于两期 embedding 差分的变化检测",
+      "versions": ["v1"]
+    },
+    {
+      "id": "building_extraction",
+      "name": "建筑物提取",
+      "description": "建筑物提取与建筑工地监测（映射原 construction 任务）",
       "versions": ["v1", "v2"]
     },
     {
-      "id": "building_change",
-      "name": "建筑变化监测",
-      "description": "监测建筑物变化情况",
-      "versions": ["v1"]
+      "id": "land_use_classification",
+      "name": "土地利用分类",
+      "description": "土地利用分类与转换监测（映射原 farmland / land_conversion 任务）",
+      "versions": ["v1", "v2"]
     },
     {
-      "id": "farmland",
-      "name": "耕地非农非粮监测",
-      "description": "监测耕地被非法占用情况",
-      "versions": ["v1"]
+      "id": "land_cover_classification",
+      "name": "土地覆盖分类",
+      "description": "土地覆盖分类（基于预训练 Linear Probe，结果需实时推理）",
+      "versions": []
+    },
+    {
+      "id": "water_extraction",
+      "name": "水体提取",
+      "description": "水体提取（基于预训练 Linear Probe，结果需实时推理）",
+      "versions": []
     }
   ]
 }
@@ -518,22 +731,47 @@ GET /regions/{region_id}/tasks/{task_type}/summary?version=v1&period=2025-04_vs_
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `region_id` | string | 是 | 区域 ID |
-| `task_type` | string | 是 | 任务类型，如 `construction` |
+| `task_type` | string | 是 | 任务类型，如 `change_detection` |
 
 **查询参数**:
 
 | 参数 | 类型 | 必填 | 默认值 | 说明 |
 |------|------|------|--------|------|
 | `version` | string | 否 | `v1` | 版本号 |
-| `period` | string | 否 | - | 时间周期，部分任务版本需要指定，如 `2025-04_vs_2025-06` |
+| `period` | string | 否 | - | 时间周期，V2 任务需要指定，如 `2025-04_vs_2025-06` |
+
+**curl 示例**:
+```bash
+# V1 单期任务
+curl -s "http://60.31.21.42:22065/regions/harbin/tasks/building_extraction/summary?version=v1"
+
+# V2 变化检测任务
+curl -s "http://60.31.21.42:22065/regions/harbin/tasks/change_detection/summary?version=v1&period=2025-04_vs_2025-06"
+curl -s "http://60.31.21.42:22065/regions/harbin/tasks/land_use_classification/summary?version=v1"
+```
 
 **成功响应** (200):
 ```json
 {
-  "task": "construction",
-  "name": "建筑工地监测",
-  "version": "v2",
+  "task": "change_detection",
+  "name": "变化检测",
+  "version": "v1",
   "period": "2025-04_vs_2025-06",
+  "grid_size": 64,
+  "total_polygons": null,
+  "total_patches": 424,
+  "positive_patches": null,
+  "negative_patches": null
+}
+```
+
+或对于 `building_extraction` V1：
+```json
+{
+  "task": "building_extraction",
+  "name": "建筑物提取",
+  "version": "v1",
+  "period": null,
   "grid_size": 64,
   "total_polygons": 24,
   "total_patches": 424,
@@ -555,6 +793,8 @@ GET /regions/{region_id}/tasks/{task_type}/summary?version=v1&period=2025-04_vs_
 | `negative_patches` | int | 无异常的 Patch 数量 |
 
 **业务含义**: `positive_patches` / `total_patches` 就是异常检出率。例如 31/424 ≈ 7.3% 的 Patch 发现了建筑工地。
+
+> **注意**: `land_cover_classification` 和 `water_extraction` 当前 `versions` 为空，调用摘要接口会返回 `404`。
 
 ---
 
@@ -582,7 +822,19 @@ GET /regions/{region_id}/patches/{patch_id}/tasks/{task_type}/result?format=png&
 |------|------|------|--------|------|
 | `format` | string | 否 | `png` | `png` 返回图片，`npy` 返回原始数组 |
 | `version` | string | 否 | `v1` | 版本号 |
-| `period` | string | 否 | - | 时间周期（如 `2025-10`），部分任务版本需要指定 |
+| `period` | string | 否 | - | 时间周期（V2 任务需要），如 `2025-04_vs_2025-06` |
+
+**curl 示例**:
+```bash
+# V1 单期结果
+curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/tasks/building_extraction/result?format=png&version=v1" -o /tmp/be_patch_000000.png
+curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/tasks/land_use_classification/result?format=png&version=v1" -o /tmp/lu_patch_000000.png
+
+# V2 变化检测结果
+curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/tasks/change_detection/result?format=png&version=v1&period=2025-04_vs_2025-06" -o /tmp/cd_patch_000000.png
+curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/tasks/building_extraction/result?format=png&version=v2&period=2025-04_vs_2025-06" -o /tmp/be_v2_patch_000000.png
+curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/tasks/land_use_classification/result?format=png&version=v2&period=2025-04_vs_2025-06" -o /tmp/lu_v2_patch_000000.png
+```
 
 **成功响应**:
 - `format=png`: 返回 PNG 图片 (`image/png`)
@@ -590,11 +842,13 @@ GET /regions/{region_id}/patches/{patch_id}/tasks/{task_type}/result?format=png&
 
 **前端用法**:
 ```html
-<img src="/regions/harbin/patches/patch_000000/tasks/construction/result?format=png" />
+<img src="http://60.31.21.42:22065/regions/harbin/patches/patch_000000/tasks/building_extraction/result?format=png&version=v1" />
 ```
 
 **错误响应**:
 - `404`: 该 Patch 在该任务下没有结果
+
+> **注意**: `land_cover_classification` 和 `water_extraction` 当前没有预生成结果图，调用此接口会返回 `404`。若需要结果，请使用「系统预训练模型」的 `/system-models/{task_id}/infer` 接口实时推理。
 
 ---
 
@@ -607,6 +861,33 @@ GET /regions/{region_id}/patches/{patch_id}/tasks/{task_type}/prediction?version
 ```
 
 **什么时候用**: 前端需要做自定义可视化（如调整阈值显示不同置信度区域），或下载给分析师进一步处理。
+
+**路径参数**:
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `region_id` | string | 是 | 区域 ID |
+| `patch_id` | string | 是 | Patch ID |
+| `task_type` | string | 是 | 任务类型 |
+
+**查询参数**:
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| `version` | string | 否 | `v1` | 版本号 |
+| `period` | string | 否 | - | 时间周期（V2 任务需要） |
+
+**curl 示例**:
+```bash
+# V1 单期预测
+curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/tasks/building_extraction/prediction?version=v1" -o /tmp/be_pred_patch_000000.npy
+curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/tasks/land_use_classification/prediction?version=v1" -o /tmp/lu_pred_patch_000000.npy
+
+# V2 变化检测预测
+curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/tasks/change_detection/prediction?version=v1&period=2025-04_vs_2025-06" -o /tmp/cd_pred_patch_000000.npy
+curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/tasks/building_extraction/prediction?version=v2&period=2025-04_vs_2025-06" -o /tmp/be_v2_pred_patch_000000.npy
+curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/tasks/land_use_classification/prediction?version=v2&period=2025-04_vs_2025-06" -o /tmp/lu_v2_pred_patch_000000.npy
+```
 
 **返回**: NPY 二进制文件 (`application/octet-stream`)
 
@@ -626,10 +907,34 @@ GET /regions/{region_id}/patches/{patch_id}/tasks/{task_type}/label?version=v1&p
 
 **什么时候用**: 对比「模型预测」和「真实标签」，计算准确率或生成混淆矩阵。
 
+**路径参数**:
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `region_id` | string | 是 | 区域 ID |
+| `patch_id` | string | 是 | Patch ID |
+| `task_type` | string | 是 | 任务类型 |
+
+**查询参数**:
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| `version` | string | 否 | `v1` | 版本号 |
+| `period` | string | 否 | - | 时间周期（V2 任务需要） |
+
+**curl 示例**:
+```bash
+curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/tasks/building_extraction/label?version=v1"
+curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/tasks/change_detection/label?version=v1&period=2025-04_vs_2025-06"
+```
+
 **返回**:
-- 如果存在 `.npy` 标签文件：返回 NPY 二进制数组
-- 如果存在 `meta.json` 元数据文件：返回 JSON 元数据
+- 如果存在 `.npy` 标签文件：返回 NPY 二进制数组 (`application/octet-stream`)
+- 如果存在 `meta.json` 元数据文件：返回 JSON 元数据 (`application/json`)
 - 如果两者都不存在：返回 `404`
+
+**错误响应**:
+- `404`: 标签或元数据不存在
 
 ---
 
@@ -643,16 +948,46 @@ GET /regions/{region_id}/tasks/{task_type}/tiles?version=v1&period=...
 
 **什么时候用**: 前端地图组件初始化时，预加载瓦片索引。
 
+**路径参数**:
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `region_id` | string | 是 | 区域 ID |
+| `task_type` | string | 是 | 任务类型 |
+
+**查询参数**:
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| `version` | string | 否 | `v1` | 版本号 |
+| `period` | string | 否 | - | 时间周期（V2 任务需要） |
+
+**curl 示例**:
+```bash
+curl -s "http://60.31.21.42:22065/regions/harbin/tasks/change_detection/tiles?version=v1&period=2025-04_vs_2025-06"
+curl -s "http://60.31.21.42:22065/regions/harbin/tasks/building_extraction/tiles?version=v1"
+curl -s "http://60.31.21.42:22065/regions/harbin/tasks/building_extraction/tiles?version=v2&period=2025-04_vs_2025-06"
+curl -s "http://60.31.21.42:22065/regions/harbin/tasks/land_use_classification/tiles?version=v1"
+```
+
 **成功响应**:
 ```json
 {
   "tiles": [
-    {"patch_id": "patch_000000", "period": "2025-10", "filename": "patch_000000_2025-10.png"},
-    {"patch_id": "patch_000001", "period": "2025-10", "filename": "patch_000001_2025-10.png"}
+    {"patch_id": "patch_000000", "period": "2025-04_vs_2025-06", "filename": "patch_000000_2025-04_vs_2025-06.png"},
+    {"patch_id": "patch_000001", "period": "2025-04_vs_2025-06", "filename": "patch_000001_2025-04_vs_2025-06.png"}
   ],
   "total": 2
 }
 ```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `tiles` | object[] | 瓦片信息列表 |
+| `tiles[].patch_id` | string | Patch ID |
+| `tiles[].period` | string | 时间段（V2 任务） |
+| `tiles[].filename` | string | 瓦片文件名 |
+| `total` | int | 瓦片总数 |
 
 ---
 
@@ -670,19 +1005,1122 @@ GET /regions/{region_id}/tasks/{task_type}/tiles/{z}/{x}/{y}.png?version=v1&peri
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
+| `region_id` | string | 是 | 区域 ID |
+| `task_type` | string | 是 | 任务类型 |
 | `z` | int | 是 | 缩放级别 (zoom level) |
 | `x` | int | 是 | 瓦片 X 坐标 |
 | `y` | int | 是 | 瓦片 Y 坐标 |
 
+**查询参数**:
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| `version` | string | 否 | `v1` | 版本号 |
+| `period` | string | 否 | - | 时间周期（V2 任务需要） |
+
+**curl 示例**:
+```bash
+curl -s "http://60.31.21.42:22065/regions/harbin/tasks/change_detection/tiles/12/6745/3201.png?version=v1&period=2025-04_vs_2025-06"
+```
+
 **前端用法** (Leaflet 示例):
 ```javascript
 L.tileLayer(
-  '/regions/harbin/tasks/construction/tiles/{z}/{x}/{y}.png?version=v1',
+  'http://60.31.21.42:22065/regions/harbin/tasks/change_detection/tiles/{z}/{x}/{y}.png?version=v1&period=2025-04_vs_2025-06',
   { opacity: 0.7 }
 ).addTo(map);
 ```
 
-**注意**: 当前版本瓦片按 Patch 切分，非标准 XYZ 切片。如需标准地图瓦片服务，后续可扩展。
+**注意**: 当前版本 XYZ 瓦片服务**暂未实现**，调用会返回 `501 Not Implemented`。如需查看结果图，请使用：
+- `/regions/{region_id}/patches/{patch_id}/tasks/{task_type}/result?format=png`
+- `/regions/{region_id}/tasks/{task_type}/tiles` 列表接口
+
+---
+
+## 🔐 认证
+
+服务支持 **API-Key 用户隔离**。在 `config.yaml` 中配置：
+
+```yaml
+auth:
+  type: "api_key"
+  users:
+    key_alice_xxx:
+      user_id: "alice"
+      name: "Alice"
+```
+
+请求时携带：
+
+```bash
+curl -H 'X-API-Key: key_alice_xxx' http://60.31.21.42:22065/models
+# 或
+curl -H 'Authorization: Bearer key_alice_xxx' http://60.31.21.42:22065/models
+```
+
+未配置 `auth` 时，所有请求使用默认用户 `default`。
+
+受保护的接口包括：
+- `/annotations/*`
+- `/models/*`
+- `/system-models/*`
+
+---
+
+## 🏷️ 标注管理
+
+自定义训练依赖用户标注。流程：
+
+1. 创建类别：`POST /annotations/classes`
+2. 创建标注：`POST /annotations`
+3. 训练模型：`POST /models`
+
+### 14. 列出标注类别
+
+列出当前用户的所有类别。
+
+```
+GET /annotations/classes
+```
+
+**curl 示例**:
+```bash
+curl -s "http://60.31.21.42:22065/annotations/classes"
+```
+
+**成功响应** (200):
+```json
+[
+  {
+    "id": "cls_abc123",
+    "name": "建筑物",
+    "color": "#ff0000"
+  },
+  {
+    "id": "cls_def456",
+    "name": "水体",
+    "color": "#0000ff"
+  }
+]
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | string | 类别唯一 ID |
+| `name` | string | 类别名称 |
+| `color` | string | 颜色，16 进制字符串 |
+
+---
+
+### 15. 创建标注类别
+
+创建一个新的类别，用于后续标注。
+
+```
+POST /annotations/classes
+```
+
+**请求体**:
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `name` | string | 是 | 类别名称 |
+| `color` | string | 是 | 类别颜色，16 进制，如 `#ff0000` |
+
+**curl 示例**:
+```bash
+curl -s -X POST "http://60.31.21.42:22065/annotations/classes" \
+  -H 'Content-Type: application/json' \
+  -d '{"name": "建筑物", "color": "#ff0000"}'
+```
+
+**成功响应** (200):
+```json
+{
+  "id": "cls_abc123",
+  "name": "建筑物",
+  "color": "#ff0000"
+}
+```
+
+---
+
+### 16. 重命名标注类别
+
+修改某个类别的名称。
+
+```
+PATCH /annotations/classes/{class_id}
+```
+
+**路径参数**:
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `class_id` | string | 是 | 类别 ID |
+
+**请求体**:
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `name` | string | 是 | 新名称 |
+
+**curl 示例**:
+```bash
+curl -s -X PATCH "http://60.31.21.42:22065/annotations/classes/cls_abc123" \
+  -H 'Content-Type: application/json' \
+  -d '{"name": "高层建筑物"}'
+```
+
+**成功响应** (200):
+```json
+{
+  "status": "ok"
+}
+```
+
+---
+
+### 17. 删除标注类别
+
+删除某个类别，并级联删除该类别下的所有标注。
+
+```
+DELETE /annotations/classes/{class_id}
+```
+
+**路径参数**:
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `class_id` | string | 是 | 类别 ID |
+
+**curl 示例**:
+```bash
+curl -s -X DELETE "http://60.31.21.42:22065/annotations/classes/cls_abc123"
+```
+
+**成功响应** (200):
+```json
+{
+  "status": "ok"
+}
+```
+
+---
+
+### 18. 列出标注
+
+查询当前用户的所有标注，支持按区域、Patch、任务类型过滤。
+
+```
+GET /annotations?region_id=harbin&patch_id=patch_000000&task_type=building_extraction
+```
+
+**查询参数**:
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `region_id` | string | 否 | 区域 ID |
+| `patch_id` | string | 否 | Patch ID |
+| `task_type` | string | 否 | 任务类型 |
+
+**curl 示例**:
+```bash
+curl -s "http://60.31.21.42:22065/annotations?region_id=harbin&patch_id=patch_000000&task_type=building_extraction"
+```
+
+**成功响应** (200):
+```json
+[
+  {
+    "id": "ann_def456",
+    "region_id": "harbin",
+    "patch_id": "patch_000000",
+    "month": "2025-04",
+    "class_id": "cls_abc123",
+    "task_type": "building_extraction",
+    "score": 1.0,
+    "geometry": {
+      "type": "mask",
+      "mask_b64": "iVBORw0KGgoAAAANSUhEUgAAAQAAAAEAC..."
+    },
+    "before_month": null,
+    "after_month": null,
+    "created_at": "2026-06-26T10:00:00"
+  }
+]
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | string | 标注唯一 ID |
+| `region_id` | string | 区域 ID |
+| `patch_id` | string | Patch ID |
+| `month` | string | 月份 |
+| `class_id` | string | 类别 ID |
+| `task_type` | string | 任务类型 |
+| `score` | float | 置信度/分数 |
+| `geometry` | object | 几何信息，支持 `mask`、`polygon`、`polyline` |
+| `before_month` | string | 变化检测前月份 |
+| `after_month` | string | 变化检测后月份 |
+| `created_at` | string | 创建时间 ISO8601 |
+
+---
+
+### 19. 创建标注
+
+创建一条新的标注。`geometry` 支持三种类型：
+- `mask`: base64 编码的 PNG 掩码
+- `polygon`: 多边形点序列 `[[x1,y1], [x2,y2], ...]`
+- `polyline`: 折线点序列 `[[x1,y1], [x2,y2], ...]`
+
+```
+POST /annotations
+```
+
+**请求体**:
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `region_id` | string | 是 | 区域 ID |
+| `patch_id` | string | 是 | Patch ID |
+| `month` | string | 是 | 月份，如 `2025-04` |
+| `class_id` | string | 是 | 类别 ID |
+| `geometry` | object | 是 | 几何对象 |
+| `task_type` | string | 否 | 任务类型，如 `building_extraction` |
+| `score` | float | 否 | 置信度，默认 1.0 |
+| `before_month` | string | 否 | 变化检测前月份 |
+| `after_month` | string | 否 | 变化检测后月份 |
+
+**curl 示例 — Mask 标注**:
+```bash
+curl -s -X POST "http://60.31.21.42:22065/annotations" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "region_id": "harbin",
+    "patch_id": "patch_000000",
+    "month": "2025-04",
+    "class_id": "cls_abc123",
+    "task_type": "building_extraction",
+    "geometry": {
+      "type": "mask",
+      "mask_b64": "iVBORw0KGgoAAAANSUhEUgAAAQAAAAEAC..."
+    }
+  }'
+```
+
+**curl 示例 — Polygon 标注**:
+```bash
+curl -s -X POST "http://60.31.21.42:22065/annotations" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "region_id": "harbin",
+    "patch_id": "patch_000000",
+    "month": "2025-04",
+    "class_id": "cls_abc123",
+    "task_type": "building_extraction",
+    "geometry": {
+      "type": "polygon",
+      "points": [[0.1, 0.1], [0.5, 0.1], [0.5, 0.5], [0.1, 0.5]]
+    }
+  }'
+```
+
+**curl 示例 — 变化检测标注（需 before_month / after_month）**:
+```bash
+curl -s -X POST "http://60.31.21.42:22065/annotations" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "region_id": "harbin",
+    "patch_id": "patch_000000",
+    "month": "2025-04",
+    "class_id": "cls_abc123",
+    "task_type": "change_detection",
+    "before_month": "2025-04",
+    "after_month": "2025-06",
+    "geometry": {
+      "type": "mask",
+      "mask_b64": "iVBORw0KGgoAAAANSUhEUgAAAQAAAAEAC..."
+    }
+  }'
+```
+
+**成功响应** (200):
+```json
+{
+  "id": "ann_def456",
+  "region_id": "harbin",
+  "patch_id": "patch_000000",
+  "month": "2025-04",
+  "class_id": "cls_abc123",
+  "task_type": "building_extraction",
+  "score": 1.0,
+  "geometry": {
+    "type": "mask",
+    "mask_b64": "iVBORw0KGgoAAAANSUhEUgAAAQAAAAEAC..."
+  },
+  "before_month": null,
+  "after_month": null,
+  "created_at": "2026-06-26T10:00:00"
+}
+```
+
+---
+
+### 20. 获取单条标注
+
+根据 ID 获取单条标注。
+
+```
+GET /annotations/{ann_id}
+```
+
+**路径参数**:
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `ann_id` | string | 是 | 标注 ID |
+
+**curl 示例**:
+```bash
+curl -s "http://60.31.21.42:22065/annotations/ann_def456"
+```
+
+**成功响应** (200): 与创建标注返回的结构相同。
+
+**错误响应**:
+- `404`: 标注不存在
+
+---
+
+### 21. 删除标注
+
+删除某条标注及其掩码文件。
+
+```
+DELETE /annotations/{ann_id}
+```
+
+**路径参数**:
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `ann_id` | string | 是 | 标注 ID |
+
+**curl 示例**:
+```bash
+curl -s -X DELETE "http://60.31.21.42:22065/annotations/ann_def456"
+```
+
+**成功响应** (200):
+```json
+{
+  "status": "ok"
+}
+```
+
+---
+
+## 🤖 自定义模型
+
+### 22. 列出自定义模型
+
+列出当前用户训练好的模型。
+
+```
+GET /models
+```
+
+**curl 示例**:
+```bash
+curl -s "http://60.31.21.42:22065/models"
+```
+
+**成功响应** (200):
+```json
+[
+  {
+    "id": "model_ghi789",
+    "name": "my-building-head",
+    "type": "classification",
+    "task_type": "building_extraction",
+    "status": "completed",
+    "created_at": "2026-06-26T10:00:00",
+    "completed_at": "2026-06-26T10:05:00",
+    "classes": [
+      {"id": "cls_abc123", "name": "建筑物", "color": "#ff0000"}
+    ],
+    "accuracy": 0.92,
+    "n_samples": 120,
+    "model_path": "users/default/models/model_ghi789/model.pt",
+    "message": null,
+    "job_id": "job_jkl012"
+  }
+]
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | string | 模型唯一 ID |
+| `name` | string | 模型名称 |
+| `type` | string | 模型类型：`classification` 或 `change_detection` |
+| `task_type` | string | 任务类型 |
+| `status` | string | 状态：`training` / `completed` / `failed` |
+| `created_at` | string | 创建时间 |
+| `completed_at` | string | 完成时间 |
+| `classes` | object[] | 模型类别列表 |
+| `accuracy` | float | 训练准确率 |
+| `n_samples` | int | 训练样本数 |
+| `model_path` | string | 模型文件路径 |
+| `message` | string | 失败原因或提示信息 |
+| `job_id` | string | 关联的训练任务 ID |
+
+---
+
+### 23. 创建并训练模型
+
+创建模型并启动异步训练任务。训练完成后才能调用推理接口。
+
+```
+POST /models
+```
+
+**请求体**:
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `name` | string | 是 | 模型名称 |
+| `model_type` | string | 是 | `classification` 或 `change_detection` |
+| `task_type` | string | 是 | 任务类型，如 `building_extraction` |
+| `region_id` | string | 是 | 区域 ID |
+| `embedding_version` | string | 否 | 嵌入版本，默认 `v2` |
+
+**curl 示例**:
+```bash
+curl -s -X POST "http://60.31.21.42:22065/models" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "name": "my-building-head",
+    "model_type": "classification",
+    "task_type": "building_extraction",
+    "region_id": "harbin",
+    "embedding_version": "v2"
+  }'
+```
+
+**成功响应** (200):
+```json
+{
+  "id": "model_ghi789",
+  "name": "my-building-head",
+  "type": "classification",
+  "task_type": "building_extraction",
+  "status": "training",
+  "created_at": "2026-06-26T10:00:00",
+  "completed_at": null,
+  "classes": [
+    {"id": "cls_abc123", "name": "建筑物", "color": "#ff0000"}
+  ],
+  "accuracy": null,
+  "n_samples": null,
+  "model_path": null,
+  "message": null,
+  "job_id": "job_jkl012"
+}
+```
+
+---
+
+### 24. 获取模型详情
+
+获取单个模型的状态。
+
+```
+GET /models/{model_id}
+```
+
+**路径参数**:
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `model_id` | string | 是 | 模型 ID |
+
+**curl 示例**:
+```bash
+curl -s "http://60.31.21.42:22065/models/model_ghi789"
+```
+
+**成功响应** (200): 与列出模型中的单个模型结构相同。
+
+**错误响应**:
+- `404`: 模型不存在
+
+---
+
+### 25. 重命名模型
+
+修改模型名称。
+
+```
+PATCH /models/{model_id}
+```
+
+**路径参数**:
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `model_id` | string | 是 | 模型 ID |
+
+**请求体**:
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `name` | string | 是 | 新名称 |
+
+**curl 示例**:
+```bash
+curl -s -X PATCH "http://60.31.21.42:22065/models/model_ghi789" \
+  -H 'Content-Type: application/json' \
+  -d '{"name": "my-building-head-v2"}'
+```
+
+**成功响应** (200):
+```json
+{
+  "status": "ok"
+}
+```
+
+---
+
+### 26. 删除模型
+
+删除模型及其关联文件。
+
+```
+DELETE /models/{model_id}
+```
+
+**路径参数**:
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `model_id` | string | 是 | 模型 ID |
+
+**curl 示例**:
+```bash
+curl -s -X DELETE "http://60.31.21.42:22065/models/model_ghi789"
+```
+
+**成功响应** (200):
+```json
+{
+  "status": "ok"
+}
+```
+
+---
+
+### 27. 单 Patch 推理
+
+使用训练完成的模型对单个 Patch 进行推理。
+
+```
+POST /models/{model_id}/infer
+```
+
+**路径参数**:
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `model_id` | string | 是 | 模型 ID |
+
+**请求体**:
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `region_id` | string | 是 | 区域 ID |
+| `patch_id` | string | 是 | Patch ID |
+| `month` | string | 是 | 月份，如 `2025-04` |
+
+**curl 示例**:
+```bash
+curl -s -X POST "http://60.31.21.42:22065/models/model_ghi789/infer" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "region_id": "harbin",
+    "patch_id": "patch_000000",
+    "month": "2025-04"
+  }'
+```
+
+**成功响应** (200):
+```json
+{
+  "result_url": "/models/results/infer_model_ghi789_harbin_patch_000000_2025-04.png"
+}
+```
+
+**错误响应**:
+- `400`: 模型未训练完成或不存在
+
+---
+
+### 28. 批量推理
+
+对最多 100 个 Patch 批量推理。
+
+```
+POST /models/{model_id}/infer_batch
+```
+
+**路径参数**:
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `model_id` | string | 是 | 模型 ID |
+
+**请求体**:
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `region_id` | string | 是 | 区域 ID |
+| `patch_ids` | string[] | 是 | Patch ID 列表，最多 100 个 |
+| `month` | string | 是 | 月份，如 `2025-04` |
+
+**curl 示例**:
+```bash
+curl -s -X POST "http://60.31.21.42:22065/models/model_ghi789/infer_batch" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "region_id": "harbin",
+    "patch_ids": ["patch_000000", "patch_000001"],
+    "month": "2025-04"
+  }'
+```
+
+**成功响应** (200):
+```json
+[
+  {
+    "patch_id": "patch_000000",
+    "status": "success",
+    "result_url": "/models/results/infer_model_ghi789_harbin_patch_000000_2025-04.png",
+    "error": null
+  },
+  {
+    "patch_id": "patch_000001",
+    "status": "success",
+    "result_url": "/models/results/infer_model_ghi789_harbin_patch_000001_2025-04.png",
+    "error": null
+  }
+]
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `patch_id` | string | Patch ID |
+| `status` | string | `success` 或 `error` |
+| `result_url` | string | 结果图路径 |
+| `error` | string | 错误信息 |
+
+---
+
+### 29. 查询训练任务状态
+
+获取异步训练任务的状态。
+
+```
+GET /models/jobs/{job_id}
+```
+
+**路径参数**:
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `job_id` | string | 是 | 任务 ID |
+
+**curl 示例**:
+```bash
+curl -s "http://60.31.21.42:22065/models/jobs/job_jkl012"
+```
+
+**成功响应** (200):
+```json
+{
+  "job_id": "job_jkl012",
+  "status": "completed",
+  "model_id": "model_ghi789",
+  "accuracy": 0.92,
+  "n_samples": 120,
+  "model_path": "users/default/models/model_ghi789/model.pt",
+  "message": null
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `job_id` | string | 任务 ID |
+| `status` | string | `running` / `completed` / `failed` |
+| `model_id` | string | 关联模型 ID |
+| `accuracy` | float | 训练准确率 |
+| `n_samples` | int | 训练样本数 |
+| `model_path` | string | 模型文件路径 |
+| `message` | string | 失败原因或提示 |
+
+---
+
+### 30. 下载推理结果图
+
+根据文件名下载自定义模型的推理结果 PNG。
+
+```
+GET /models/results/{filename}
+```
+
+**路径参数**:
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `filename` | string | 是 | 结果文件名 |
+
+**curl 示例**:
+```bash
+curl -s "http://60.31.21.42:22065/models/results/infer_model_ghi789_harbin_patch_000000_2025-04.png" -o /tmp/infer_result.png
+```
+
+**成功响应** (200): 返回 PNG 图片 (`image/png`)
+
+---
+
+## 🧩 系统预训练模型
+
+### 31. 列出系统预训练模型
+
+列出某个区域可用的系统预训练模型。
+
+```
+GET /system-models?region_id=harbin
+```
+
+**查询参数**:
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `region_id` | string | 是 | 区域 ID |
+
+**curl 示例**:
+```bash
+curl -s "http://60.31.21.42:22065/system-models?region_id=harbin"
+```
+
+**成功响应** (200):
+```json
+[
+  {
+    "id": "land_cover_classification",
+    "name": "土地覆盖分类",
+    "description": "WorldCover / Dynamic World 土地覆盖分类",
+    "versions": ["v1", "v2"]
+  },
+  {
+    "id": "water_extraction",
+    "name": "水体提取",
+    "description": "JRC Global Surface Water 水体提取",
+    "versions": ["v1", "v2"]
+  },
+  {
+    "id": "building_extraction",
+    "name": "建筑物提取",
+    "description": "OSM 建筑物提取",
+    "versions": ["v1", "v2"]
+  }
+]
+```
+
+---
+
+### 32. 获取系统模型类别定义
+
+获取系统预训练模型的类别定义（颜色、名称等）。
+
+```
+GET /system-models/{task_id}/classes?region_id=harbin&version=v2
+```
+
+**路径参数**:
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `task_id` | string | 是 | 任务 ID，如 `land_cover_classification` |
+
+**查询参数**:
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| `region_id` | string | 是 | - | 区域 ID |
+| `version` | string | 否 | `v2` | 模型版本 |
+
+**curl 示例**:
+```bash
+curl -s "http://60.31.21.42:22065/system-models/land_cover_classification/classes?region_id=harbin&version=v2"
+```
+
+**成功响应** (200):
+```json
+[
+  {"id": "sys_land_cover_classification_0", "name": "No data", "color": "#000000"},
+  {"id": "sys_land_cover_classification_1", "name": "Tree cover", "color": "#006400"},
+  {"id": "sys_land_cover_classification_2", "name": "Shrubland", "color": "#ffbb22"}
+]
+```
+
+---
+
+### 33. 系统模型单 Patch 推理
+
+使用系统预训练模型对单个 Patch 实时推理。
+
+```
+POST /system-models/{task_id}/infer?region_id=harbin&patch_id=patch_000000&month=2025-04&version=v2
+```
+
+**路径参数**:
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `task_id` | string | 是 | 任务 ID |
+
+**查询参数**:
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| `region_id` | string | 是 | - | 区域 ID |
+| `patch_id` | string | 是 | - | Patch ID |
+| `month` | string | 是 | - | 月份 |
+| `version` | string | 否 | `v2` | 模型版本 |
+
+**curl 示例**:
+```bash
+curl -s -X POST "http://60.31.21.42:22065/system-models/land_cover_classification/infer?region_id=harbin&patch_id=patch_000000&month=2025-04&version=v2"
+```
+
+**成功响应** (200):
+```json
+{
+  "result_url": "/system-models/results/land_cover_classification_harbin_patch_000000_2025-04.png"
+}
+```
+
+---
+
+### 34. 下载系统模型结果图
+
+根据文件名下载系统模型推理结果 PNG。
+
+```
+GET /system-models/results/{filename}
+```
+
+**路径参数**:
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `filename` | string | 是 | 结果文件名 |
+
+**curl 示例**:
+```bash
+curl -s "http://60.31.21.42:22065/system-models/results/land_cover_classification_harbin_patch_000000_2025-04.png" -o /tmp/sys_lc_result.png
+```
+
+**成功响应** (200): 返回 PNG 图片 (`image/png`)
+
+---
+
+## 🎯 SAM3 交互式分割
+
+SAM3（Segment Anything with Concepts）是基于 Meta AI 的交互式实例分割模型。前端用户可以在卫星影像上点击点坐标，实时获取分割掩码。
+
+### 35. SAM3 状态查询
+
+查询 SAM3 模型加载状态和 GPU 内存使用情况。
+
+```
+GET /regions/{region_id}/sam3/status
+```
+
+**路径参数**:
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `region_id` | string | 是 | 区域 ID |
+
+**curl 示例**:
+```bash
+curl -s "http://60.31.21.42:22065/regions/harbin/sam3/status"
+```
+
+**成功响应** (200):
+```json
+{
+  "model_loaded": true,
+  "device": "cuda:0",
+  "gpu_memory": {
+    "allocated_mb": 3842,
+    "reserved_mb": 4096
+  },
+  "cache": {
+    "size": 3,
+    "max_size": 20,
+    "entries": ["harbin_patch_000000_2025-10"]
+  }
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `model_loaded` | bool | 模型是否已加载到 GPU |
+| `device` | string | 当前使用的设备（`cuda:N` 或 `cpu`，未加载时为 `not_loaded`） |
+| `gpu_memory.allocated_mb` | int | 已分配的 GPU 显存（MB） |
+| `gpu_memory.reserved_mb` | int | 预留的 GPU 显存（MB） |
+| `cache.size` | int | 当前缓存的 embedding 数量 |
+| `cache.max_size` | int | 缓存上限（默认 20） |
+| `cache.entries` | string[] | 缓存的 embedding_id 列表 |
+
+**错误响应**:
+- `404`: 区域不存在
+
+**缓存淘汰语义**:
+嵌入缓存采用 LRU（最近最少使用）策略。当 `cache.size` 达到 `max_size` 后，新的嵌入请求会自动淘汰最旧的缓存项，并释放对应的 GPU 张量。缓存项在服务器重启后全部清空。
+
+---
+
+### 36. SAM3 Embed — 预加载影像
+
+预加载 patch 的 S2 RGB 影像，计算 SAM3 embedding，返回影像和 embedding_id。
+
+```
+POST /regions/{region_id}/sam3/embed
+```
+
+**路径参数**:
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `region_id` | string | 是 | 区域 ID |
+
+**请求体**:
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `patch_id` | string | 是 | Patch ID |
+| `month` | string | 是 | 月份，如 `2025-10` |
+
+**curl 示例**:
+```bash
+curl -s -X POST "http://60.31.21.42:22065/regions/harbin/sam3/embed" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "patch_id": "patch_000000",
+    "month": "2025-10"
+  }'
+```
+
+**成功响应** (200):
+```json
+{
+  "embedding_id": "harbin_patch_000000_2025-10",
+  "status": "ready",
+  "image": {
+    "width": 256,
+    "height": 256,
+    "format": "png",
+    "data": "iVBORw0KGgoAAAANSUhEUgAAAQAAAAEAC..."
+  }
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `embedding_id` | string | 后续 segment 请求的标识符 |
+| `status` | string | 状态，通常为 `ready` |
+| `image.width` | int | 影像宽度 |
+| `image.height` | int | 影像高度 |
+| `image.format` | string | 图片格式 |
+| `image.data` | string | S2 RGB 自然色影像的 base64 PNG |
+
+**错误码**:
+- `400`: 请求参数错误（如非法 patch_id、路径穿越尝试）
+- `404`: Patch 或 S2 影像不存在
+- `503`: GPU 内存不足或模型加载失败
+
+**前端提示**: `image.data` 可直接解码为 `<img>` 标签显示，让用户在影像上点击。
+
+---
+
+### 37. SAM3 Segment — 点选分割
+
+基于已缓存的 embedding 和用户点击的点坐标，生成分割掩码。
+
+```
+POST /regions/{region_id}/sam3/segment
+```
+
+**路径参数**:
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `region_id` | string | 是 | 区域 ID |
+
+**请求体**:
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `embedding_id` | string | 是 | embed 接口返回的 ID |
+| `point_coords` | float[][] | 是 | 归一化坐标 `[[x, y], ...]`，范围 `[0, 1]` |
+| `point_labels` | int[] | 是 | `1`=正样本（前景），`0`=负样本（背景） |
+| `multimask_output` | bool | 否 | `true` 返回 3 个候选掩码，`false` 返回 1 个，默认 `true` |
+
+**curl 示例**:
+```bash
+curl -s -X POST "http://60.31.21.42:22065/regions/harbin/sam3/segment" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "embedding_id": "harbin_patch_000000_2025-10",
+    "point_coords": [[0.52, 0.48]],
+    "point_labels": [1],
+    "multimask_output": true
+  }'
+```
+
+**成功响应** (200):
+```json
+{
+  "masks": [
+    {
+      "data": "iVBORw0KGgoAAAANSUhEUgAAAQAAAAEAC...",
+      "score": 0.95,
+      "bbox": [120, 110, 35, 42]
+    }
+  ]
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `data` | string | 二值掩码的 base64 PNG（白色=选中区域，黑色=背景） |
+| `score` | float | 模型置信度 `[0, 1]` |
+| `bbox` | int[] | 边界框 `[x, y, width, height]`（像素坐标） |
+
+**错误码**:
+- `404`: embedding_id 不存在（未调用 embed）
+- `422`: 坐标格式错误或越界
+- `503`: GPU 推理失败
+
+**前端提示**:
+- 掩码 PNG 可叠加在原始影像上显示（白色区域半透明覆盖）
+- `multimask_output=true` 时，前端可让用户从 3 个候选掩码中选择最佳结果
 
 ---
 
@@ -703,13 +2141,15 @@ L.tileLayer(
 | 状态码 | 含义 | 场景 |
 |--------|------|------|
 | `200` | 成功 | 请求正常处理 |
-| `400` | 请求格式错误 | Patch ID 格式非法、路径穿越尝试 |
-| `404` | 未找到 | 区域/Patch/任务/结果不存在 |
-| `413` | 请求体过大 | 文件超过 1GB 限制或图像超过 5000 万像素 |
+| `400` | 请求格式错误 | Patch ID 格式非法、路径穿越尝试、模型未训练完成 |
+| `401` | 未认证 | 缺少或错误的 API Key（仅在配置了 auth 时） |
+| `403` | 禁止访问 | 访问了其他用户的 job |
+| `404` | 未找到 | 区域/Patch/任务/结果/标签/模型不存在 |
+| `413` | 请求体过大 | 文件超过 100MB 限制或图像超过 5000 万像素 |
 | `422` | 参数校验失败 | 查询参数格式不正确（如 page=-1、bbox=nan、page_size=999） |
 | `500` | 服务器错误 | 内部异常，需联系后端排查 |
-| `501` | 未实现 | 瓦片服务等功能尚未实现 |
-| `503` | 服务不可用 | 服务正在启动中或重启中，稍后重试 |
+| `501` | 未实现 | 标准 XYZ 瓦片服务等功能尚未实现 |
+| `503` | 服务不可用 | 服务正在启动中、GPU 内存不足或模型加载失败 |
 
 > **注意**：请求 `/regions/{region_id}/patches/{patch_id}/embedding?format=png` 时，如果该区域该 Patch 只有 `.npy` 格式，响应头会包含 `X-Available-Format: npy`，提示前端可以请求 `format=npy` 获取原始数据。
 
@@ -717,19 +2157,19 @@ L.tileLayer(
 
 **区域不存在**:
 ```bash
-GET /regions/beijing
+curl -s "http://60.31.21.42:22065/regions/beijing"
 # → 404 {"detail": "Region 'beijing' not found"}
 ```
 
 **Patch 不存在**:
 ```bash
-GET /regions/harbin/patches/patch_999999
+curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_999999"
 # → 404 {"detail": "Patch 'patch_999999' not found"}
 ```
 
 **嵌入不存在**:
 ```bash
-GET /regions/haidian/patches/patch_999999/embedding
+curl -s "http://60.31.21.42:22065/regions/haidian/patches/patch_999999/embedding"
 # → 404 {"detail": "Embedding not found for patch 'patch_999999'"}
 ```
 
@@ -755,17 +2195,21 @@ config.yaml
 regions:
   shenzhen:
     name: "深圳"
-    patches_meta: "/data/shenzhen/patches_meta.json"
+    patches_meta: "data/shenzhen/patches_meta.json"
     embeddings:
-      v1: "/data/shenzhen/embeddings"
+      v1:
+        path: "data/shenzhen/embeddings/v1"
+        template: "{month}/{patch_id}.{fmt}"
+        formats: ["npy", "png", "json"]
     tasks:
-      construction:
-        name: "建筑工地监测"
+      change_detection:
+        name: "变化检测"
+        description: "基于两期 embedding 差分的变化检测"
         versions:
           v1:
-            results: "/data/shenzhen/results/construction"
-            predictions: "/data/shenzhen/predictions/construction"
-            labels: "/data/shenzhen/labels/construction"
+            results: "data/shenzhen/tasks/change_detection/v1/results"
+            predictions: "data/shenzhen/tasks/change_detection/v1/predictions"
+            labels: "data/shenzhen/tasks/change_detection/v1/labels"
 ```
 
 保存后，访问 `/regions` 即可看到新区域。
@@ -780,9 +2224,9 @@ regions:
         description: "监测城市绿地变化"
         versions:
           v1:
-            results: "/data/results/green_space"
-            predictions: "/data/predictions/green_space"
-            labels: "/data/labels/green_space"
+            results: "data/results/green_space"
+            predictions: "data/predictions/green_space"
+            labels: "data/labels/green_space"
 ```
 
 ---
@@ -803,8 +2247,10 @@ regions:
 ```
 1. GET /regions/{id}/tasks → 加载任务选择器
 2. 用户选择任务 → GET /regions/{id}/tasks/{task}/tiles → 加载瓦片列表
-3. 地图移动时 → GET /.../tiles/{z}/{x}/{y}.png → 动态加载瓦片
+3. 按 Patch 展示结果图 → GET /regions/{id}/patches/{pid}/tasks/{task}/result?format=png
 ```
+
+> 当前版本 `/tiles/{z}/{x}/{y}.png` 返回 501，建议先使用单 Patch 结果图或瓦片列表接口。
 
 ### 3. 前端 Fetch 示例
 
@@ -828,8 +2274,12 @@ async function fetchPatches(regionId: string, bbox: string, page = 1, pageSize =
 }
 
 // 3. 加载任务结果图
-function getResultImageUrl(regionId: string, patchId: string, taskType: string) {
-  return `${API_BASE}/regions/${regionId}/patches/${patchId}/tasks/${taskType}/result?format=png`;
+function getResultImageUrl(regionId: string, patchId: string, taskType: string, version = 'v1', period?: string) {
+  const url = new URL(`${API_BASE}/regions/${regionId}/patches/${patchId}/tasks/${taskType}/result`);
+  url.searchParams.set('format', 'png');
+  url.searchParams.set('version', version);
+  if (period) url.searchParams.set('period', period);
+  return url.toString();
 }
 ```
 
@@ -853,8 +2303,10 @@ function getResultImageUrl(regionId: string, patchId: string, taskType: string) 
 | 覆盖范围 | 126.5°E ~ 126.7°E, 45.7°N ~ 45.8°N |
 | 时间范围 | 2023-01 ~ 2025-10 |
 | 数据源 | Sentinel-2, Sentinel-1, Landsat, DEM, WorldCover 等 |
-| 嵌入格式 | PNG 64×64 RGB |
-| 下游任务 | 5 个（construction, building_change, farmland, land_conversion, change_detection） |
+| 嵌入格式 | PNG 64×64 RGB / NPY 原始数组 |
+| 下游任务 | 5 个（`change_detection`, `building_extraction`, `land_use_classification`, `land_cover_classification`, `water_extraction`） |
+| 有预生成结果的任务 | `change_detection` V1、<br>`building_extraction` V1/V2、<br>`land_use_classification` V1/V2 |
+| 需实时推理的任务 | `land_cover_classification`、`water_extraction`（通过 `/system-models`） |
 
 ### 海淀区 (haidian)
 
@@ -864,335 +2316,15 @@ function getResultImageUrl(regionId: string, patchId: string, taskType: string) 
 | 覆盖范围 | 116.2°E ~ 116.3°E, 39.9°N ~ 40.1°N |
 | 时间范围 | 2025-02 ~ 2026-04 |
 | 数据源 | Sentinel-2, Sentinel-1, Landsat, DEM, WorldCover 等 |
-| 嵌入格式 | NPY 64×128×128 float32 |
-| 下游任务 | 暂无（预留扩展） |
-
----
-
-## 🎯 SAM3 交互式分割
-
-SAM3（Segment Anything with Concepts）是基于 Meta AI 的交互式实例分割模型。前端用户可以在卫星影像上点击点坐标，实时获取分割掩码。
-
-### SAM3 Embed — 预加载影像
-
-预加载 patch 的 S2 RGB 影像，计算 SAM3 embedding，返回影像和 embedding_id。
-
-```
-POST /regions/{region_id}/sam3/embed
-```
-
-**请求体**:
-```json
-{
-  "patch_id": "patch_000000",
-  "month": "2025-10"
-}
-```
-
-**响应**:
-```json
-{
-  "embedding_id": "harbin_patch_000000_2025-10",
-  "status": "ready",
-  "image": {
-    "width": 256,
-    "height": 256,
-    "format": "png",
-    "data": "iVBORw0KGgoAAAANSUhEUgAAAQAAAAEAC..."
-  }
-}
-```
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `embedding_id` | string | 后续 segment 请求的标识符 |
-| `image.data` | string | S2 RGB 自然色影像的 base64 PNG |
-
-**错误码**:
-- `400` — 请求参数错误（如非法 patch_id、路径穿越尝试）
-- `404` — Patch 或 S2 影像不存在
-- `503` — GPU 内存不足或模型加载失败
-
-**前端提示**: `image.data` 可直接解码为 `<img>` 标签显示，让用户在影像上点击。
-
----
-
-### SAM3 Segment — 点选分割
-
-基于已缓存的 embedding 和用户点击的点坐标，生成分割掩码。
-
-```
-POST /regions/{region_id}/sam3/segment
-```
-
-**请求体**:
-```json
-{
-  "embedding_id": "harbin_patch_000000_2025-10",
-  "point_coords": [[0.52, 0.48]],
-  "point_labels": [1],
-  "multimask_output": true
-}
-```
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `embedding_id` | string | 是 | embed 接口返回的 ID |
-| `point_coords` | float[][] | 是 | 归一化坐标 `[[x, y], ...]`，范围 `[0, 1]` |
-| `point_labels` | int[] | 是 | `1`=正样本（前景），`0`=负样本（背景） |
-| `multimask_output` | bool | 否 | `true` 返回 3 个候选掩码，`false` 返回 1 个 |
-
-**响应**:
-```json
-{
-  "masks": [
-    {
-      "data": "iVBORw0KGgoAAAANSUhEUgAAAQAAAAEAC...",
-      "score": 0.95,
-      "bbox": [120, 110, 35, 42]
-    }
-  ]
-}
-```
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `data` | string | 二值掩码的 base64 PNG（白色=选中区域，黑色=背景） |
-| `score` | float | 模型置信度 `[0, 1]` |
-| `bbox` | int[] | 边界框 `[x, y, width, height]`（像素坐标） |
-
-**错误码**:
-- `404` — embedding_id 不存在（未调用 embed）
-- `422` — 坐标格式错误或越界
-- `503` — GPU 推理失败
-
-**前端提示**: 
-- 掩码 PNG 可叠加在原始影像上显示（白色区域半透明覆盖）
-- `multimask_output=true` 时，前端可让用户从 3 个候选掩码中选择最佳结果
-
----
-
-### SAM3 Status — 服务状态
-
-查询 SAM3 模型加载状态和 GPU 内存使用情况。
-
-```
-GET /regions/{region_id}/sam3/status
-```
-
-**响应**:
-```json
-{
-  "model_loaded": true,
-  "device": "cuda:0",
-  "gpu_memory": {
-    "allocated_mb": 3842,
-    "reserved_mb": 4096
-  },
-  "cache": {
-    "size": 3,
-    "max_size": 20,
-    "entries": ["harbin_patch_000000_2025-10"]
-  }
-}
-```
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `model_loaded` | bool | 模型是否已加载到 GPU |
-| `device` | string | 当前使用的设备（`cuda:N` 或 `cpu`） |
-| `gpu_memory.allocated_mb` | int | 已分配的 GPU 显存（MB） |
-| `cache.size` | int | 当前缓存的 embedding 数量 |
-| `cache.max_size` | int | 缓存上限（默认 20） |
-
-**错误码**:
-- `404` — 区域不存在
-
-**字段说明补充**:
-- `device`: 模型未加载时返回 `"not_loaded"`，加载后返回 `"cuda:N"` 或 `"cpu"`
-- `cache.entries`: 按最近使用顺序排列的 embedding_id 列表，最前面的是最近使用的
-
-**缓存淘汰语义**:
-嵌入缓存采用 LRU（最近最少使用）策略。当 `cache.size` 达到 `max_size` 后，新的嵌入请求会自动淘汰最旧的缓存项，并释放对应的 GPU 张量。缓存项在服务器重启后全部清空。
-
----
-
-## 🔐 认证
-
-服务支持 **API-Key 用户隔离**。在 `config.yaml` 中配置：
-
-```yaml
-auth:
-  type: "api_key"
-  users:
-    key_alice_xxx:
-      user_id: "alice"
-      name: "Alice"
-```
-
-请求时携带：
-
-```bash
-curl -H 'X-API-Key: key_alice_xxx' http://localhost:9061/models
-# 或
-curl -H 'Authorization: Bearer key_alice_xxx' http://localhost:9061/models
-```
-
-未配置 `auth` 时，所有请求使用默认用户 `default`。
-
----
-
-## 🏷️ 标注管理
-
-自定义训练依赖用户标注。流程：
-
-1. 创建类别：`POST /annotations/classes`
-2. 创建标注：`POST /annotations`
-3. 训练模型：`POST /models`
-
-### `GET /annotations/classes`
-
-列出当前用户的所有类别。
-
-### `POST /annotations/classes`
-
-创建类别。
-
-**请求体**:
-```json
-{
-  "name": "Building",
-  "color": "#ff0000"
-}
-```
-
-### `GET /annotations`
-
-查询标注，支持 `region_id`、`patch_id`、`task_type` 过滤。
-
-### `POST /annotations`
-
-创建标注。`geometry` 支持 `mask`（base64 PNG）、`polygon`、`polyline`。
-
-**请求体示例**:
-```json
-{
-  "region_id": "harbin",
-  "patch_id": "patch_000000",
-  "month": "2025-04",
-  "class_id": "cls_xxx",
-  "task_type": "building_extraction",
-  "geometry": {
-    "type": "mask",
-    "mask_b64": "iVBORw0KGgoAAAANSUhEUg..."
-  }
-}
-```
-
-变化检测标注需额外提供 `before_month` 和 `after_month`。
-
----
-
-## 🤖 自定义模型
-
-### `GET /models`
-
-列出当前用户训练好的模型。
-
-### `POST /models`
-
-创建并异步训练模型。
-
-**请求体**:
-```json
-{
-  "name": "my-building-head",
-  "model_type": "classification",
-  "task_type": "building_extraction",
-  "region_id": "harbin",
-  "embedding_version": "v2"
-}
-```
-
-`model_type` 可选 `classification` 或 `change_detection`。
-
-**响应**:
-```json
-{
-  "id": "model_xxxx",
-  "name": "my-building-head",
-  "status": "training",
-  ...
-}
-```
-
-### `GET /models/{model_id}`
-
-获取模型状态（`training` / `completed` / `failed`）。
-
-### `GET /models/jobs/{job_id}`
-
-查询训练任务状态。
-
-### `POST /models/{model_id}/infer`
-
-单 patch 推理。
-
-**请求体**:
-```json
-{
-  "region_id": "harbin",
-  "patch_id": "patch_000000",
-  "month": "2025-04"
-}
-```
-
-**响应**:
-```json
-{
-  "result_url": "/models/results/infer_model_xxx_harbin_patch_000000_2025-04.png"
-}
-```
-
-### `POST /models/{model_id}/infer_batch`
-
-批量推理，最多 100 个 patch。
-
-**请求体**:
-```json
-{
-  "region_id": "harbin",
-  "patch_ids": ["patch_000000", "patch_000001"],
-  "month": "2025-04"
-}
-```
-
----
-
-## 🧩 系统预训练模型
-
-### `GET /system-models?region_id=harbin`
-
-列出区域可用的系统预训练模型。
-
-### `GET /system-models/{task_id}/classes?region_id=harbin`
-
-获取模型类别定义，`task_id` 如 `land_cover_classification`。
-
-### `POST /system-models/{task_id}/infer`
-
-使用系统模型对单 patch 推理。
-
-**示例**:
-```bash
-curl -X POST "http://localhost:9061/system-models/land_cover_classification/infer?region_id=harbin&patch_id=patch_000000&month=2025-04"
-```
+| 嵌入格式 | NPZ 多通道数组 |
+| 下游任务 | 已定义 5 个，但 `versions` 为空 |
+| 可用接口 | `/regions/haidian/patches/*`、`/regions/haidian/patches/*/embedding` |
 
 ---
 
 ## 📞 技术支持
 
 - **GitHub Issues**: [go-bananas-wwj/embedding-api/issues](https://github.com/go-bananas-wwj/embedding-api/issues)
-- **服务监控**: `GET /health`
+- **服务监控**: `GET http://60.31.21.42:22065/health`
 - **在线调试**: `http://60.31.21.42:22065/docs`
 - **本地调试**: `http://localhost:9061/docs`
