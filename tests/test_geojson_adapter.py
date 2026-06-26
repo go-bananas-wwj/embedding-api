@@ -70,7 +70,7 @@ def test_rasterize_geometry():
         ],
     }
     mask = rasterize_geometry(geometry, bbox)
-    assert mask.shape == (256, 256)
+    assert mask.shape == (128, 128)
     assert mask.dtype == np.uint8
     assert mask.sum() > 0
 
@@ -93,7 +93,7 @@ def test_parse_annotations_for_training():
     assert records[0]["patch_id"] == "patch_000000"
     assert records[0]["month"] == "2025-04"
     assert records[0]["label_index"] == 1
-    assert records[0]["mask"].shape == (256, 256)
+    assert records[0]["mask"].shape == (128, 128)
 
 
 def test_parse_change_detection_annotations():

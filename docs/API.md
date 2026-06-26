@@ -1564,7 +1564,7 @@ GET /models/results/{filename}
 curl -s "http://60.31.21.42:22065/models/results/infer_model_ghi789_harbin_patch_000000_2025-04.png" -o /tmp/infer_result.png
 ```
 
-**成功响应** (200): 返回 PNG 图片 (`image/png`)
+**成功响应** (200): 返回 PNG 图片 (`image/png`)，尺寸统一为 **128×128** 像素。
 
 ---
 

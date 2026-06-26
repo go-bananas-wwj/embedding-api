@@ -17,7 +17,7 @@ from app.services.data_service import DataService
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MASK_SIZE = (256, 256)
+DEFAULT_MASK_SIZE = (128, 128)
 
 
 def _get_patch_bbox(region_id: str, patch_id: str) -> Tuple[float, float, float, float]:

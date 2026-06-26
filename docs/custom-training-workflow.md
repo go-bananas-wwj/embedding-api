@@ -41,7 +41,7 @@
 
 - **前端自治**：分类和标注完全由前端在浏览器 `localStorage` / `IndexedDB` 中管理，后端不再提供 `/annotations` 接口。
 - **训练包**：前端在调用 `POST /models` 时，把完整的标注包（GeoJSON FeatureCollection + classes 数组）一次性传给后端。
-- **后端训练**：后端解析 GeoJSON，把 WGS84 多边形栅格化为 256×256 mask，提取 embedding，训练一个轻量级的下游任务头（LogisticRegression）。
+- **后端训练**：后端解析 GeoJSON，把 WGS84 多边形栅格化为 128×128 mask，提取 embedding，训练一个轻量级的下游任务头（LogisticRegression）。
 - **模型名称用户定义**：`name` 字段由用户输入，后端只负责生成 `model_id`。
 
 ---
@@ -276,7 +276,8 @@ Content-Type: application/json
 1. 校验 `annotations` 和 `classes` 格式。
 2. 按 `patch_id` 分组 GeoJSON features。
 3. 读取每个 Patch 的 WGS84 bbox。
-4. 使用 `shapely` + `rasterio` 把 Polygon 栅格化为 256×256 mask。
+4. 使用 `shapely` + `rasterio` 把 Polygon 栅格化为 128×128 mask。
+5. 推理结果图统一输出为 128×128 PNG。
 5. 加载对应月份的 embedding。
 6. 提取正负样本，训练 `LogisticRegression`。
 7. 保存 `model.pkl`，更新模型状态。
@@ -458,7 +459,7 @@ GET /models/results/infer_model_xyz789_harbin_patch_000001_2025-04.png
 
 ### 响应
 
-直接返回 PNG 图片。
+直接返回 128×128 PNG 图片。
 
 ### 前端展示方式
 

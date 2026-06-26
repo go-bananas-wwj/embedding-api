@@ -138,7 +138,7 @@ class InferenceEngine:
             rgb = self._color_encode_classes(pred, classes, class_map)
 
         img = Image.fromarray(rgb).resize(
-            (256, 256), Image.Resampling.NEAREST
+            (128, 128), Image.Resampling.NEAREST
         )
         result_path = self.results_dir / result_filename
         img.save(result_path)

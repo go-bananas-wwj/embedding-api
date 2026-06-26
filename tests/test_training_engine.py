@@ -125,6 +125,7 @@ def test_classification_inference_color_matches_class_map(
     )
 
     img = np.array(Image.open(result_path))
+    assert img.shape[:2] == (128, 128), "Inference result should be 128x128"
     # At least some pixels should be colored with the class color (#FF0000).
     red_pixels = np.all(img == [255, 0, 0], axis=-1)
     assert red_pixels.sum() > 0, "Expected some red pixels from class color encoding"
@@ -201,4 +202,4 @@ def test_change_detection_inference_uses_before_and_after(
 
     assert result_path.endswith("_2025-04_vs_2025-06.png")
     img = np.array(Image.open(result_path))
-    assert img.shape == (256, 256, 4)
+    assert img.shape == (128, 128, 4)
