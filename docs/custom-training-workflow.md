@@ -146,6 +146,12 @@ curl -H "Authorization: Bearer your_api_key" http://60.31.21.42:22065/health
 | `before_month` | string | 条件 | 变化检测必填 |
 | `after_month` | string | 条件 | 变化检测必填 |
 
+### 多分类与多标注支持
+
+- 一个 `FeatureCollection` 可以包含**多个 Feature**，同一 `class_id` 在同一 Patch/时间下的多个 Polygon 会自动合并成一个 mask。
+- 一个训练请求可以包含**多个类别**；后端会为每个类别分配独立的数字标签（从 1 开始，0 为背景）。
+- 同一 Patch 内不同类别的像素不会被误标为背景：后端会先计算所有活跃类别的并集 mask，负样本仅从“任何类别都没有覆盖”的区域抽取。
+
 ---
 
 ## Step 2：创建模型并启动训练

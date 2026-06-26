@@ -203,3 +203,124 @@ def test_change_detection_inference_uses_before_and_after(
     assert result_path.endswith("_2025-04_vs_2025-06.png")
     img = np.array(Image.open(result_path))
     assert img.shape == (128, 128, 4)
+
+
+def test_multi_class_multi_feature_training(user_id):
+    """Multiple features and classes on the same patch should train successfully."""
+    features = [
+        {
+            "type": "Feature",
+            "properties": {
+                "patch_id": "patch_000000",
+                "region_id": "harbin",
+                "class_id": "cls_001",
+                "class_name": "建筑",
+                "color": "#FF0000",
+                "task_type": "building_extraction",
+                "month": "2025-04",
+            },
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [
+                    [
+                        [126.52, 45.75],
+                        [126.525, 45.75],
+                        [126.525, 45.753],
+                        [126.52, 45.753],
+                        [126.52, 45.75],
+                    ]
+                ],
+            },
+        },
+        {
+            "type": "Feature",
+            "properties": {
+                "patch_id": "patch_000000",
+                "region_id": "harbin",
+                "class_id": "cls_002",
+                "class_name": "道路",
+                "color": "#00FF00",
+                "task_type": "building_extraction",
+                "month": "2025-04",
+            },
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [
+                    [
+                        [126.525, 45.75],
+                        [126.53, 45.75],
+                        [126.53, 45.753],
+                        [126.525, 45.753],
+                        [126.525, 45.75],
+                    ]
+                ],
+            },
+        },
+        # Two features for cls_001 should be merged.
+        {
+            "type": "Feature",
+            "properties": {
+                "patch_id": "patch_000000",
+                "region_id": "harbin",
+                "class_id": "cls_001",
+                "class_name": "建筑",
+                "color": "#FF0000",
+                "task_type": "building_extraction",
+                "month": "2025-04",
+            },
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [
+                    [
+                        [126.52, 45.753],
+                        [126.525, 45.753],
+                        [126.525, 45.755],
+                        [126.52, 45.755],
+                        [126.52, 45.753],
+                    ]
+                ],
+            },
+        },
+    ]
+    annotations = GeoJSONFeatureCollection(
+        type="FeatureCollection",
+        features=[GeoJSONFeature.model_validate(f) for f in features],
+    )
+    classes = [
+        ModelClass(id="cls_001", name="建筑", color="#FF0000"),
+        ModelClass(id="cls_002", name="道路", color="#00FF00"),
+    ]
+
+    registry = get_model_registry(user_id)
+    model_id = registry.create_model(
+        name="test-multi",
+        model_type="classification",
+        classes=[c.model_dump() for c in classes],
+        task_type="building_extraction",
+        region_id="harbin",
+    )
+
+    engine = ClassificationTrainingEngine(user_id)
+    result = engine.train(
+        model_id=model_id,
+        region_id="harbin",
+        task_type="building_extraction",
+        embedding_version="v2",
+        annotations=annotations,
+        classes=classes,
+        class_ids=["cls_001", "cls_002"],
+    )
+
+    model_data = joblib.load(result["model_path"])
+    assert model_data["class_map"] == {"cls_001": 1, "cls_002": 2}
+    assert {c["id"] for c in model_data["classes"]} == {"cls_001", "cls_002"}
+
+    infer_engine = InferenceEngine(user_id)
+    result_path = infer_engine.infer(
+        model_id=model_id,
+        region_id="harbin",
+        patch_id="patch_000000",
+        month="2025-04",
+    )
+    img = np.array(Image.open(result_path))
+    assert img.shape[:2] == (128, 128)

@@ -90,6 +90,31 @@ class ClassificationTrainingEngine:
             model_type="classification",
         )
 
+        # Build a union mask per (patch_id, month) so pixels belonging to other
+        # active classes are not sampled as background.
+        union_masks: Dict[Tuple[str, str], np.ndarray] = {}
+        for record in records:
+            patch_id = record["patch_id"]
+            month = record["month"]
+            emb = _load_embedding_for_training(
+                region_id, patch_id, month, version=embedding_version
+            )
+            if emb is None:
+                continue
+            D, H, W = emb.shape
+            mask = record["mask"]
+            if mask.shape != (H, W):
+                mask = np.array(
+                    Image.fromarray(mask.astype(np.uint8)).resize(
+                        (W, H), Image.Resampling.NEAREST
+                    )
+                )
+            key = (patch_id, month)
+            if key in union_masks:
+                union_masks[key] = np.maximum(union_masks[key], mask)
+            else:
+                union_masks[key] = mask
+
         X_train, y_train = [], []
         for record in records:
             patch_id = record["patch_id"]
@@ -105,14 +130,23 @@ class ClassificationTrainingEngine:
             mask = record["mask"]
             D, H, W = emb.shape
             if mask.shape != (H, W):
-                mask_pil = Image.fromarray(mask.astype(np.uint8))
-                mask = np.array(mask_pil.resize((W, H), Image.Resampling.NEAREST))
+                mask = np.array(
+                    Image.fromarray(mask.astype(np.uint8)).resize(
+                        (W, H), Image.Resampling.NEAREST
+                    )
+                )
+
+            union_mask = union_masks.get((patch_id, month))
+            if union_mask is None:
+                continue
 
             emb_flat = emb.reshape(D, -1).T  # [H*W, D]
             mask_flat = mask.flatten()
+            union_flat = union_mask.flatten()
 
             pos_indices = np.where(mask_flat > 0)[0]
-            neg_indices = np.where(mask_flat == 0)[0]
+            # Background = pixels not covered by any active class in this patch/time.
+            neg_indices = np.where(union_flat == 0)[0]
 
             if len(pos_indices) == 0:
                 continue
@@ -209,6 +243,36 @@ class ChangeDetectionTrainingEngine:
             model_type="change_detection",
         )
 
+        # Union masks per (patch_id, before_month, after_month) so overlapping
+        # change annotations from different classes do not get sampled as no-change.
+        union_masks: Dict[Tuple[str, str, str], np.ndarray] = {}
+        for record in records:
+            patch_id = record["patch_id"]
+            before_month = record["before_month"]
+            after_month = record["after_month"]
+            emb_before = _load_embedding_for_training(
+                region_id, patch_id, before_month, version=embedding_version
+            )
+            emb_after = _load_embedding_for_training(
+                region_id, patch_id, after_month, version=embedding_version
+            )
+            if emb_before is None or emb_after is None:
+                continue
+            diff = emb_after - emb_before
+            _, H, W = diff.shape
+            mask = record["mask"]
+            if mask.shape != (H, W):
+                mask = np.array(
+                    Image.fromarray(mask.astype(np.uint8)).resize(
+                        (W, H), Image.Resampling.NEAREST
+                    )
+                )
+            key = (patch_id, before_month, after_month)
+            if key in union_masks:
+                union_masks[key] = np.maximum(union_masks[key], mask)
+            else:
+                union_masks[key] = mask
+
         X_train, y_train = [], []
         for record in records:
             patch_id = record["patch_id"]
@@ -231,14 +295,23 @@ class ChangeDetectionTrainingEngine:
             diff = emb_after - emb_before
             D, H, W = diff.shape
             if mask.shape != (H, W):
-                mask_pil = Image.fromarray(mask.astype(np.uint8))
-                mask = np.array(mask_pil.resize((W, H), Image.Resampling.NEAREST))
+                mask = np.array(
+                    Image.fromarray(mask.astype(np.uint8)).resize(
+                        (W, H), Image.Resampling.NEAREST
+                    )
+                )
+
+            union_mask = union_masks.get((patch_id, before_month, after_month))
+            if union_mask is None:
+                continue
 
             diff_flat = diff.reshape(D, -1).T
             mask_flat = mask.flatten()
+            union_flat = union_mask.flatten()
 
             pos_indices = np.where(mask_flat > 0)[0]
-            neg_indices = np.where(mask_flat == 0)[0]
+            # No-change = pixels not covered by any active change annotation.
+            neg_indices = np.where(union_flat == 0)[0]
 
             if len(pos_indices) == 0:
                 continue
