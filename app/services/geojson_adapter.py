@@ -102,7 +102,9 @@ def parse_annotations_for_training(
         - mask: 256x256 binary mask merged across all features for this patch/class
         - class_id, label_index
 
-    Returns a list of records ready for embedding extraction.
+    Returns:
+        A tuple (records, class_map) where class_map maps active class_id to
+        numeric label index (background is 0, user classes start at 1).
     """
     all_class_ids = {c.id for c in classes}
     active_class_ids = set(class_ids) if class_ids else all_class_ids
@@ -164,4 +166,4 @@ def parse_annotations_for_training(
     if not records:
         raise ValueError("No valid training records after parsing annotations")
 
-    return records
+    return records, class_map

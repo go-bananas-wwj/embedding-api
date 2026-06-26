@@ -67,6 +67,7 @@ class ClassificationTrainingEngine:
         annotations: GeoJSONFeatureCollection,
         classes: List[ModelClass],
         class_ids: List[str],
+        epochs: int = 100,
     ) -> Dict[str, Any]:
         """Train a classification head.
 
@@ -82,7 +83,7 @@ class ClassificationTrainingEngine:
         Returns:
             Dict with model_path, accuracy, n_samples.
         """
-        records = parse_annotations_for_training(
+        records, class_map = parse_annotations_for_training(
             annotations=annotations,
             classes=classes,
             class_ids=class_ids,
@@ -135,7 +136,7 @@ class ClassificationTrainingEngine:
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(X_train)
 
-        clf = LogisticRegression(max_iter=1000, solver="lbfgs")
+        clf = LogisticRegression(max_iter=epochs, solver="lbfgs")
         clf.fit(X_scaled, y_train)
 
         class_records = [c.model_dump() for c in classes if c.id in class_ids]
@@ -144,9 +145,11 @@ class ClassificationTrainingEngine:
             "model": clf,
             "classes": class_records,
             "class_ids": class_ids,
+            "class_map": class_map,
             "task_type": task_type,
             "region_id": region_id,
             "embedding_version": embedding_version,
+            "epochs": epochs,
             "trained_at": datetime.now().isoformat(),
         }
 
@@ -183,6 +186,7 @@ class ChangeDetectionTrainingEngine:
         annotations: GeoJSONFeatureCollection,
         classes: List[ModelClass],
         class_ids: List[str],
+        epochs: int = 100,
     ) -> Dict[str, Any]:
         """Train a change-detection head.
 
@@ -198,7 +202,7 @@ class ChangeDetectionTrainingEngine:
         Returns:
             Dict with model_path, accuracy, n_samples.
         """
-        records = parse_annotations_for_training(
+        records, class_map = parse_annotations_for_training(
             annotations=annotations,
             classes=classes,
             class_ids=class_ids,
@@ -257,19 +261,27 @@ class ChangeDetectionTrainingEngine:
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(X_train)
 
-        clf = LogisticRegression(max_iter=1000, solver="lbfgs")
+        clf = LogisticRegression(max_iter=epochs, solver="lbfgs")
         clf.fit(X_scaled, y_train)
 
         class_records = [c.model_dump() for c in classes if c.id in class_ids]
+        # Determine the before/after months that were actually used.
+        used_months = {(r["before_month"], r["after_month"]) for r in records}
+        before_month, after_month = next(iter(used_months))
+
         model_data = {
             "scaler": scaler,
             "model": clf,
             "classes": class_records,
             "class_ids": class_ids,
+            "class_map": class_map,
             "feature_type": "diff",
             "task_type": task_type,
             "region_id": region_id,
             "embedding_version": embedding_version,
+            "before_month": before_month,
+            "after_month": after_month,
+            "epochs": epochs,
             "trained_at": datetime.now().isoformat(),
         }
 

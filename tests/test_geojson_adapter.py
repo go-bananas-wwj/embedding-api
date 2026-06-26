@@ -83,7 +83,7 @@ def test_parse_annotations_for_training():
         ],
     )
     classes = [ModelClass(id="cls_001", name="建筑", color="#FF0000")]
-    records = parse_annotations_for_training(
+    records, class_map = parse_annotations_for_training(
         annotations=annotations,
         classes=classes,
         class_ids=["cls_001"],
@@ -111,7 +111,7 @@ def test_parse_change_detection_annotations():
         features=[GeoJSONFeature.model_validate(feature)],
     )
     classes = [ModelClass(id="cls_001", name="变化区域", color="#FF0000")]
-    records = parse_annotations_for_training(
+    records, class_map = parse_annotations_for_training(
         annotations=annotations,
         classes=classes,
         class_ids=["cls_001"],

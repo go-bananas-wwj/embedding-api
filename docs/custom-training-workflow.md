@@ -113,11 +113,11 @@ curl -H "Authorization: Bearer your_api_key" http://60.31.21.42:22065/health
         "type": "Polygon",
         "coordinates": [
           [
-            [126.50, 45.74],
-            [126.52, 45.74],
-            [126.52, 45.76],
-            [126.50, 45.76],
-            [126.50, 45.74]
+            [126.51631, 45.743707],
+            [126.532242, 45.743707],
+            [126.532242, 45.755574],
+            [126.51631, 45.755574],
+            [126.51631, 45.743707]
           ]
         ]
       }
@@ -185,11 +185,11 @@ Content-Type: application/json
           "type": "Polygon",
           "coordinates": [
             [
-              [126.50, 45.74],
-              [126.52, 45.74],
-              [126.52, 45.76],
-              [126.50, 45.76],
-              [126.50, 45.74]
+              [126.51631, 45.743707],
+              [126.532242, 45.743707],
+              [126.532242, 45.755574],
+              [126.51631, 45.755574],
+              [126.51631, 45.743707]
             ]
           ]
         }
@@ -231,11 +231,11 @@ Content-Type: application/json
           "type": "Polygon",
           "coordinates": [
             [
-              [126.50, 45.74],
-              [126.52, 45.74],
-              [126.52, 45.76],
-              [126.50, 45.76],
-              [126.50, 45.74]
+              [126.51631, 45.743707],
+              [126.532242, 45.743707],
+              [126.532242, 45.755574],
+              [126.51631, 45.755574],
+              [126.51631, 45.743707]
             ]
           ]
         }
@@ -265,6 +265,7 @@ Content-Type: application/json
   "accuracy": null,
   "n_samples": null,
   "model_path": "users/default/models/model_xyz789.pkl",
+  "description": "哈尔滨建筑提取模型",
   "message": null,
   "job_id": "job_def456"
 }
@@ -279,6 +280,16 @@ Content-Type: application/json
 5. 加载对应月份的 embedding。
 6. 提取正负样本，训练 `LogisticRegression`。
 7. 保存 `model.pkl`，更新模型状态。
+
+### 校验与限制
+
+- `model_type` 与 `task_type` 必须匹配：
+  - `classification` 仅支持 `building_extraction`、`land_use_classification`、`land_cover_classification`、`water_extraction`。
+  - `change_detection` 必须搭配 `task_type: "change_detection"`。
+- 所有 Feature 的 `region_id` 必须与顶层 `region_id` 一致。
+- 所有 Feature 的 `class_id` 必须在 `classes` 中定义；如果传入 `class_ids`，还必须在 `class_ids` 子集内。
+- 标注包限制：最多 `10000` 个 Feature，总顶点数不超过 `100000`。
+- `epochs` 会映射为 `LogisticRegression` 的 `max_iter`，默认 `100`。
 
 ---
 
@@ -349,11 +360,24 @@ POST /models/{model_id}/infer
 Content-Type: application/json
 ```
 
+分类模型传 `month`；变化检测模型传 `before_month` 和 `after_month`。
+
 ```json
 {
   "region_id": "harbin",
   "patch_id": "patch_000001",
   "month": "2025-04"
+}
+```
+
+变化检测示例：
+
+```json
+{
+  "region_id": "harbin",
+  "patch_id": "patch_000001",
+  "before_month": "2025-04",
+  "after_month": "2025-06"
 }
 ```
 
@@ -385,6 +409,21 @@ Content-Type: application/json
     "patch_000002"
   ],
   "month": "2025-04"
+}
+```
+
+变化检测批量推理示例：
+
+```json
+{
+  "region_id": "harbin",
+  "patch_ids": [
+    "patch_000000",
+    "patch_000001",
+    "patch_000002"
+  ],
+  "before_month": "2025-04",
+  "after_month": "2025-06"
 }
 ```
 
@@ -432,7 +471,7 @@ GET /models/results/infer_model_xyz789_harbin_patch_000001_2025-04.png
 ```javascript
 L.imageOverlay(
   'http://60.31.21.42:22065/models/results/infer_model_xyz789_harbin_patch_000001_2025-04.png',
-  [[45.74, 126.5], [45.76, 126.55]]
+  [[45.743707, 126.51631], [45.755574, 126.532242]]
 ).addTo(map);
 ```
 
@@ -537,11 +576,11 @@ const annotations = {
       geometry: {
         type: 'Polygon',
         coordinates: [[
-          [126.50, 45.74],
-          [126.52, 45.74],
-          [126.52, 45.76],
-          [126.50, 45.76],
-          [126.50, 45.74]
+          [126.51631, 45.743707],
+          [126.532242, 45.743707],
+          [126.532242, 45.755574],
+          [126.51631, 45.755574],
+          [126.51631, 45.743707]
         ]]
       }
     }
@@ -555,7 +594,7 @@ const model = await request('/models', 'POST', {
   task_type: 'building_extraction',
   region_id: 'harbin',
   embedding_version: 'v2',
-  epochs: 20,
+  epochs: 100,
   annotations: annotations,
   classes: classes
 });

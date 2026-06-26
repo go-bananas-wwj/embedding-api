@@ -57,6 +57,7 @@ def _model_payload(name="test-model", model_type="classification", task_type="bu
         "annotations": _geojson_annotation(task_type=task_type),
         "classes": [{"id": "cls_001", "name": "建筑", "color": "#FF0000"}],
         "epochs": 1,
+        "description": "test description",
     }
 
 
@@ -86,6 +87,7 @@ class TestModels:
         data = response.json()
         assert data["name"] == "test-geojson"
         assert data["status"] == "training"
+        assert data["description"] == "test description"
         assert "job_id" in data
 
     def test_create_model_invalid_type(self):
@@ -195,3 +197,21 @@ class TestModels:
         assert r.status_code == 200
         data = r.json()
         assert data["status"] == "training"
+
+    def test_create_model_rejects_unknown_class_ids(self):
+        payload = _model_payload("test-unknown-class")
+        payload["class_ids"] = ["cls_missing"]
+        r = client.post("/models", json=payload)
+        assert r.status_code == 422
+
+    def test_create_model_rejects_mismatched_region_id(self):
+        payload = _model_payload("test-region-mismatch")
+        payload["annotations"]["features"][0]["properties"]["region_id"] = "haidian"
+        r = client.post("/models", json=payload)
+        assert r.status_code == 422
+
+    def test_create_model_rejects_unknown_feature_class_id(self):
+        payload = _model_payload("test-unknown-feature-class")
+        payload["annotations"]["features"][0]["properties"]["class_id"] = "cls_missing"
+        r = client.post("/models", json=payload)
+        assert r.status_code == 422

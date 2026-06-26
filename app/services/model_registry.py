@@ -63,6 +63,7 @@ class ModelRegistry:
         classes: List[Dict[str, Any]],
         task_type: Optional[str] = None,
         region_id: Optional[str] = None,
+        description: Optional[str] = None,
     ) -> str:
         model_id = f"model_{uuid.uuid4().hex[:8]}"
         record = {
@@ -71,6 +72,7 @@ class ModelRegistry:
             "type": model_type,
             "task_type": task_type,
             "region_id": region_id,
+            "description": description,
             "status": "training",
             "created_at": datetime.now().isoformat(),
             "completed_at": None,

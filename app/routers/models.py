@@ -4,7 +4,7 @@
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import List
+from typing import Dict, List
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Path as PathParam
 from fastapi.responses import FileResponse
@@ -13,6 +13,7 @@ from app.schemas.models import (
     BatchInferRequest,
     BatchInferResult,
     InferRequest,
+    InferResult,
     JobStatusOut,
     ModelCreate,
     ModelOut,
@@ -73,6 +74,7 @@ async def create_model(
         classes=[c.model_dump() for c in req.classes],
         task_type=req.task_type,
         region_id=req.region_id,
+        description=req.description,
     )
     job_id = f"job_{uuid.uuid4().hex[:8]}"
     _training_jobs[job_id] = {
@@ -91,6 +93,7 @@ async def create_model(
         task_type=req.task_type,
         model_type=req.model_type,
         embedding_version=req.embedding_version,
+        epochs=req.epochs,
         annotations=req.annotations,
         classes=req.classes,
         class_ids=active_class_ids,
@@ -120,7 +123,7 @@ async def get_model(
     return model
 
 
-@router.patch("/{model_id}")
+@router.patch("/{model_id}", response_model=Dict[str, str])
 async def rename_model(
     model_id: str = PathParam(
         ...,
@@ -140,7 +143,7 @@ async def rename_model(
     return {"status": "ok"}
 
 
-@router.delete("/{model_id}")
+@router.delete("/{model_id}", response_model=Dict[str, str])
 async def delete_model(
     model_id: str = PathParam(
         ...,
@@ -159,7 +162,7 @@ async def delete_model(
     return {"status": "ok"}
 
 
-@router.post("/{model_id}/infer")
+@router.post("/{model_id}/infer", response_model=InferResult)
 async def infer(
     model_id: str = PathParam(
         ...,
@@ -184,7 +187,12 @@ async def infer(
     engine = InferenceEngine(user["user_id"])
     try:
         result_path = engine.infer(
-            model_id, req.region_id, req.patch_id, req.month
+            model_id,
+            req.region_id,
+            req.patch_id,
+            month=req.month,
+            before_month=req.before_month,
+            after_month=req.after_month,
         )
     except DataValidationError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -226,7 +234,12 @@ async def infer_batch(
 
     engine = InferenceEngine(user["user_id"])
     results = engine.infer_batch(
-        model_id, req.region_id, req.patch_ids, req.month
+        model_id,
+        req.region_id,
+        req.patch_ids,
+        month=req.month,
+        before_month=req.before_month,
+        after_month=req.after_month,
     )
     return [
         {
@@ -309,6 +322,7 @@ def _do_training(
     task_type: str,
     model_type: str,
     embedding_version: str,
+    epochs: int,
     annotations,
     classes,
     class_ids,
@@ -324,6 +338,7 @@ def _do_training(
                 annotations=annotations,
                 classes=classes,
                 class_ids=class_ids,
+                epochs=epochs,
             )
         else:
             engine = ClassificationTrainingEngine(user_id)
@@ -335,6 +350,7 @@ def _do_training(
                 annotations=annotations,
                 classes=classes,
                 class_ids=class_ids,
+                epochs=epochs,
             )
 
         registry = get_model_registry(user_id)

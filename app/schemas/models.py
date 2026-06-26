@@ -192,11 +192,11 @@ class ModelCreate(BaseModel):
         examples=["v2"],
     )
     epochs: int = Field(
-        20,
+        100,
         ge=1,
         le=1000,
-        description="Number of training epochs.",
-        examples=[20],
+        description="Number of training iterations (mapped to LogisticRegression max_iter).",
+        examples=[100],
     )
     class_ids: Optional[List[str]] = Field(
         None,
@@ -220,8 +220,54 @@ class ModelCreate(BaseModel):
 
     @model_validator(mode="after")
     def validate_model_type_consistency(self):
+        valid_classification_tasks = {
+            "building_extraction",
+            "land_use_classification",
+            "land_cover_classification",
+            "water_extraction",
+        }
+        if self.model_type == "classification" and self.task_type not in valid_classification_tasks:
+            raise ValueError(
+                f"classification model does not support task_type '{self.task_type}'"
+            )
+        if self.model_type == "change_detection" and self.task_type != "change_detection":
+            raise ValueError(
+                "change_detection model requires task_type 'change_detection'"
+            )
+
+        class_ids = {c.id for c in self.classes}
+        if self.class_ids:
+            for cid in self.class_ids:
+                if cid not in class_ids:
+                    raise ValueError(f"class_id '{cid}' is not defined in classes")
+
+        active_class_ids = set(self.class_ids) if self.class_ids else class_ids
+
+        total_vertices = 0
+        max_features = 10000
+        max_vertices = 100_000
+        if len(self.annotations.features) > max_features:
+            raise ValueError(f"annotations exceed maximum of {max_features} features")
+
         for feature in self.annotations.features:
             props = feature.properties
+            if props.region_id != self.region_id:
+                raise ValueError(
+                    f"feature region_id '{props.region_id}' does not match top-level region_id '{self.region_id}'"
+                )
+            if props.class_id not in class_ids:
+                raise ValueError(
+                    f"feature class_id '{props.class_id}' is not defined in classes"
+                )
+            if props.class_id not in active_class_ids:
+                raise ValueError(
+                    f"feature class_id '{props.class_id}' is not in class_ids"
+                )
+            if props.task_type != self.task_type:
+                raise ValueError(
+                    f"feature task_type '{props.task_type}' does not match model task_type '{self.task_type}'"
+                )
+
             if self.model_type == "classification":
                 if not props.month:
                     raise ValueError(f"classification model requires 'month' for patch {props.patch_id}")
@@ -232,7 +278,25 @@ class ModelCreate(BaseModel):
                     )
             else:
                 raise ValueError(f"Unsupported model_type: {self.model_type}")
+
+            coords = feature.geometry.get("coordinates", [])
+            total_vertices += self._count_vertices(coords)
+
+        if total_vertices > max_vertices:
+            raise ValueError(f"annotations exceed maximum of {max_vertices} total vertices")
+
         return self
+
+    @staticmethod
+    def _count_vertices(coords):
+        """Recursively count coordinate pairs in a GeoJSON coordinate array."""
+        count = 0
+        if isinstance(coords, list):
+            if coords and isinstance(coords[0], (int, float)):
+                return 1
+            for item in coords:
+                count += ModelCreate._count_vertices(item)
+        return count
 
 
 class ModelOut(BaseModel):
@@ -249,6 +313,7 @@ class ModelOut(BaseModel):
     accuracy: Optional[float] = Field(None, description="Training accuracy, if available.")
     n_samples: Optional[int] = Field(None, description="Number of training samples.")
     model_path: Optional[str] = Field(None, description="Path to the saved model artifact.")
+    description: Optional[str] = Field(None, description="User-provided model description.")
     message: Optional[str] = Field(None, description="Status or error message.")
     job_id: Optional[str] = Field(None, description="Training job identifier.")
 
@@ -274,11 +339,31 @@ class InferRequest(BaseModel):
         description="Patch identifier in the form patch_000000.",
         examples=["patch_000000"],
     )
-    month: str = Field(
-        ...,
-        description="Month for the source embedding, e.g. 2025-04.",
+    month: Optional[str] = Field(
+        None,
+        description="Month for the source embedding, e.g. 2025-04. Required for classification models.",
         examples=["2025-04"],
     )
+    before_month: Optional[str] = Field(
+        None,
+        description="Before month for change-detection inference, e.g. 2025-04.",
+        examples=["2025-04"],
+    )
+    after_month: Optional[str] = Field(
+        None,
+        description="After month for change-detection inference, e.g. 2025-06.",
+        examples=["2025-06"],
+    )
+
+    @model_validator(mode="after")
+    def validate_infer_months(self):
+        has_single = bool(self.month)
+        has_pair = bool(self.before_month) and bool(self.after_month)
+        if has_single and has_pair:
+            raise ValueError("Provide either 'month' or both 'before_month' and 'after_month', not both")
+        if not has_single and not has_pair:
+            raise ValueError("Provide either 'month' (classification) or both 'before_month' and 'after_month' (change detection)")
+        return self
 
 
 class BatchInferRequest(BaseModel):
@@ -294,11 +379,35 @@ class BatchInferRequest(BaseModel):
         description="List of patch identifiers to infer (max 100).",
         examples=[["patch_000000", "patch_000001"]],
     )
-    month: str = Field(
-        ...,
-        description="Month for the source embedding, e.g. 2025-04.",
+    month: Optional[str] = Field(
+        None,
+        description="Month for the source embedding, e.g. 2025-04. Required for classification models.",
         examples=["2025-04"],
     )
+    before_month: Optional[str] = Field(
+        None,
+        description="Before month for change-detection inference, e.g. 2025-04.",
+        examples=["2025-04"],
+    )
+    after_month: Optional[str] = Field(
+        None,
+        description="After month for change-detection inference, e.g. 2025-06.",
+        examples=["2025-06"],
+    )
+
+    @model_validator(mode="after")
+    def validate_batch_infer_months(self):
+        has_single = bool(self.month)
+        has_pair = bool(self.before_month) and bool(self.after_month)
+        if has_single and has_pair:
+            raise ValueError("Provide either 'month' or both 'before_month' and 'after_month', not both")
+        if not has_single and not has_pair:
+            raise ValueError("Provide either 'month' (classification) or both 'before_month' and 'after_month' (change detection)")
+        return self
+
+
+class InferResult(BaseModel):
+    result_url: str = Field(..., description="URL to the generated result PNG.")
 
 
 class BatchInferResult(BaseModel):

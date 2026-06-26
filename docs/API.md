@@ -1110,7 +1110,8 @@ curl -s "http://60.31.21.42:22065/models"
     ],
     "accuracy": 0.92,
     "n_samples": 120,
-    "model_path": "users/default/models/model_ghi789/model.pt",
+    "model_path": "users/default/models/model_ghi789.pkl",
+    "description": "基于用户标注的建筑提取模型",
     "message": null,
     "job_id": "job_jkl012"
   }
@@ -1129,7 +1130,8 @@ curl -s "http://60.31.21.42:22065/models"
 | `classes` | object[] | 模型类别列表 |
 | `accuracy` | float | 训练准确率 |
 | `n_samples` | int | 训练样本数 |
-| `model_path` | string | 模型文件路径 |
+| `model_path` | string | 模型文件路径（`.pkl`） |
+| `description` | string | 模型描述 |
 | `message` | string | 失败原因或提示信息 |
 | `job_id` | string | 关联的训练任务 ID |
 
@@ -1152,7 +1154,8 @@ POST /models
 | `task_type` | string | 是 | 任务类型，如 `building_extraction`、`change_detection` 等 |
 | `region_id` | string | 是 | 区域 ID，如 `harbin` 或 `haidian` |
 | `embedding_version` | string | 否 | 嵌入版本，默认 `v2` |
-| `epochs` | int | 否 | 训练轮数，默认 `20`，范围 `1~1000` |
+| `epochs` | int | 否 | 训练迭代次数（映射为 `LogisticRegression.max_iter`），默认 `100`，范围 `1~1000` |
+| `description` | string | 否 | 模型描述 |
 | `annotations` | object | 是 | GeoJSON FeatureCollection，坐标为 WGS84，几何类型支持 `Polygon`、`MultiPolygon` |
 | `classes` | object[] | 是 | 类别定义列表，每项包含 `id`、`name`、`color` |
 | `class_ids` | string[] | 否 | 可选，指定参与训练的类别 ID 子集；为空时使用标注中所有类别 |
@@ -1162,6 +1165,9 @@ POST /models
 - 每个 `Feature` 的 `properties` 必须包含 `patch_id`、`region_id`、`class_id`、`task_type`。
 - `classification` 模型还需要 `month`；`change_detection` 模型还需要 `before_month` 和 `after_month`。
 - `geometry` 坐标使用 WGS84 `[lon, lat]`。
+- 所有 `Feature` 的 `region_id` 必须与请求体顶层 `region_id` 一致。
+- 所有 `Feature` 的 `class_id` 必须在 `classes` 中定义，且当传入 `class_ids` 时必须在 `class_ids` 内。
+- 限制：最多 `10000` 个 Feature，总顶点数不超过 `100000`。
 
 **curl 示例 — 分类模型**:
 ```bash
@@ -1192,11 +1198,11 @@ curl -s -X POST "http://60.31.21.42:22065/models" \
           "geometry": {
             "type": "Polygon",
             "coordinates": [[
-              [126.505, 45.742],
-              [126.515, 45.742],
-              [126.515, 45.748],
-              [126.505, 45.748],
-              [126.505, 45.742]
+              [126.51631, 45.743707],
+              [126.532242, 45.743707],
+              [126.532242, 45.755574],
+              [126.51631, 45.755574],
+              [126.51631, 45.743707]
             ]]
           }
         }
@@ -1235,11 +1241,11 @@ curl -s -X POST "http://60.31.21.42:22065/models" \
           "geometry": {
             "type": "Polygon",
             "coordinates": [[
-              [126.505, 45.742],
-              [126.515, 45.742],
-              [126.515, 45.748],
-              [126.505, 45.748],
-              [126.505, 45.742]
+              [126.51631, 45.743707],
+              [126.532242, 45.743707],
+              [126.532242, 45.755574],
+              [126.51631, 45.755574],
+              [126.51631, 45.743707]
             ]]
           }
         }
@@ -1264,6 +1270,7 @@ curl -s -X POST "http://60.31.21.42:22065/models" \
   "accuracy": null,
   "n_samples": null,
   "model_path": null,
+  "description": "基于用户标注的建筑提取模型",
   "message": null,
   "job_id": "job_jkl012"
 }
@@ -1381,9 +1388,11 @@ POST /models/{model_id}/infer
 |------|------|------|------|
 | `region_id` | string | 是 | 区域 ID |
 | `patch_id` | string | 是 | Patch ID |
-| `month` | string | 是 | 月份，如 `2025-04` |
+| `month` | string | 条件 | 单期任务必填，如 `2025-04` |
+| `before_month` | string | 条件 | 变化检测必填，如 `2025-04` |
+| `after_month` | string | 条件 | 变化检测必填，如 `2025-06` |
 
-**curl 示例**:
+**curl 示例 — 分类模型**:
 ```bash
 curl -s -X POST "http://60.31.21.42:22065/models/model_ghi789/infer" \
   -H 'Content-Type: application/json' \
@@ -1391,6 +1400,18 @@ curl -s -X POST "http://60.31.21.42:22065/models/model_ghi789/infer" \
     "region_id": "harbin",
     "patch_id": "patch_000000",
     "month": "2025-04"
+  }'
+```
+
+**curl 示例 — 变化检测模型**:
+```bash
+curl -s -X POST "http://60.31.21.42:22065/models/model_ghi789/infer" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "region_id": "harbin",
+    "patch_id": "patch_000000",
+    "before_month": "2025-04",
+    "after_month": "2025-06"
   }'
 ```
 
@@ -1426,9 +1447,11 @@ POST /models/{model_id}/infer_batch
 |------|------|------|------|
 | `region_id` | string | 是 | 区域 ID |
 | `patch_ids` | string[] | 是 | Patch ID 列表，最多 100 个 |
-| `month` | string | 是 | 月份，如 `2025-04` |
+| `month` | string | 条件 | 单期任务必填，如 `2025-04` |
+| `before_month` | string | 条件 | 变化检测必填，如 `2025-04` |
+| `after_month` | string | 条件 | 变化检测必填，如 `2025-06` |
 
-**curl 示例**:
+**curl 示例 — 分类模型**:
 ```bash
 curl -s -X POST "http://60.31.21.42:22065/models/model_ghi789/infer_batch" \
   -H 'Content-Type: application/json' \
@@ -1436,6 +1459,18 @@ curl -s -X POST "http://60.31.21.42:22065/models/model_ghi789/infer_batch" \
     "region_id": "harbin",
     "patch_ids": ["patch_000000", "patch_000001"],
     "month": "2025-04"
+  }'
+```
+
+**curl 示例 — 变化检测模型**:
+```bash
+curl -s -X POST "http://60.31.21.42:22065/models/model_ghi789/infer_batch" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "region_id": "harbin",
+    "patch_ids": ["patch_000000", "patch_000001"],
+    "before_month": "2025-04",
+    "after_month": "2025-06"
   }'
 ```
 
@@ -1493,7 +1528,7 @@ curl -s "http://60.31.21.42:22065/models/jobs/job_jkl012"
   "model_id": "model_ghi789",
   "accuracy": 0.92,
   "n_samples": 120,
-  "model_path": "users/default/models/model_ghi789/model.pt",
+  "model_path": "users/default/models/model_ghi789.pkl",
   "message": null
 }
 ```

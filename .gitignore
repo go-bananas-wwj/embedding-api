@@ -37,6 +37,7 @@ service_watchdog.log
 service_watchdog.pid
 watchdog.log
 watchdog.pid
+nohup.out
 
 # Data and models (large files, not committed)
 data/
