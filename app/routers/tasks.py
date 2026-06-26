@@ -14,9 +14,28 @@ from app.services.tile_service import TileService
 router = APIRouter()
 TASK_FORMATS = Literal["png", "npy"]
 
+_TASK_OPENAPI_EXAMPLES = {
+    "change_detection": {"summary": "Change detection", "value": "change_detection"},
+    "building_extraction": {"summary": "Building extraction", "value": "building_extraction"},
+    "land_use_classification": {"summary": "Land use classification", "value": "land_use_classification"},
+    "land_cover_classification": {"summary": "Land cover classification", "value": "land_cover_classification"},
+    "water_extraction": {"summary": "Water extraction", "value": "water_extraction"},
+}
+
+_VERSION_OPENAPI_EXAMPLES = {
+    "v1": {"summary": "V4-based results", "value": "v1"},
+    "v2": {"summary": "V5-based results", "value": "v2"},
+}
+
 
 @router.get("/regions/{region_id}/tasks", response_model=TasksResponse)
-async def list_tasks(region_id: str):
+async def list_tasks(
+    region_id: str = PathParam(
+        ...,
+        description="Region identifier. Use 'harbin' or 'haidian'.",
+        examples=["harbin"],
+    )
+):
     """List available downstream tasks for a region."""
     config = get_config()
     if not config.region_exists(region_id):
@@ -38,10 +57,28 @@ async def list_tasks(region_id: str):
 
 @router.get("/regions/{region_id}/tasks/{task_type}/summary", response_model=TaskSummary)
 async def get_task_summary(
-    region_id: str,
-    task_type: str,
-    version: str = Query("v1"),
-    period: Optional[str] = Query(None),
+    region_id: str = PathParam(
+        ...,
+        description="Region identifier. Use 'harbin' or 'haidian'.",
+        examples=["harbin"],
+    ),
+    task_type: str = PathParam(
+        ...,
+        description="Downstream task type.",
+        examples=["change_detection"],
+        openapi_examples=_TASK_OPENAPI_EXAMPLES,
+    ),
+    version: str = Query(
+        "v1",
+        description="Task result version. Allowed values: v1, v2.",
+        examples=["v1"],
+        openapi_examples=_VERSION_OPENAPI_EXAMPLES,
+    ),
+    period: Optional[str] = Query(
+        None,
+        description="Comparison period for time-series tasks, e.g. 2025-04_vs_2025-06.",
+        examples=["2025-04_vs_2025-06"],
+    ),
 ):
     """Get task summary statistics."""
     config = get_config()
@@ -92,12 +129,42 @@ async def get_task_summary(
     },
 )
 async def get_task_result(
-    region_id: str,
-    patch_id: str,
-    task_type: str,
-    format: str = Query("png", description="Format: png, npy"),
-    version: str = Query("v1"),
-    period: Optional[str] = Query(None),
+    region_id: str = PathParam(
+        ...,
+        description="Region identifier. Use 'harbin' or 'haidian'.",
+        examples=["harbin"],
+    ),
+    patch_id: str = PathParam(
+        ...,
+        description="Patch identifier in the form patch_000000.",
+        examples=["patch_000000"],
+    ),
+    task_type: str = PathParam(
+        ...,
+        description="Downstream task type.",
+        examples=["change_detection"],
+        openapi_examples=_TASK_OPENAPI_EXAMPLES,
+    ),
+    format: str = Query(
+        "png",
+        description="Output format. Allowed values: png, npy.",
+        examples=["png"],
+        openapi_examples={
+            "png": {"summary": "PNG image", "value": "png"},
+            "npy": {"summary": "NumPy array", "value": "npy"},
+        },
+    ),
+    version: str = Query(
+        "v1",
+        description="Task result version. Allowed values: v1, v2.",
+        examples=["v1"],
+        openapi_examples=_VERSION_OPENAPI_EXAMPLES,
+    ),
+    period: Optional[str] = Query(
+        None,
+        description="Comparison period for time-series tasks, e.g. 2025-04_vs_2025-06.",
+        examples=["2025-04_vs_2025-06"],
+    ),
 ):
     """Get task result for a specific patch."""
     if format not in ("png", "npy"):
@@ -151,11 +218,33 @@ async def get_task_result(
 
 @router.get("/regions/{region_id}/patches/{patch_id}/tasks/{task_type}/prediction")
 async def get_task_prediction(
-    region_id: str,
-    patch_id: str,
-    task_type: str,
-    version: str = Query("v1"),
-    period: Optional[str] = Query(None),
+    region_id: str = PathParam(
+        ...,
+        description="Region identifier. Use 'harbin' or 'haidian'.",
+        examples=["harbin"],
+    ),
+    patch_id: str = PathParam(
+        ...,
+        description="Patch identifier in the form patch_000000.",
+        examples=["patch_000000"],
+    ),
+    task_type: str = PathParam(
+        ...,
+        description="Downstream task type.",
+        examples=["change_detection"],
+        openapi_examples=_TASK_OPENAPI_EXAMPLES,
+    ),
+    version: str = Query(
+        "v1",
+        description="Task result version. Allowed values: v1, v2.",
+        examples=["v1"],
+        openapi_examples=_VERSION_OPENAPI_EXAMPLES,
+    ),
+    period: Optional[str] = Query(
+        None,
+        description="Comparison period for time-series tasks, e.g. 2025-04_vs_2025-06.",
+        examples=["2025-04_vs_2025-06"],
+    ),
 ):
     """Get raw prediction array (.npy) for a patch."""
     config = get_config()
@@ -191,11 +280,33 @@ async def get_task_prediction(
 
 @router.get("/regions/{region_id}/patches/{patch_id}/tasks/{task_type}/label")
 async def get_task_label(
-    region_id: str,
-    patch_id: str,
-    task_type: str,
-    version: str = Query("v1"),
-    period: Optional[str] = Query(None),
+    region_id: str = PathParam(
+        ...,
+        description="Region identifier. Use 'harbin' or 'haidian'.",
+        examples=["harbin"],
+    ),
+    patch_id: str = PathParam(
+        ...,
+        description="Patch identifier in the form patch_000000.",
+        examples=["patch_000000"],
+    ),
+    task_type: str = PathParam(
+        ...,
+        description="Downstream task type.",
+        examples=["change_detection"],
+        openapi_examples=_TASK_OPENAPI_EXAMPLES,
+    ),
+    version: str = Query(
+        "v1",
+        description="Task result version. Allowed values: v1, v2.",
+        examples=["v1"],
+        openapi_examples=_VERSION_OPENAPI_EXAMPLES,
+    ),
+    period: Optional[str] = Query(
+        None,
+        description="Comparison period for time-series tasks, e.g. 2025-04_vs_2025-06.",
+        examples=["2025-04_vs_2025-06"],
+    ),
 ):
     """Get label array (.npy) or metadata for a patch."""
     config = get_config()
@@ -234,10 +345,28 @@ async def get_task_label(
 
 @router.get("/regions/{region_id}/tasks/{task_type}/tiles", response_model=TilesResponse)
 async def list_tiles(
-    region_id: str,
-    task_type: str,
-    version: str = Query("v1"),
-    period: Optional[str] = Query(None),
+    region_id: str = PathParam(
+        ...,
+        description="Region identifier. Use 'harbin' or 'haidian'.",
+        examples=["harbin"],
+    ),
+    task_type: str = PathParam(
+        ...,
+        description="Downstream task type.",
+        examples=["change_detection"],
+        openapi_examples=_TASK_OPENAPI_EXAMPLES,
+    ),
+    version: str = Query(
+        "v1",
+        description="Task result version. Allowed values: v1, v2.",
+        examples=["v1"],
+        openapi_examples=_VERSION_OPENAPI_EXAMPLES,
+    ),
+    period: Optional[str] = Query(
+        None,
+        description="Comparison period for time-series tasks, e.g. 2025-04_vs_2025-06.",
+        examples=["2025-04_vs_2025-06"],
+    ),
 ):
     """List available tiles for a task."""
     config = get_config()
@@ -265,13 +394,31 @@ async def list_tiles(
     },
 )
 async def get_tile(
-    region_id: str,
-    task_type: str,
-    z: int = PathParam(..., ge=0, le=20),
-    x: int = PathParam(..., ge=0),
-    y: int = PathParam(..., ge=0),
-    version: str = Query("v1"),
-    period: Optional[str] = Query(None),
+    region_id: str = PathParam(
+        ...,
+        description="Region identifier. Use 'harbin' or 'haidian'.",
+        examples=["harbin"],
+    ),
+    task_type: str = PathParam(
+        ...,
+        description="Downstream task type.",
+        examples=["change_detection"],
+        openapi_examples=_TASK_OPENAPI_EXAMPLES,
+    ),
+    z: int = PathParam(..., ge=0, le=20, description="Tile zoom level.", examples=[12]),
+    x: int = PathParam(..., ge=0, description="Tile X coordinate.", examples=[6828]),
+    y: int = PathParam(..., ge=0, description="Tile Y coordinate.", examples=[3102]),
+    version: str = Query(
+        "v1",
+        description="Task result version. Allowed values: v1, v2.",
+        examples=["v1"],
+        openapi_examples=_VERSION_OPENAPI_EXAMPLES,
+    ),
+    period: Optional[str] = Query(
+        None,
+        description="Comparison period for time-series tasks, e.g. 2025-04_vs_2025-06.",
+        examples=["2025-04_vs_2025-06"],
+    ),
 ):
     """Serve a map tile image."""
     raise HTTPException(

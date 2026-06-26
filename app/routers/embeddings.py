@@ -4,7 +4,7 @@ import asyncio
 import os
 import re
 from typing import Literal, Optional
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Path
 from fastapi.responses import FileResponse
 import numpy as np
 
@@ -96,11 +96,41 @@ def _load_npz_embedding(path: str):
     },
 )
 async def get_embedding(
-    region_id: str,
-    patch_id: str,
-    format: str = Query("png", description="Output format: png, npy, json, cache"),
-    version: Optional[str] = Query(None, description="Embedding version: v1, v2"),
-    month: Optional[str] = Query(None, description="Month for time-series embedding, e.g. 2025-04"),
+    region_id: str = Path(
+        ...,
+        description="Region identifier. Use 'harbin' or 'haidian'.",
+        examples=["harbin"],
+    ),
+    patch_id: str = Path(
+        ...,
+        description="Patch identifier in the form patch_000000.",
+        examples=["patch_000000"],
+    ),
+    format: str = Query(
+        "png",
+        description="Output format. Allowed values: png, npy, json, cache.",
+        examples=["png"],
+        openapi_examples={
+            "png": {"summary": "PNG visualization", "value": "png"},
+            "npy": {"summary": "Raw NumPy array", "value": "npy"},
+            "json": {"summary": "Array statistics", "value": "json"},
+            "cache": {"summary": "Cache fallback", "value": "cache"},
+        },
+    ),
+    version: Optional[str] = Query(
+        None,
+        description="Embedding version. Allowed values: v1 (V4 model), v2 (V5 model).",
+        examples=["v1"],
+        openapi_examples={
+            "v1": {"summary": "V4 embedding model", "value": "v1"},
+            "v2": {"summary": "V5 embedding model", "value": "v2"},
+        },
+    ),
+    month: Optional[str] = Query(
+        None,
+        description="Month for time-series embeddings, e.g. 2025-04. Falls back to the first available month if omitted.",
+        examples=["2025-04"],
+    ),
 ):
     """Get embedding data for a patch.
 

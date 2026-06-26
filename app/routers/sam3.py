@@ -2,7 +2,7 @@
 
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Body, HTTPException, Path
 
 from app.config import get_config
 from app.schemas.sam3 import (
@@ -19,7 +19,14 @@ logger = logging.getLogger(__name__)
 
 
 @router.post("/regions/{region_id}/sam3/embed", response_model=EmbedResponse)
-async def sam3_embed(region_id: str, req: EmbedRequest):
+async def sam3_embed(
+    region_id: str = Path(
+        ...,
+        description="Region identifier. Use 'harbin' or 'haidian'.",
+        examples=["harbin"],
+    ),
+    req: EmbedRequest = Body(...),
+):
     """Preload patch image and compute SAM3 embedding."""
     config = get_config()
     if not config.region_exists(region_id):
@@ -39,7 +46,14 @@ async def sam3_embed(region_id: str, req: EmbedRequest):
 
 
 @router.post("/regions/{region_id}/sam3/segment", response_model=SegmentResponse)
-async def sam3_segment(region_id: str, req: SegmentRequest):
+async def sam3_segment(
+    region_id: str = Path(
+        ...,
+        description="Region identifier. Use 'harbin' or 'haidian'.",
+        examples=["harbin"],
+    ),
+    req: SegmentRequest = Body(...),
+):
     """Segment instance using cached embedding and point prompts."""
     config = get_config()
     if not config.region_exists(region_id):
@@ -62,7 +76,13 @@ async def sam3_segment(region_id: str, req: SegmentRequest):
 
 
 @router.get("/regions/{region_id}/sam3/status", response_model=StatusResponse)
-async def sam3_status(region_id: str):
+async def sam3_status(
+    region_id: str = Path(
+        ...,
+        description="Region identifier. Use 'harbin' or 'haidian'.",
+        examples=["harbin"],
+    )
+):
     """Get SAM3 model loading status and cache info."""
     config = get_config()
     if not config.region_exists(region_id):

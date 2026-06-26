@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Path as PathParam
 from fastapi.responses import FileResponse
 
 from app.schemas.models import (
@@ -88,7 +88,12 @@ async def create_model(
 
 @router.get("/{model_id}", response_model=ModelOut)
 async def get_model(
-    model_id: str, user: dict = Depends(get_current_user)
+    model_id: str = PathParam(
+        ...,
+        description="Model ID returned by POST /models. Replace with the real ID from the create response.",
+        examples=["model_ghi789"],
+    ),
+    user: dict = Depends(get_current_user),
 ) -> dict:
     """Get a single model status by ID."""
     model = get_model_registry(user["user_id"]).get_model(model_id)
@@ -99,8 +104,12 @@ async def get_model(
 
 @router.patch("/{model_id}")
 async def rename_model(
-    model_id: str,
-    req: ModelRenameRequest,
+    model_id: str = PathParam(
+        ...,
+        description="Model ID returned by POST /models. Replace with the real ID from the create response.",
+        examples=["model_ghi789"],
+    ),
+    req: ModelRenameRequest = Body(...),
     user: dict = Depends(get_current_user),
 ) -> dict:
     """Rename a model."""
@@ -111,7 +120,12 @@ async def rename_model(
 
 @router.delete("/{model_id}")
 async def delete_model(
-    model_id: str, user: dict = Depends(get_current_user)
+    model_id: str = PathParam(
+        ...,
+        description="Model ID returned by POST /models. Replace with the real ID from the create response.",
+        examples=["model_ghi789"],
+    ),
+    user: dict = Depends(get_current_user),
 ) -> dict:
     """Delete a model and its artifact."""
     if not get_model_registry(user["user_id"]).delete_model(model_id):
@@ -121,8 +135,12 @@ async def delete_model(
 
 @router.post("/{model_id}/infer")
 async def infer(
-    model_id: str,
-    req: InferRequest,
+    model_id: str = PathParam(
+        ...,
+        description="Model ID returned by POST /models. Replace with the real ID from the create response.",
+        examples=["model_ghi789"],
+    ),
+    req: InferRequest = Body(...),
     user: dict = Depends(get_current_user),
 ) -> dict:
     """Run single-patch inference with a trained model."""
@@ -151,8 +169,12 @@ async def infer(
 
 @router.post("/{model_id}/infer_batch", response_model=List[BatchInferResult])
 async def infer_batch(
-    model_id: str,
-    req: BatchInferRequest,
+    model_id: str = PathParam(
+        ...,
+        description="Model ID returned by POST /models. Replace with the real ID from the create response.",
+        examples=["model_ghi789"],
+    ),
+    req: BatchInferRequest = Body(...),
     user: dict = Depends(get_current_user),
 ) -> List[dict]:
     """Run inference for up to 100 patches."""
@@ -187,7 +209,12 @@ async def infer_batch(
 
 @router.get("/jobs/{job_id}", response_model=JobStatusOut)
 async def get_job_status(
-    job_id: str, user: dict = Depends(get_current_user)
+    job_id: str = PathParam(
+        ...,
+        description="Training job ID returned by POST /models. Replace with the real job ID from the create response.",
+        examples=["job_jkl012"],
+    ),
+    user: dict = Depends(get_current_user),
 ) -> dict:
     """Get training job status."""
     job = _training_jobs.get(job_id)
@@ -208,7 +235,12 @@ async def get_job_status(
 
 @router.get("/results/{filename}")
 async def get_result(
-    filename: str, user: dict = Depends(get_current_user)
+    filename: str = PathParam(
+        ...,
+        description="Inference result filename returned by /models/{model_id}/infer or /models/{model_id}/infer_batch.",
+        examples=["infer_model_ghi789_harbin_patch_000000_2025-04.png"],
+    ),
+    user: dict = Depends(get_current_user),
 ) -> FileResponse:
     """Serve an inference result PNG."""
     results_dir = InferenceEngine(user["user_id"]).results_dir

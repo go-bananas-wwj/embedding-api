@@ -1,6 +1,6 @@
 """Region management router."""
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Path
 from app.config import get_config
 from app.schemas.models import (
     RegionsResponse, RegionInfo, HealthResponse, RegionDetail, RegionTaskMeta,
@@ -40,7 +40,17 @@ async def list_regions():
 
 
 @router.get("/regions/{region_id}", response_model=RegionDetail)
-async def get_region(region_id: str):
+async def get_region(
+    region_id: str = Path(
+        ...,
+        description="Region identifier. Use 'harbin' (Harbin New Area) or 'haidian' (Haidian District).",
+        examples=["harbin"],
+        openapi_examples={
+            "harbin": {"summary": "Harbin New Area", "value": "harbin"},
+            "haidian": {"summary": "Haidian District", "value": "haidian"},
+        },
+    )
+):
     """Get region details."""
     config = get_config()
     if not config.region_exists(region_id):
