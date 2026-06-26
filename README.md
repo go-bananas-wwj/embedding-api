@@ -42,6 +42,8 @@ pip install -r requirements.txt
 - OpenAPI JSON: http://60.31.21.42:22065/openapi.json
 
 > **注意**：上述在线文档默认已关闭（`DOCS_URL=none`），如需在线调试需显式开启。
+>
+> 📘 自定义训练工作流（前端接入指南）：[`docs/custom-training-workflow.md`](docs/custom-training-workflow.md)
 
 ### 哈尔滨新区任务说明
 
