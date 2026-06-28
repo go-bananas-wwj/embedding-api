@@ -56,3 +56,38 @@
 - 全量测试通过：`99 passed, 1 skipped`。
 - 已推送 GitHub：`6e6e4c2`。
 - 服务已重启，`/regions/harbin/mosaic?date=2025-04&sensor_type=s2&version=v2&format=png` 返回 4.9MB PNG。
+
+
+## 2026-06-28 mosaic 接口扩展为 S2/S1/Landsat
+
+- 发现 `/workspace/raw/harbin/` 下已有 S2、S1、Landsat 的原始 per-patch TIFF 数据。
+- 重写 `app/services/mosaic_service.py`：
+  - 从 `/workspace/raw/{region}/{sensor}/{patch_id}/{period}.tif` 读取原始数据。
+  - `date=YYYY-MM` 自动映射到季度文件名（如 `2025-04` → `2025Q2`）。
+  - 支持 `sensor_type=s2|s1|landsat`。
+  - PNG 输出使用标准波段合成：S2/Landsat 真彩色（B4/B3/B2），S1 伪彩色（R=VV, G=VH, B=VH/VV）。
+  - GeoTIFF 输出保留原始多波段和 UTM 坐标。
+  - 新增 `patch_ids` 参数，可只拼指定 patch。
+- 更新 `app/routers/regions.py` 的 `/regions/{region_id}/mosaic` 端点。
+- 更新 `tests/test_mosaic.py`，用 5 个 patch 子集提速；GeoTIFF 测试标记为 `slow`。
+- 更新 `README.md`、`docs/API.md` 说明多传感器支持和波段合成。
+- 全量非 slow 测试通过：`96 passed, 5 deselected`。
+- 已推送 GitHub：`38f0792`。
+- 服务已重启，验证通过：
+  - S2 全区域 `15.0 MB` PNG
+  - S1 两 patch 预览 `90 KB` PNG
+  - Landsat 两 patch 预览 `11 KB` PNG
+
+
+## 2026-06-28 前端文档与 API 测试报告更新
+
+- 同步 `test_output_agent/test_api.py`：
+  - 任务配置改为 5 类新专题（change_detection/building_extraction/land_use_classification/land_cover_classification/water_extraction）。
+  - 新增 `test_mosaic_endpoints()` 覆盖 s2/s1/landsat。
+  - 新增 `test_model_endpoints()` 覆盖 `/models` 列表。
+  - 报告结论更新为当前接口现状。
+- 重新运行 `test_output_agent/test_api.py`，生成 `test_output_agent/report.md`：
+  - 总测试 101 项，通过 97 项，预期内失败 4 项（change_detection 部分 result/prediction 数据缺失），非预期异常 0 项。
+- 单元测试：`pytest -q -m "not slow"` → `96 passed, 5 deselected`。
+- 确认 `docs/API.md` 已包含 `/regions/{region_id}/mosaic`、自定义模型、训练工作流等完整中文说明与 curl 示例。
+- 提交并推送。
