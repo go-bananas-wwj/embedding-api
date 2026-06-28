@@ -1,38 +1,104 @@
-# Haidian 区域复现程序
+# Haidian V1 P2A Deployment Pipeline
 
-本目录包含海淀区遥感 embedding 生成程序。海淀数据使用 OLMO Earth 模型，与哈尔滨的 xuannv_show 流程不同。
+This directory contains Haidian deployment utilities.  API version `v1` for
+Haidian is backed by the xuannv P2A embedding model trained on December 2025
+through May 2026 imagery.
 
-## 目录结构
+## Available API Tasks
 
+The Haidian V1 package follows the same `data/<region>` and `models/<region>`
+layout used by Harbin.
+
+| API task | Source task | Default head | Status |
+|---|---|---|---|
+| `building_extraction` | `haidian_building_osm` | U-Net | ready |
+| `road_extraction` | `haidian_road_osm` | U-Net | ready |
+| `construction` | Haidian construction labels | U-Net | ready |
+| `construction_joint` | Haidian subset of `construction_joint` | U-Net | ready |
+
+The API version name is intentionally `v1` even though the underlying research
+experiment is called P2A.
+
+## Directory Layout
+
+```text
+data/haidian/
+  patches_meta_v1.json
+  embeddings/v1/{month}/{patch_id}.npy
+  embeddings/v1/{month}/{patch_id}.png
+  tasks/{task}/v1/predictions/{patch_id}.npy
+  tasks/{task}/v1/results/tiles/{patch_id}.png
+  tasks/{task}/v1/labels/...
+
+models/haidian/v1/
+  embedding/best.pt
+  embedding/config.yaml
+  task_heads/{task}/{head}/best.pt
 ```
-pipelines/haidian/
-├── batch_produce_embeddings.py         # 批量生产 embedding
-├── extract_olmoearth_embeddings.py     # 从 OlmoEarth 数据提取 embedding
-└── README.md
-```
 
-## 复现流程
+Months are `202512`, `202601`, `202602`, `202603`, `202604`, and `202605`.
 
-### 1. 提取 OlmoEarth Embedding
+## Install Assets From ModelScope
+
+The large assets are stored in the ModelScope dataset
+`WeijieWu/xuannv_embdding_api` under `haidian/v1`.
 
 ```bash
 cd /workspace/embedding-api
-python pipelines/haidian/extract_olmoearth_embeddings.py \
-  --input-dir /path/to/olmoearth/data \
-  --output-dir data/haidian/embeddings
+export MODELSCOPE_TOKEN="..."  # only needed for private datasets
+python pipelines/haidian/download_modelscope_assets.py \
+  --repo WeijieWu/xuannv_embdding_api \
+  --prefix haidian/v1/api_ready \
+  --target .
 ```
 
-### 2. 批量生产 Embedding
+After download, start the API normally:
 
 ```bash
-python pipelines/haidian/batch_produce_embeddings.py \
-  --input-dir /path/to/raw/data \
-  --output-dir data/haidian/embeddings \
-  --model-checkpoint /path/to/model.pt
+DOCS_URL=/docs uvicorn app.main:app --host 0.0.0.0 --port 9061
 ```
 
-## 路径说明
+## Prepare Upload Package
 
-- Embedding 输出到 `embedding-api/data/haidian/embeddings/`
-- 每个 patch 对应一个 `{patch_id}.npy` 文件，shape 为 `(64, 128, 128)`
-- 海淀区当前只有 embedding 数据，无下游任务数据
+On the xuannv training machine, create the ModelScope upload package:
+
+```bash
+cd /workspace/embedding-api
+python pipelines/haidian/prepare_v1_api_assets.py \
+  --output-root /data/xuannv_embedding/modelscope_upload/haidian/v1
+```
+
+For a fast dry run:
+
+```bash
+python pipelines/haidian/prepare_v1_api_assets.py \
+  --output-root /tmp/haidian_v1_dryrun \
+  --max-patches 2 \
+  --copy-mode symlink \
+  --skip-raw-training-data
+```
+
+## Regenerate Task Predictions
+
+If task results need to be regenerated from downloaded embeddings and task-head
+weights:
+
+```bash
+python pipelines/haidian/inference_task_head.py \
+  --task building_extraction \
+  --before-month 202512 \
+  --after-month 202605 \
+  --device cuda
+```
+
+Supported tasks are `building_extraction`, `road_extraction`, `construction`,
+and `construction_joint`.
+
+## Example API Calls
+
+```bash
+curl -s "http://localhost:9061/regions/haidian/patches/patch_000000/embedding?format=json&version=v1&month=202512"
+curl -s "http://localhost:9061/regions/haidian/patches/patch_000000/tasks/building_extraction/result?format=png&version=v1" -o /tmp/haidian_building.png
+curl -s "http://localhost:9061/regions/haidian/patches/patch_000000/tasks/road_extraction/prediction?version=v1" -o /tmp/haidian_road.npy
+```
+

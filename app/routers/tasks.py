@@ -17,6 +17,8 @@ TASK_FORMATS = Literal["png", "npy"]
 _TASK_OPENAPI_EXAMPLES = {
     "change_detection": {"summary": "Change detection", "value": "change_detection"},
     "building_extraction": {"summary": "Building extraction", "value": "building_extraction"},
+    "road_extraction": {"summary": "Road extraction", "value": "road_extraction"},
+    "construction": {"summary": "Construction detection", "value": "construction"},
     "land_use_classification": {"summary": "Land use classification", "value": "land_use_classification"},
     "land_cover_classification": {"summary": "Land cover classification", "value": "land_cover_classification"},
     "water_extraction": {"summary": "Water extraction", "value": "water_extraction"},

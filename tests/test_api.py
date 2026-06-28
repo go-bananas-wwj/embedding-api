@@ -205,6 +205,8 @@ class TestTasks:
         task_ids = [t["id"] for t in data["tasks"]]
         assert "change_detection" in task_ids
         assert "building_extraction" in task_ids
+        assert "road_extraction" in task_ids
+        assert "construction" in task_ids
         assert "land_use_classification" in task_ids
         assert "land_cover_classification" in task_ids
         assert "water_extraction" in task_ids

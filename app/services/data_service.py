@@ -415,6 +415,9 @@ class DataService:
                 path = DataService._find_first_file(base, f"{patch_id}_*.npy")
                 if path:
                     return path
+                path = _resolve_path(base, f"{patch_id}.npy")
+                if path:
+                    return path
                 # Per-patch fallback only; no whole-region result.npy fallback
                 path = _resolve_path(base, f"{patch_id}.npy")
                 if path:
@@ -451,6 +454,9 @@ class DataService:
                     # period is requested, so an explicit period is honored.
                     tiles_dir = Path(base) / "tiles"
                     path = DataService._find_first_file(str(tiles_dir), f"{patch_id}_*.png")
+                    if path:
+                        return path
+                    path = _resolve_path(str(tiles_dir), f"{patch_id}.png")
                     if path:
                         return path
         return None
@@ -521,6 +527,9 @@ class DataService:
         """
         # Flat layout: predictions are stored directly in the base directory.
         path = DataService._find_first_file(base_dir, f"{patch_id}_*.npy")
+        if path:
+            return path
+        path = _resolve_path(base_dir, f"{patch_id}.npy")
         if path:
             return path
 

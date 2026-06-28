@@ -33,6 +33,7 @@ curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/embedding?
 curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/embedding?format=npy&version=v2&month=2025-04" -o /tmp/emb_patch_000000.npy
 curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/embedding?format=json&version=v2&month=2025-04"
 curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/embedding?format=cache&version=v2&month=2025-04" -o /tmp/emb_patch_000000_cache.png
+curl -s "http://60.31.21.42:22065/regions/haidian/patches/patch_000000/embedding?format=json&version=v1&month=202512"
 
 # 4. 下游任务
 curl -s "http://60.31.21.42:22065/regions/harbin/tasks"
@@ -46,6 +47,9 @@ curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/tasks/buil
 curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/tasks/land_use_classification/result?format=png&version=v1" -o /tmp/lu_patch_000000.png
 curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/tasks/building_extraction/prediction?version=v1" -o /tmp/be_pred_patch_000000.npy
 curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/tasks/building_extraction/label?version=v1"
+curl -s "http://60.31.21.42:22065/regions/haidian/patches/patch_000000/tasks/building_extraction/result?format=png&version=v1" -o /tmp/haidian_building.png
+curl -s "http://60.31.21.42:22065/regions/haidian/patches/patch_000000/tasks/road_extraction/result?format=png&version=v1" -o /tmp/haidian_road.png
+curl -s "http://60.31.21.42:22065/regions/haidian/patches/patch_000000/tasks/construction/result?format=png&version=v1" -o /tmp/haidian_construction.png
 
 # 6. 瓦片
 curl -s "http://60.31.21.42:22065/regions/harbin/tasks/change_detection/tiles?version=v1&period=2025-04_vs_2025-06"
@@ -167,6 +171,9 @@ Embedding 是深度学习模型把卫星影像「翻译」成的高维向量。�
 |-----------|--------|---------|---------------------|
 | `change_detection` | 变化检测 | 基于两期 embedding 差分检测变化区域 | `building_change`、`demolition` |
 | `building_extraction` | 建筑物提取 | 提取建筑物、建筑工地 | `construction` |
+| `road_extraction` | 道路提取 | 提取道路和路网 | 无 |
+| `construction` | 施工地检测 | 海淀区施工地检测 | 无 |
+| `construction_joint` | 施工地联合检测 | construction_joint 的海淀子集 | 无 |
 | `land_use_classification` | 土地利用分类 | 耕地、建设用地等土地利用类型 | `farmland`、`land_conversion` |
 | `land_cover_classification` | 土地覆盖分类 | WorldCover / Dynamic World 土地覆盖 | 无 |
 | `water_extraction` | 水体提取 | JRC 水体提取 | 无 |
@@ -175,7 +182,7 @@ Embedding 是深度学习模型把卫星影像「翻译」成的高维向量。�
 - **V1**: 单期监测，只有一个时间点的结果，需指定 `month`（如 `2025-04`）
 - **V2**: 变化监测，对比两个时间点的差异，需指定 `period`（如 `2025-04_vs_2025-06`）
 
-> ⚠️ **旧任务 ID 已废弃**：`construction`、`building_change`、`farmland`、`land_conversion`、`demolition` 这些名称已从 API 和配置中移除。请统一使用上表中的 5 个新 ID。服务端通过配置映射保证老数据仍然可用（例如请求 `building_extraction` 会自动读取原 `construction` 目录的数据）。
+> ⚠️ **旧任务 ID 说明**：哈尔滨仍建议使用统一任务 ID，如 `building_extraction`、`land_use_classification`。海淀 V1 额外开放 `road_extraction`、`construction`、`construction_joint`，用于服务 P2A 海淀专题任务。
 
 ### 什么是瓦片（Tile）？
 
@@ -351,7 +358,7 @@ curl -s "http://60.31.21.42:22065/regions"
 | `patch_count` | int | 该区域包含的 Patch 总数 |
 | `tasks` | string[] | 该区域支持的下游任务列表 |
 
-**注意**: 海淀区虽然列出了 5 个任务，但当前 `versions` 为空，因此任务结果、预测、标签等接口会返回 `404`，仅 Embedding 接口可用。
+**注意**: 海淀区 `v1` 使用 xuannv P2A 模型，embedding 月份为 `202512` 至 `202605`。当前可用任务包括 `building_extraction`、`road_extraction`、`construction` 和 `construction_joint`；`land_cover_classification` 与 `water_extraction` 仍保留任务入口，但没有预生成结果。
 
 ---
 
@@ -2231,11 +2238,12 @@ function getResultImageUrl(regionId: string, patchId: string, taskType: string, 
 |------|------|
 | Patch 总数 | 320 |
 | 覆盖范围 | 116.2°E ~ 116.3°E, 39.9°N ~ 40.1°N |
-| 时间范围 | 2025-02 ~ 2026-04 |
-| 数据源 | Sentinel-2, Sentinel-1, Landsat, DEM, WorldCover 等 |
-| 嵌入格式 | NPZ 多通道数组 |
-| 下游任务 | 已定义 5 个，但 `versions` 为空 |
-| 可用接口 | `/regions/haidian/patches/*`、`/regions/haidian/patches/*/embedding` |
+| 时间范围 | 2025-12 ~ 2026-05 |
+| 数据源 | Sentinel-2, Sentinel-1, Landsat, 高分光学, 高分 SAR, WorldCover 等 |
+| 嵌入格式 | NPY 多通道数组 / PNG PCA 预览 / JSON 统计 |
+| 下游任务 | `building_extraction`, `road_extraction`, `construction`, `construction_joint`, `land_use_classification`, `land_cover_classification`, `water_extraction` |
+| 有预生成结果的任务 | `building_extraction` V1、`road_extraction` V1、`construction` V1、`construction_joint` V1 |
+| 可用接口 | `/regions/haidian/patches/*`、`/regions/haidian/patches/*/embedding`、`/regions/haidian/patches/*/tasks/*/result` |
 
 ---
 
