@@ -59,8 +59,9 @@ DOCS_URL=/docs uvicorn app.main:app --reload --host 0.0.0.0 --port 9061
 ### 下载海淀 V1 资产
 
 海淀区 V1 的模型、embedding、任务结果和训练数据归档托管在 ModelScope
-数据集 `WeijieWu/xuannv_embdding_api` 的 `haidian/v1` 目录下。部署时先安装
-ModelScope CLI，然后下载 API-ready 目录：
+数据集 `WeijieWu/xuannv_embdding_api` 的 `haidian/v1` 目录下。
+
+**完整部署（需要约 9.5 GB 空间）**：
 
 ```bash
 export MODELSCOPE_TOKEN="..."  # 私有数据集需要；不要写入代码
@@ -70,12 +71,22 @@ python pipelines/haidian/download_modelscope_assets.py \
   --target .
 ```
 
+**仅部署 embedding 接口（约 7.6 GB，不下原始场景和任务结果）**：
+
+```bash
+export MODELSCOPE_TOKEN="..."
+python pipelines/haidian/download_embeddings.py
+```
+
 下载后可直接访问：
 
 ```bash
 curl "http://localhost:9061/regions/haidian/patches/patch_000000/embedding?format=json&version=v1&month=202512"
-curl "http://localhost:9061/regions/haidian/patches/patch_000000/tasks/road_extraction/result?format=png&version=v1" -o /tmp/haidian_road.png
+curl "http://localhost:9061/regions/haidian/patches/patch_000000/embedding?format=png&version=v1&month=202512" -o /tmp/haidian_emb.png
 ```
+
+> 仅下载 embedding 时，海淀区专题任务结果接口和 SAM3 分割接口暂不可用。
+> 需要这些能力请使用 `download_modelscope_assets.py` 下载完整资产。
 
 ### 下载哈尔滨 V1/V2 资产
 

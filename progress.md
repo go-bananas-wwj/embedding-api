@@ -172,3 +172,26 @@
   - 与本地生成的文件对比，内容一致。
 - 代码变更已推送 GitHub：`fe9ae22`。
 - 当前后端服务未重启、未受影响。
+
+
+## 2026-06-29 在本机部署海淀区 V1 embedding 服务
+
+- 目标：在不影响哈尔滨新区服务的前提下，使 `GET /regions/haidian/patches/{patch_id}/embedding` 可用。
+- 保留哈尔滨 staging `/workspace/modelscope_upload/harbin/v1` 不清理（磁盘空间足够）。
+- 新增 `pipelines/haidian/download_embeddings.py`：
+  - 仅从 ModelScope 下载 `data/haidian/embeddings/v1/**` 与 `data/haidian/patches_meta_v1.json`。
+  - Token 从 `MODELSCOPE_TOKEN` 环境变量读取。
+- 下载结果：
+  - 5,760 个文件，约 7.57 GB。
+  - 月份覆盖 `202512` ~ `202605`。
+- 重启 watchdog 服务加载 PR #1 中新增的 Haidian V1 配置：
+  - 重启后 `/health` 正常返回，regions 包含 `harbin` 和 `haidian`。
+  - 哈尔滨接口验证正常：`/regions/harbin/patches/patch_000000/embedding` 返回 200。
+  - 海淀接口验证正常：
+    - JSON：`/regions/haidian/patches/patch_000000/embedding?format=json&version=v1&month=202512` 返回 shape `[64,128,128]`。
+    - PNG：`/regions/haidian/patches/patch_000000/embedding?format=png&version=v1&month=202512` 返回 `image/png`。
+- 限制：
+  - 仅启用海淀区 embedding 查询接口。
+  - 专题任务结果与 SAM3 分割需要额外下载完整资产，本次因空间/范围限制未下载。
+- 文档更新：`README.md` 增加「仅部署 embedding 接口」说明。
+- 已推送 GitHub：待提交。
