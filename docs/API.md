@@ -1581,19 +1581,28 @@ GET /regions/{region_id}/mosaic?date=YYYY-MM&sensor_type=s2&format=png
 
 **路径参数**:
 
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `region_id` | string | 是 | 区域 ID，如 `harbin` |
+| 参数 | 类型 | 必填 | 可取值 | 说明 |
+|------|------|------|--------|------|
+| `region_id` | string | 是 | `harbin` / `haidian` | 区域 ID |
 
 **查询参数**:
 
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `date` | string | 是 | 日期/月份，哈尔滨格式为 `YYYY-MM`，如 `2025-04`；会自动映射到季度文件 `2025Q2` |
-| `sensor_type` | string | 否 | 传感器类型：`s2`（默认）、`s1`、`landsat` |
-| `version` | string | 否 | 保留字段，对原始传感器数据无效 |
-| `format` | string | 否 | 输出格式：`png`（默认，可视化 RGB）或 `tif`（GeoTIFF，保留原始多波段与 UTM 坐标） |
-| `patch_ids` | string[] | 否 | 可选，只拼接指定 Patch ID 列表（可多次传入），不传则拼接全区域 |
+| 参数 | 类型 | 必填 | 可取值 | 默认值 | 说明 |
+|------|------|------|--------|--------|------|
+| `date` | string | 是 | `2025-01` ~ `2025-12`（哈尔滨），`YYYY-MM` | - | 日期/月份，哈尔滨会自动映射到季度文件 |
+| `sensor_type` | string | 否 | `s2` / `s1` / `landsat` | `s2` | 传感器类型 |
+| `version` | string | 否 | 任意 / 可省略 | `None` | 保留字段，对原始传感器数据无效 |
+| `format` | string | 否 | `png` / `tif` | `png` | 输出格式：`png` 可视化；`tif` GeoTIFF 原始数据 |
+| `patch_ids` | string[] | 否 | 如 `patch_000000`、`patch_000001` | 全区域 | 只拼接指定 Patch ID 列表，可多次传入 |
+
+**哈尔滨 `date` 与季度文件映射**：
+
+| 你传的 `date` | 实际读取的文件 | 说明 |
+|---------------|----------------|------|
+| `2025-01` / `2025-02` / `2025-03` | `2025Q1` | 第一季度 |
+| `2025-04` / `2025-05` / `2025-06` | `2025Q2` | 第二季度 |
+| `2025-07` / `2025-08` / `2025-09` | `2025Q3` | 第三季度 |
+| `2025-10` / `2025-11` / `2025-12` | `2025Q4` | 第四季度 |
 
 **波段合成规则**：
 
@@ -1603,18 +1612,26 @@ GET /regions/{region_id}/mosaic?date=YYYY-MM&sensor_type=s2&format=png
 | `landsat` | B4(R) / B3(G) / B2(B) | Landsat 真彩色 |
 | `s1` | R=VV, G=VH, B=VH/VV | Sentinel-1 伪彩色合成 |
 
-**curl 示例**:
+**完整请求示例**：
+
 ```bash
-# 全区域 S2 大图
+# 1. 哈尔滨全区域 Sentinel-2 真彩色 PNG（最大图，首次较慢）
 curl -s "http://60.31.21.42:22065/regions/harbin/mosaic?date=2025-04&sensor_type=s2&format=png" -o /tmp/harbin_s2_2025-04.png
 
-# 只拼前两个 patch（快速预览）
+# 2. 只拼前两个 patch 的 Sentinel-1 伪彩色预览（快）
 curl -s "http://60.31.21.42:22065/regions/harbin/mosaic?date=2025-04&sensor_type=s1&format=png&patch_ids=patch_000000&patch_ids=patch_000001" -o /tmp/harbin_s1_preview.png
+
+# 3. Landsat 全区域 GeoTIFF 原始数据（保留多波段与坐标）
+curl -s "http://60.31.21.42:22065/regions/harbin/mosaic?date=2025-04&sensor_type=landsat&format=tif" -o /tmp/harbin_landsat_2025-04.tif
+
+# 4. 本地调试地址（服务重启后默认端口 9061）
+curl -s "http://localhost:9061/regions/harbin/mosaic?date=2025-04&sensor_type=s2&format=png&patch_ids=patch_000000&patch_ids=patch_000001" -o /tmp/harbin_s2_preview.png
 ```
 
 **成功响应** (200): 返回 PNG 或 GeoTIFF 图片。
 
 > 首次生成后会缓存到 `users/default/mosaic/{region_id}_{sensor_type}_{date}.{format}`，后续直接读取。
+> 默认按 Patch 文件名排序后拼接，因此多次请求同一组 `patch_ids` 会命中缓存。
 
 ---
 

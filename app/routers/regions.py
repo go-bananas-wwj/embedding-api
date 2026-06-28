@@ -99,39 +99,66 @@ async def get_region(
 async def get_region_mosaic(
     region_id: str = Path(
         ...,
-        description="Region identifier. Use 'harbin' or 'haidian'.",
+        description="区域 ID。当前可用：'harbin'（哈尔滨新区）、'haidian'（海淀区）。",
         examples=["harbin"],
+        openapi_examples={
+            "harbin": {"summary": "哈尔滨新区", "value": "harbin"},
+            "haidian": {"summary": "北京海淀区", "value": "haidian"},
+        },
     ),
     date: str = Query(
         ...,
-        description="Date or period in YYYY-MM (harbin).",
+        description="日期/月份，哈尔滨格式为 'YYYY-MM'，会自动映射到季度文件。例如 '2025-04' -> '2025Q2'。",
         examples=["2025-04"],
+        openapi_examples={
+            "2025-04": {"summary": "2025 年第 2 季度", "value": "2025-04"},
+            "2025-10": {"summary": "2025 年第 4 季度", "value": "2025-10"},
+        },
     ),
     sensor_type: str = Query(
         "s2",
-        description="Sensor type. Currently only 's2' (Sentinel-2) is supported.",
+        description="传感器类型。可选：'s2'（Sentinel-2，默认）、's1'（Sentinel-1）、'landsat'。",
         examples=["s2"],
+        openapi_examples={
+            "s2": {"summary": "Sentinel-2 真彩色", "value": "s2"},
+            "s1": {"summary": "Sentinel-1 SAR 伪彩色", "value": "s1"},
+            "landsat": {"summary": "Landsat 真彩色", "value": "landsat"},
+        },
     ),
     version: Optional[str] = Query(
         None,
-        description="保留字段，对原始卫星传感器数据无效。",
-        examples=["v2"],
+        description="保留字段，对原始卫星传感器数据无效，可留空。",
+        examples=[None],
     ),
     format: str = Query(
         "png",
-        description="Output format: 'png' (default) or 'tif' (GeoTIFF with WGS84).",
+        description="输出格式。'png'（默认，可视化 RGB）或 'tif'（GeoTIFF，保留原始多波段与坐标）。",
         examples=["png"],
+        openapi_examples={
+            "png": {"summary": "PNG 可视化", "value": "png"},
+            "tif": {"summary": "GeoTIFF 原始数据", "value": "tif"},
+        },
     ),
     patch_ids: Optional[List[str]] = Query(
         None,
-        description="可选，只拼接指定的 Patch ID 列表（用于快速预览或局部大图）。",
+        description="可选，只拼接指定的 Patch ID 列表（用于快速预览或局部大图）。不传则拼全区域。",
         examples=[["patch_000000", "patch_000001"]],
+        openapi_examples={
+            "two_patches": {
+                "summary": "只拼前两个 patch",
+                "value": ["patch_000000", "patch_000001"],
+            },
+            "empty": {
+                "summary": "拼全区域（不传）",
+                "value": [],
+            },
+        },
     ),
 ):
     """获取指定日期、区域的整区域马赛克大图。
 
-    将区域内所有 Patch 的预览图按地理范围拼接成一张大图返回，
-    用于前端展示整区域遥感影像。当前仅支持 Sentinel-2（sensor_type='s2'）。
+    将区域内所有 Patch 的原始卫星 TIFF 按地理范围拼接成一张大图返回，
+    用于前端展示整区域遥感影像。支持 Sentinel-2（s2）、Sentinel-1（s1）、Landsat。
     首次生成后会缓存到 users/default/mosaic/，后续直接读取。
     """
     try:
