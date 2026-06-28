@@ -1,10 +1,17 @@
 """Region management router."""
 
-from fastapi import APIRouter, HTTPException, Path
+import io
+from typing import Optional
+
+from fastapi import APIRouter, HTTPException, Path, Query
+from fastapi.responses import StreamingResponse
+
 from app.config import get_config
 from app.schemas.models import (
     RegionsResponse, RegionInfo, HealthResponse, RegionDetail, RegionTaskMeta,
 )
+from app.services.data_service import DataNotFoundError, DataValidationError
+from app.services.mosaic_service import build_mosaic
 
 router = APIRouter()
 
@@ -86,3 +93,55 @@ async def get_region(
         tasks=tasks,
         embeddings=list(region.get("embeddings", {}).keys()),
     )
+
+
+@router.get("/regions/{region_id}/mosaic")
+async def get_region_mosaic(
+    region_id: str = Path(
+        ...,
+        description="Region identifier. Use 'harbin' or 'haidian'.",
+        examples=["harbin"],
+    ),
+    date: str = Query(
+        ...,
+        description="Date or period in YYYY-MM (harbin).",
+        examples=["2025-04"],
+    ),
+    sensor_type: str = Query(
+        "s2",
+        description="Sensor type. Currently only 's2' (Sentinel-2) is supported.",
+        examples=["s2"],
+    ),
+    version: Optional[str] = Query(
+        None,
+        description="Embedding version. Defaults to 'v2' for Sentinel-2.",
+        examples=["v2"],
+    ),
+    format: str = Query(
+        "png",
+        description="Output format: 'png' (default) or 'tif' (GeoTIFF with WGS84).",
+        examples=["png"],
+    ),
+):
+    """获取指定日期、区域的整区域马赛克大图。
+
+    将区域内所有 Patch 的预览图按地理范围拼接成一张大图返回，
+    用于前端展示整区域遥感影像。当前仅支持 Sentinel-2（sensor_type='s2'）。
+    首次生成后会缓存到 users/default/mosaic/，后续直接读取。
+    """
+    try:
+        data, mime = build_mosaic(
+            region_id=region_id,
+            date=date,
+            sensor_type=sensor_type,
+            version=version,
+            fmt=format,
+        )
+    except DataValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except DataNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to build mosaic: {e}")
+
+    return StreamingResponse(io.BytesIO(data), media_type=mime)

@@ -173,12 +173,12 @@ class ModelCreate(BaseModel):
     )
     model_type: str = Field(
         ...,
-        description="Model head type. Allowed values: 'classification' or 'change_detection'.",
+        description="模型大类，决定训练哪种下游任务头。可选 'classification'（分类头）或 'change_detection'（变化检测头）。",
         examples=["classification"],
     )
     task_type: str = Field(
         ...,
-        description="Downstream task type. Allowed values: change_detection, building_extraction, land_use_classification, land_cover_classification, water_extraction.",
+        description="具体任务类型，与 model_type 配合使用。classification 对应 building_extraction / land_use_classification / land_cover_classification / water_extraction；change_detection 对应 change_detection。",
         examples=["building_extraction"],
     )
     region_id: str = Field(
@@ -360,9 +360,9 @@ class InferRequest(BaseModel):
         has_single = bool(self.month)
         has_pair = bool(self.before_month) and bool(self.after_month)
         if has_single and has_pair:
-            raise ValueError("Provide either 'month' or both 'before_month' and 'after_month', not both")
+            raise ValueError("请勿同时传入 'month' 和 'before_month'/'after_month'；分类模型传 month，变化检测模型传 before_month+after_month")
         if not has_single and not has_pair:
-            raise ValueError("Provide either 'month' (classification) or both 'before_month' and 'after_month' (change detection)")
+            raise ValueError("分类模型请传入 'month'，变化检测模型请同时传入 'before_month' 和 'after_month'")
         return self
 
 
@@ -400,9 +400,9 @@ class BatchInferRequest(BaseModel):
         has_single = bool(self.month)
         has_pair = bool(self.before_month) and bool(self.after_month)
         if has_single and has_pair:
-            raise ValueError("Provide either 'month' or both 'before_month' and 'after_month', not both")
+            raise ValueError("请勿同时传入 'month' 和 'before_month'/'after_month'；分类模型传 month，变化检测模型传 before_month+after_month")
         if not has_single and not has_pair:
-            raise ValueError("Provide either 'month' (classification) or both 'before_month' and 'after_month' (change detection)")
+            raise ValueError("分类模型请传入 'month'，变化检测模型请同时传入 'before_month' 和 'after_month'")
         return self
 
 

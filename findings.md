@@ -95,3 +95,56 @@
 
 当前 embedding-api 无自定义训练/推理 API，需新增模块。
 
+
+
+## 前端同事反馈问题分析（2026-06-26）
+
+### 问题 1：POST /models 参数设计
+
+**同事原话**：
+1. `task_type` 参数不需要。
+2. `model_type` 提供参数示例。
+
+**当前实现**：
+- `model_type` 只能是 `classification` 或 `change_detection`。
+- `task_type` 用于区分 4 种分类子任务：`building_extraction`、`land_use_classification`、`land_cover_classification`、`water_extraction`。
+- 因此 `task_type` 目前是有必要的，但确实会让前端觉得冗余。
+
+**可选方案**：
+- **方案 A**：保持现状，但优化 Swagger/文档示例，明确说明 `model_type` 与 `task_type` 的关系。
+- **方案 B**：把 `model_type` 直接扩展为具体任务类型（`change_detection`、`building_extraction`、`land_use_classification`、`land_cover_classification`、`water_extraction`），删除 `task_type` 字段。后端根据 `model_type` 判断是二分类头还是多分类头。
+
+### 问题 2：POST /models/{model_id}/infer_batch 月份参数
+
+**同事示例**：同时传了 `month`、`before_month`、`after_month`。
+
+**当前实现**：
+- 校验器要求“要么传 `month`，要么同时传 `before_month`+`after_month`”，不能同时传三类。
+- 分类模型用 `month`；变化检测模型用 `before_month`/`after_month`。
+
+**问题根因**：
+- Swagger 示例不清晰，导致前端以为三个参数都要填。
+
+**可选方案**：
+- **方案 A**：保持 XOR 校验，但把 Swagger 示例拆成“分类示例”和“变化检测示例”，并在描述里写清楚。
+- **方案 B**：对变化检测模型，如果只传 `month`，后端自动使用训练时保存的 `before_month`/`after_month`（或默认上一期/当期）。但这会降低灵活性。
+- **方案 C**：给 `infer_batch` 加 `model_type` 感知的校验错误提示，让前端更容易理解。
+
+### 问题 3：大图接口（按日期/区域/传感器返回遥感 PNG）
+
+**同事需求**：接收 `date`、`region_id`、`sensor_type`，返回遥感数据 PNG 大图。
+
+**当前数据现状**：
+- 我们只有 patch 级 embedding（`.npy`）和对应的 64×64 预览 PNG。
+- 没有整区域的原始卫星影像，也没有按 `sensor_type` 分类的数据目录。
+- `config.yaml` 里没有 `sensor_type` 字段，embedding 版本（v1/v2）可近似看作不同模型/传感器来源。
+
+**可选方案**：
+- **方案 A**：基于现有 patch 预览 PNG 拼接整区域马赛克大图（按日期 + embedding 版本）。尺寸约为 `64 * sqrt(n_patches)`，哈尔滨约 400 个 patch，拼出来约 1280×1280。
+- **方案 B**：支持 `bbox` 参数，只拼 bbox 内的 patch，返回局部大图。
+- **方案 C**：等后续补齐原始遥感影像（如 Sentinel-2 RGB 真彩图）后再实现真正的大图接口。
+
+**待澄清点**：
+- “大图”是指整区域马赛克，还是指定 bbox 的区域？
+- `sensor_type` 是否需要映射为 `embedding_version`（v1/v2）？
+- 返回的 PNG 是否需要带地理坐标（GeoTIFF），还是仅用于前端叠加展示？

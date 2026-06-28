@@ -1150,8 +1150,8 @@ POST /models
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `name` | string | 是 | 用户自定义模型名称 |
-| `model_type` | string | 是 | 模型头类型：`classification` 或 `change_detection` |
-| `task_type` | string | 是 | 任务类型，如 `building_extraction`、`change_detection` 等 |
+| `model_type` | string | 是 | 模型大类：`classification`（分类头）或 `change_detection`（变化检测头） |
+| `task_type` | string | 是 | 具体任务类型，与 `model_type` 配合。`classification` 对应 `building_extraction` / `land_use_classification` / `land_cover_classification` / `water_extraction`；`change_detection` 对应 `change_detection` |
 | `region_id` | string | 是 | 区域 ID，如 `harbin` 或 `haidian` |
 | `embedding_version` | string | 否 | 嵌入版本，默认 `v2` |
 | `epochs` | int | 否 | 训练迭代次数（映射为 `LogisticRegression.max_iter`），默认 `100`，范围 `1~1000` |
@@ -1565,6 +1565,43 @@ curl -s "http://60.31.21.42:22065/models/results/infer_model_ghi789_harbin_patch
 ```
 
 **成功响应** (200): 返回 PNG 图片 (`image/png`)，尺寸统一为 **128×128** 像素。
+
+---
+
+## 🛰 区域马赛克大图
+
+### 23. 获取整区域马赛克大图
+
+将某个区域、某个日期/月份下所有 Patch 的预览图按地理范围拼接成一张大图返回，用于前端展示整区域遥感影像。
+
+```
+GET /regions/{region_id}/mosaic?date=YYYY-MM&sensor_type=s2&version=v2&format=png
+```
+
+**路径参数**:
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `region_id` | string | 是 | 区域 ID，如 `harbin` |
+
+**查询参数**:
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `date` | string | 是 | 日期/月份，哈尔滨格式为 `YYYY-MM`，如 `2025-04` |
+| `sensor_type` | string | 否 | 传感器类型，当前仅支持 `s2`（Sentinel-2），默认 `s2` |
+| `version` | string | 否 | Embedding 版本，默认 `v2` |
+| `format` | string | 否 | 输出格式：`png`（默认）或 `tif`（GeoTIFF，带 WGS84 地理坐标） |
+
+**curl 示例**:
+```bash
+curl -s "http://60.31.21.42:22065/regions/harbin/mosaic?date=2025-04&sensor_type=s2&version=v2&format=png" -o /tmp/harbin_2025-04.png
+```
+
+**成功响应** (200): 返回 PNG 或 GeoTIFF 图片。
+
+> 首次生成后会缓存到 `users/default/mosaic/{region_id}_{sensor_type}_{version}_{date}.{format}`，后续直接读取。
+> 当前仅支持 Sentinel-2；S1、Landsat 等传感器数据尚未接入，传入会返回 `400`。
 
 ---
 

@@ -283,3 +283,156 @@ app/
 3. Phase 4 文档与 Phase 5 验证紧随。
 
 请确认方案后执行。
+
+
+---
+
+## 前端反馈处理计划（2026-06-26）
+
+### 目标
+
+处理前端同事针对 `/models`、`/models/{model_id}/infer_batch` 以及新增“大图”接口提出的三个问题。
+
+### 待决策问题
+
+| 编号 | 问题 | 建议方案 |
+|------|------|----------|
+| 1 | POST /models 是否需要 `task_type`？ | 方案 A：保留 `task_type`，优化示例/说明；方案 B：删除 `task_type`，把 `model_type` 扩展为具体任务类型。 |
+| 2 | `infer_batch` 月份参数怎么填？ | 方案 A：保持 XOR 校验，拆分 Swagger 示例；方案 B：CD 模型支持只传 `month` 并自动取训练期；方案 C：仅校验提示优化。 |
+| 3 | 新增按日期/区域/传感器返回 PNG 大图接口 | 方案 A：拼整区域马赛克；方案 B：拼 bbox 局部大图；方案 C：等原始影像数据。 |
+
+### 执行步骤
+
+1. **确认用户决策**：对上述三个问题达成一致。
+2. **更新 schema 与路由**：按决策修改 `app/schemas/models.py`、`app/routers/models.py`。
+3. **新增大图接口**：若选择方案 A/B，设计并实现 `/regions/{region_id}/mosaic` 或 `/imagery` 端点。
+4. **更新 Swagger 示例与文档**：确保前端看到的示例是可运行的、清晰的。
+5. **补充测试**：针对新参数组合、新接口写单测/集成测试。
+6. **全量测试 + 推送 + 重启服务**。
+
+### 风险
+
+- 删除 `task_type` 或改变 `model_type` 枚举属于接口破坏性变更，需同步前端。
+- 大图接口如果按 64×64 patch 预览图拼接，分辨率有限，需和前端确认是否接受。
+
+---
+
+**等待用户确认方案后再执行。**
+
+
+---
+
+## 前端反馈处理计划（2026-06-26）
+
+### 目标
+
+处理前端同事针对 `/models`、`/models/{model_id}/infer_batch` 以及新增“大图”接口提出的三个问题。
+
+### 待决策问题
+
+| 编号 | 问题 | 建议方案 |
+|------|------|----------|
+| 1 | POST /models 是否需要 `task_type`？ | 方案 A：保留 `task_type`，优化示例/说明；方案 B：删除 `task_type`，把 `model_type` 扩展为具体任务类型。 |
+| 2 | `infer_batch` 月份参数怎么填？ | 方案 A：保持 XOR 校验，拆分 Swagger 示例；方案 B：CD 模型支持只传 `month` 并自动取训练期；方案 C：仅校验提示优化。 |
+| 3 | 新增按日期/区域/传感器返回 PNG 大图接口 | 方案 A：拼整区域马赛克；方案 B：拼 bbox 局部大图；方案 C：等原始影像数据。 |
+
+### 执行步骤
+
+1. **确认用户决策**：对上述三个问题达成一致。
+2. **更新 schema 与路由**：按决策修改 `app/schemas/models.py`、`app/routers/models.py`。
+3. **新增大图接口**：若选择方案 A/B，设计并实现 `/regions/{region_id}/mosaic` 或 `/imagery` 端点。
+4. **更新 Swagger 示例与文档**：确保前端看到的示例是可运行的、清晰的。
+5. **补充测试**：针对新参数组合、新接口写单测/集成测试。
+6. **全量测试 + 推送 + 重启服务**。
+
+### 风险
+
+- 删除 `task_type` 或改变 `model_type` 枚举属于接口破坏性变更，需同步前端。
+- 大图接口如果按 64×64 patch 预览图拼接，分辨率有限，需和前端确认是否接受。
+
+---
+
+## 决策确认与详细实施方案（2026-06-26）
+
+### 已确认决策
+
+| 问题 | 决策 |
+|------|------|
+| POST /models 参数设计 | **保持现状**（方案 A）：保留 `model_type` + `task_type`，但优化 Swagger 示例和字段描述，让前端明白 `task_type` 用于区分 4 种分类子任务。 |
+| infer_batch 月份参数 | **保持 XOR 校验并优化示例**（方案 A）：Swagger 提供分类、变化检测两套独立示例，错误提示更明确。 |
+| 大图接口 | **整区域马赛克**（方案 A 扩展）：将哈尔滨 424 个 patch 的 64×64 预览图按地理范围拼接成一张大图返回；`sensor_type` 当前仅支持 `s2`（映射到 embedding `v2`），S1/Landsat 暂无数据，接口返回清晰的 400 提示。 |
+
+### 详细实施步骤
+
+#### Phase 1：优化 `/models` 与 `/models/{model_id}/infer_batch` 的 Swagger 示例与描述
+
+1. **修改 `app/schemas/models.py`**
+   - 为 `ModelCreate.model_type` 增加中文描述，说明是“模型大类”。
+   - 为 `ModelCreate.task_type` 增加描述，说明是“具体任务类型，与 `model_type` 配合使用”。
+   - 为 `ModelCreate` 增加字段级示例，例如 `model_type` 示例为 `classification`，`task_type` 示例为 `building_extraction`。
+
+2. **修改 `app/routers/models.py`**
+   - 在 `POST /models` 的 `Body(...)` 中使用 `openapi_examples` 提供两套可运行示例：
+     - 分类模型（`building_extraction`）
+     - 变化检测模型（`change_detection`）
+   - 在 `POST /models/{model_id}/infer` 和 `POST /models/{model_id}/infer_batch` 的 `Body(...)` 中使用 `openapi_examples` 提供：
+     - 分类推理示例（只传 `month`）
+     - 变化检测推理示例（只传 `before_month` + `after_month`）
+   - 校验错误信息改为中文，明确说明“分类模型请使用 month，变化检测模型请使用 before_month + after_month”。
+
+3. **更新 `docs/API.md` 和 `docs/custom-training-workflow.md`**
+   - 在请求体示例里分别给出分类/变化检测两套完整 JSON。
+   - 在“接口概览”里说明 `model_type` 与 `task_type` 的对应关系。
+
+#### Phase 2：新增整区域马赛克大图接口
+
+1. **设计端点**
+   - `GET /regions/{region_id}/mosaic`
+   - Query 参数：
+     - `date`（YYYY-MM，必填）
+     - `sensor_type`（默认 `s2`，当前仅支持 `s2`）
+     - `version`（可选，默认 `v2`；`sensor_type=s2` 时若未传 version 则默认 `v2`）
+     - `format`（默认 `png`，可选 `tif`）
+
+2. **实现 `app/services/mosaic_service.py`**
+   - 读取区域所有 patch 的 WGS84 bbox（从 `patches_meta.json`）。
+   - 根据每个 patch 的 64×64 预览 PNG 计算像素分辨率。
+   - 计算整体 mosaic 的地理范围和输出尺寸。
+   - 把所有 patch 的 PNG 按地理坐标拼到一张大图里：
+     - 黑边/透明作为 nodata。
+     - 若 patch 有重叠，后来者覆盖前者（简单策略）。
+   - 返回 PNG 字节流；若 `format=tif` 返回 GeoTIFF（带地理坐标）。
+
+3. **实现 `app/routers/regions.py` 新端点**
+   - 参数校验：
+     - `region_id` 必须存在。
+     - `sensor_type` 当前只允许 `s2`（后续可扩展 `s1`、`landsat`）。
+     - `date` 必须存在对应目录或文件；不存在返回 404。
+   - 调用 `mosaic_service.build_mosaic(...)`，返回 `StreamingResponse(image/png)` 或 `image/tiff`。
+
+4. **缓存与性能**
+   - 首次生成后缓存到 `users/default/mosaic/{region_id}_{sensor_type}_{date}.{format}`，后续直接读取。
+   - 哈尔滨 424 个 64×64 patch，总像素约 170 万，生成耗时 < 1s，内存占用小。
+
+5. **测试**
+   - 单元测试：mock 少量 patch，验证 mosaic 尺寸、像素非空、缓存文件生成。
+   - 集成测试：用哈尔滨真实数据调用 `/regions/harbin/mosaic?date=2025-04&sensor_type=s2`，保存输出并检查形状。
+
+#### Phase 3：测试、推送与重启
+
+1. 本地运行 `python -m pytest -q`。
+2. 提交并推送 GitHub。
+3. 服务器上重启 watchdog。
+4. 用 curl 验证：
+   - Swagger `/docs` 里 `/models` 和 `/models/{model_id}/infer_batch` 示例正确。
+   - `/regions/harbin/mosaic?date=2025-04&sensor_type=s2` 返回 PNG。
+
+### 风险与注意事项
+
+- 大图接口目前只能用现有 64×64 embedding 预览图拼接，空间分辨率低于原始遥感影像；需向前端说明。
+- S1/Landsat 数据未接入，`sensor_type` 仅支持 `s2`。
+- mosaic 生成依赖 `patches_meta.json` 中的 bbox；若 bbox 不规则，可能出现黑边缝隙。
+
+---
+
+**等待用户最终确认后执行。**

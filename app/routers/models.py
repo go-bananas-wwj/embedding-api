@@ -4,7 +4,7 @@
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Path as PathParam
 from fastapi.responses import FileResponse
@@ -44,11 +44,109 @@ async def list_models(user: dict = Depends(get_current_user)) -> List[dict]:
     return get_model_registry(user["user_id"]).list_models()
 
 
+_CLASSIFICATION_EXAMPLE = {
+    "summary": "分类模型（以建筑物提取为例）",
+    "description": "model_type='classification' 时必须搭配 task_type='building_extraction' / 'land_use_classification' / 'land_cover_classification' / 'water_extraction' 之一，并传入 month。",
+    "value": {
+        "name": "我的建筑提取模型",
+        "model_type": "classification",
+        "task_type": "building_extraction",
+        "region_id": "harbin",
+        "embedding_version": "v2",
+        "epochs": 100,
+        "class_ids": ["cls_001"],
+        "description": "基于用户标注的建筑提取模型",
+        "annotations": {
+            "type": "FeatureCollection",
+            "features": [
+                {
+                    "type": "Feature",
+                    "properties": {
+                        "patch_id": "patch_000000",
+                        "region_id": "harbin",
+                        "class_id": "cls_001",
+                        "class_name": "建筑用地",
+                        "color": "#FF0000",
+                        "task_type": "building_extraction",
+                        "month": "2025-04",
+                    },
+                    "geometry": {
+                        "type": "Polygon",
+                        "coordinates": [
+                            [
+                                [126.51631, 45.743707],
+                                [126.532242, 45.743707],
+                                [126.532242, 45.755574],
+                                [126.51631, 45.755574],
+                                [126.51631, 45.743707],
+                            ]
+                        ],
+                    },
+                }
+            ],
+        },
+        "classes": [{"id": "cls_001", "name": "建筑用地", "color": "#FF0000"}],
+    },
+}
+
+_CHANGE_DETECTION_EXAMPLE = {
+    "summary": "变化检测模型",
+    "description": "model_type='change_detection' 时 task_type 也必须为 'change_detection'，并传入 before_month 和 after_month。",
+    "value": {
+        "name": "我的变化检测模型",
+        "model_type": "change_detection",
+        "task_type": "change_detection",
+        "region_id": "harbin",
+        "embedding_version": "v2",
+        "epochs": 100,
+        "class_ids": ["cls_001"],
+        "description": "基于用户标注的变化检测模型",
+        "annotations": {
+            "type": "FeatureCollection",
+            "features": [
+                {
+                    "type": "Feature",
+                    "properties": {
+                        "patch_id": "patch_000000",
+                        "region_id": "harbin",
+                        "class_id": "cls_001",
+                        "class_name": "变化区域",
+                        "color": "#FF0000",
+                        "task_type": "change_detection",
+                        "before_month": "2025-04",
+                        "after_month": "2025-06",
+                    },
+                    "geometry": {
+                        "type": "Polygon",
+                        "coordinates": [
+                            [
+                                [126.51631, 45.743707],
+                                [126.532242, 45.743707],
+                                [126.532242, 45.755574],
+                                [126.51631, 45.755574],
+                                [126.51631, 45.743707],
+                            ]
+                        ],
+                    },
+                }
+            ],
+        },
+        "classes": [{"id": "cls_001", "name": "变化区域", "color": "#FF0000"}],
+    },
+}
+
+
 @router.post("", response_model=ModelOut)
 async def create_model(
-    req: ModelCreate,
-    background_tasks: BackgroundTasks,
+    background_tasks: BackgroundTasks = BackgroundTasks(),
     user: dict = Depends(get_current_user),
+    req: ModelCreate = Body(
+        ...,
+        openapi_examples={
+            "classification": _CLASSIFICATION_EXAMPLE,
+            "change_detection": _CHANGE_DETECTION_EXAMPLE,
+        },
+    ),
 ) -> dict:
     """创建模型并启动异步训练任务。
 
@@ -162,6 +260,29 @@ async def delete_model(
     return {"status": "ok"}
 
 
+_INFER_EXAMPLES: Dict[str, Any] = {
+    "classification": {
+        "summary": "分类模型推理",
+        "description": "分类模型只需传入 month。",
+        "value": {
+            "region_id": "harbin",
+            "patch_id": "patch_000000",
+            "month": "2025-04",
+        },
+    },
+    "change_detection": {
+        "summary": "变化检测模型推理",
+        "description": "变化检测模型需同时传入 before_month 和 after_month，不要传 month。",
+        "value": {
+            "region_id": "harbin",
+            "patch_id": "patch_000000",
+            "before_month": "2025-04",
+            "after_month": "2025-06",
+        },
+    },
+}
+
+
 @router.post("/{model_id}/infer", response_model=InferResult)
 async def infer(
     model_id: str = PathParam(
@@ -169,7 +290,7 @@ async def infer(
         description="Model ID returned by POST /models. Replace with the real ID from the create response.",
         examples=["model_ghi789"],
     ),
-    req: InferRequest = Body(...),
+    req: InferRequest = Body(..., openapi_examples=_INFER_EXAMPLES),
     user: dict = Depends(get_current_user),
 ) -> dict:
     """对单个 Patch 运行自定义模型推理。
@@ -205,6 +326,29 @@ async def infer(
     return {"result_url": f"/models/results/{filename}"}
 
 
+_INFER_BATCH_EXAMPLES: Dict[str, Any] = {
+    "classification": {
+        "summary": "分类模型批量推理",
+        "description": "分类模型批量推理只需传入 month。",
+        "value": {
+            "region_id": "harbin",
+            "patch_ids": ["patch_000000", "patch_000001"],
+            "month": "2025-04",
+        },
+    },
+    "change_detection": {
+        "summary": "变化检测模型批量推理",
+        "description": "变化检测模型批量推理需同时传入 before_month 和 after_month，不要传 month。",
+        "value": {
+            "region_id": "harbin",
+            "patch_ids": ["patch_000000", "patch_000001"],
+            "before_month": "2025-04",
+            "after_month": "2025-06",
+        },
+    },
+}
+
+
 @router.post("/{model_id}/infer_batch", response_model=List[BatchInferResult])
 async def infer_batch(
     model_id: str = PathParam(
@@ -212,7 +356,7 @@ async def infer_batch(
         description="Model ID returned by POST /models. Replace with the real ID from the create response.",
         examples=["model_ghi789"],
     ),
-    req: BatchInferRequest = Body(...),
+    req: BatchInferRequest = Body(..., openapi_examples=_INFER_BATCH_EXAMPLES),
     user: dict = Depends(get_current_user),
 ) -> List[dict]:
     """对最多 100 个 Patch 批量运行自定义模型推理。
