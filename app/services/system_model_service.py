@@ -106,6 +106,58 @@ def _task_description(task_id: str) -> str:
     }.get(task_id, "")
 
 
+SYSTEM_TASK_IDS = {"land_cover_classification", "water_extraction", "building_extraction"}
+
+
+def is_system_task(task_id: str) -> bool:
+    """Return True if task_id identifies a system pre-trained model."""
+    return task_id in SYSTEM_TASK_IDS
+
+
+def get_system_model_versions(region_id: str, task_id: str) -> List[str]:
+    """Return available checkpoint versions for a system model in a region."""
+    for m in list_system_models(region_id):
+        if m["id"] == task_id:
+            return m.get("versions", [])
+    return []
+
+
+def get_system_model_info(region_id: str, task_id: str, version: str = "v2") -> Dict[str, Any]:
+    """Return ModelOut-compatible metadata for a system pre-trained model.
+
+    Raises FileNotFoundError if the model is not available for the region/version.
+    """
+    if not is_system_task(task_id):
+        raise ValueError(f"Not a system task: {task_id}")
+
+    versions = get_system_model_versions(region_id, task_id)
+    if version not in versions:
+        version = versions[0] if versions else "v2"
+
+    # Ensure model file exists (will raise FileNotFoundError if not)
+    _resolve_model_path(region_id, task_id, version)
+
+    classes = get_system_model_classes(region_id, task_id, version)
+    return {
+        "id": task_id,
+        "name": _task_display_name(task_id),
+        "type": "classification",
+        "task_type": task_id,
+        "status": "ready",
+        "created_at": "1970-01-01T00:00:00",
+        "completed_at": "1970-01-01T00:00:00",
+        "classes": classes,
+        "accuracy": None,
+        "n_samples": None,
+        "model_path": None,
+        "description": _task_description(task_id),
+        "message": None,
+        "job_id": None,
+        "source": "system",
+        "versions": versions,
+    }
+
+
 def _resolve_model_path(
     region_id: str, task_id: str, version: str = "v2"
 ) -> Optional[Path]:
@@ -205,7 +257,7 @@ def infer_system_model(
             rgb[pred == idx] = _hex_to_rgb(str(color))
     rgb[pred == -1] = (200, 200, 200)
 
-    img = Image.fromarray(rgb).resize((256, 256), Image.Resampling.NEAREST)
+    img = Image.fromarray(rgb).resize((128, 128), Image.Resampling.NEAREST)
 
     if results_dir is None:
         results_dir = Path("users/default/system_model_results")

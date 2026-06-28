@@ -1,14 +1,14 @@
 # Embedding API 接口测试报告
 
-**测试时间**: 2026-06-28 16:38:14
+**测试时间**: 2026-06-28 19:48:34
 **基地址**: http://localhost:9061
 
 ## 总结
 
 | 指标 | 数量 |
 |------|------|
-| 总测试数 | 101 |
-| ✅ 通过 | 97 |
+| 总测试数 | 105 |
+| ✅ 通过 | 101 |
 | ⚠️ 失败（可能预期） | 4 |
 | ❌ 异常（非预期） | 0 |
 
@@ -24,8 +24,8 @@
 | 4 | GET /regions/haidian | `/regions/haidian` | 200 | patch_count=320, tasks=['change_detection', 'building_extraction', 'land_use_classification', 'land_cover_classification', 'water_extraction'], embeddings=['v1'] |
 | 5 | GET /regions/harbin/patches?page=1&page_size=5 | `/regions/harbin/patches?page=1&page_size=5` | 200 | total=424, patches=['patch_000000', 'patch_000001', 'patch_000002', 'patch_000003', 'patch_000004'] |
 | 6 | GET /regions/harbin/patches?bbox=... | `/regions/harbin/patches?page=1&page_size=5&bbox=126.5,45.74,126.55,45.76` | 200 | total=7, patches=['patch_000000', 'patch_000001', 'patch_000002', 'patch_000007', 'patch_000008'] |
-| 7 | GET /regions/harbin/patches/patch_000000 | `/regions/harbin/patches/patch_000000` | 200 | has_embedding=True, available_tasks=['land_use_classification', 'building_extraction'] |
-| 8 | GET /regions/harbin/patches/patch_000010 | `/regions/harbin/patches/patch_000010` | 200 | has_embedding=True, available_tasks=['land_use_classification', 'building_extraction'] |
+| 7 | GET /regions/harbin/patches/patch_000000 | `/regions/harbin/patches/patch_000000` | 200 | has_embedding=True, available_tasks=['building_extraction', 'land_use_classification'] |
+| 8 | GET /regions/harbin/patches/patch_000010 | `/regions/harbin/patches/patch_000010` | 200 | has_embedding=True, available_tasks=['building_extraction', 'land_use_classification'] |
 | 9 | GET /regions/harbin/patches/patch_000000/embedding?format=png | `/regions/harbin/patches/patch_000000/embedding?format=png` | 200 | 64x64 mode=RGB |
 | 10 | GET /regions/harbin/patches/patch_000000/embedding?format=json | `/regions/harbin/patches/patch_000000/embedding?format=json` | 200 | shape=[64, 64, 3], dtype=uint8 |
 | 11 | GET /regions/harbin/patches/patch_000000/embedding?format=npy | `/regions/harbin/patches/patch_000000/embedding?format=npy` | 200 | shape=(128, 64, 64), dtype=float32, size=524288 |
@@ -112,9 +112,13 @@
 | 92 | GET /regions/harbin/mosaic?date=2025-04&sensor_type=s2&format=png&patch_ids=patch_000000&patch_ids=patch_000001 | `/regions/harbin/mosaic?date=2025-04&sensor_type=s2&format=png&patch_ids=patch_000000&patch_ids=patch_000001` | 200 | 256x128 mode=RGBA |
 | 93 | GET /regions/harbin/mosaic?date=2025-04&sensor_type=s1&format=png&patch_ids=patch_000000&patch_ids=patch_000001 | `/regions/harbin/mosaic?date=2025-04&sensor_type=s1&format=png&patch_ids=patch_000000&patch_ids=patch_000001` | 200 | 256x128 mode=RGBA |
 | 94 | GET /regions/harbin/mosaic?date=2025-04&sensor_type=landsat&format=png&patch_ids=patch_000000&patch_ids=patch_000001 | `/regions/harbin/mosaic?date=2025-04&sensor_type=landsat&format=png&patch_ids=patch_000000&patch_ids=patch_000001` | 200 | 86x43 mode=RGBA |
-| 95 | GET /models | `/models` | 200 | count=125 |
-| 96 | GET /openapi.json | `/openapi.json` | 200 | openapi=3.1.0, title=Embedding API |
-| 97 | GET /docs | `/docs` | 200 | body length=1012, contains swagger=True |
+| 95 | GET /models | `/models` | 200 | count=140 |
+| 96 | GET /models?region_id=harbin | `/models?region_id=harbin` | 200 | total=143, system=3 |
+| 97 | GET /models/building_extraction?region_id=harbin | `/models/building_extraction?region_id=harbin` | 200 | source=system, status=ready |
+| 98 | POST /models/building_extraction/infer | `/models/building_extraction/infer` | 200 | result_url=/system-models/results/building_extraction_harbin_patch_000000_2025-04.png |
+| 99 | GET /system-models/results/building_extraction_harbin_patch_000000_2025-04.png | `/system-models/results/building_extraction_harbin_patch_000000_2025-04.png` | 200 |  |
+| 100 | GET /openapi.json | `/openapi.json` | 200 | openapi=3.1.0, title=Embedding API |
+| 101 | GET /docs | `/docs` | 200 | body length=1012, contains swagger=True |
 
 ## ⚠️ 失败列表（数据缺失导致，可能预期）
 
@@ -136,7 +140,7 @@
 - **基础接口**: /health、/regions、/regions/harbin、/regions/haidian 均正常返回 JSON 数据。
 - **专题任务接口**: change_detection/building_extraction/land_use_classification 的 result/prediction 正常返回；land_cover_classification/water_extraction 因无数据返回 404。
 - **Mosaic 大图接口**: /regions/harbin/mosaic 支持 s2/s1/landsat，返回 PNG 正常。
-- **自定义模型接口**: /models 列表接口返回正常。
+- **自定义模型接口**: /models 列表接口返回正常；/models/{model_id}/infer 与 /models/{model_id}/infer_batch 已支持系统预训练模型 ID。
 
 ## Mosaic 接口调用示例
 

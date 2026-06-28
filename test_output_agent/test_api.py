@@ -28,15 +28,21 @@ def curl(
     save_path: Optional[Path] = None,
     expect_status: int = 200,
     method: str = "GET",
+    data: Optional[bytes] = None,
 ) -> Tuple[int, bytes, Dict[str, str]]:
     """Make a curl request and return status, body, parsed headers."""
     full_url = f"{BASE_URL}{url_path}"
+    data_file: Optional[Path] = None
     cmd = [
         "curl", "-s", "-w", "\\n%{http_code}", "-D", "-",
         *CURL_PROXY,
         "-X", method,
-        full_url,
     ]
+    if data is not None:
+        data_file = OUTPUT_DIR / f"_payload_{int(time.time()*1000000)}.json"
+        data_file.write_bytes(data)
+        cmd.extend(["-H", "Content-Type: application/json", "-d", f"@{data_file}"])
+    cmd.append(full_url)
     if save_path:
         cmd.extend(["-o", str(save_path)])
 
@@ -98,9 +104,10 @@ def curl(
             "curl", "-s", "-w", "\\nHTTP_CODE:%{http_code}",
             *CURL_PROXY,
             "-X", method,
-            "-o", str(save_path),
-            full_url,
         ]
+        if data_file is not None:
+            cmd.extend(["-H", "Content-Type: application/json", "-d", f"@{data_file}"])
+        cmd.extend(["-o", str(save_path), full_url])
         result = subprocess.run(cmd, capture_output=True)
         output = result.stdout.decode("utf-8", errors="replace")
         for line in output.splitlines():
@@ -110,6 +117,8 @@ def curl(
             body = save_path.read_bytes()
         save_path.unlink(missing_ok=True)
 
+    if data_file is not None:
+        data_file.unlink(missing_ok=True)
     return http_status, body, headers
 
 
@@ -545,6 +554,67 @@ def test_model_endpoints():
     log_result(f"GET {url}", url, status, 200, detail, notes="List user models")
 
 
+def test_system_model_via_models_endpoint():
+    """Test that system pre-trained models can be inferred via /models/{id}/infer."""
+    print("\n=== Testing System Model via /models Endpoint ===")
+
+    # List with region_id should include system models
+    url = "/models?region_id=harbin"
+    status, body, _ = curl(url)
+    detail = ""
+    if status == 200:
+        try:
+            data = json.loads(body)
+            system_count = sum(1 for m in data if m.get("source") == "system")
+            detail = f"total={len(data)}, system={system_count}"
+        except Exception as e:
+            detail = f"JSON parse error: {e}"
+    else:
+        detail = body.decode("utf-8", errors="replace")[:200]
+    log_result(f"GET {url}", url, status, 200, detail, notes="List includes system models")
+
+    # Single system model detail
+    url = "/models/building_extraction?region_id=harbin"
+    status, body, _ = curl(url)
+    detail = ""
+    if status == 200:
+        try:
+            data = json.loads(body)
+            detail = f"source={data.get('source')}, status={data.get('status')}"
+        except Exception as e:
+            detail = f"JSON parse error: {e}"
+    else:
+        detail = body.decode("utf-8", errors="replace")[:200]
+    log_result(f"GET {url}", url, status, 200, detail, notes="System model detail")
+
+    # System model single inference
+    url = "/models/building_extraction/infer"
+    payload = json.dumps({
+        "region_id": "harbin",
+        "patch_id": "patch_000000",
+        "month": "2025-04",
+        "version": "v2",
+    }).encode("utf-8")
+    status, body, _ = curl(url, method="POST", data=payload)
+    detail = ""
+    result_url = None
+    if status == 200:
+        try:
+            data = json.loads(body)
+            result_url = data.get("result_url", "")
+            detail = f"result_url={result_url}"
+        except Exception as e:
+            detail = f"JSON parse error: {e}"
+    else:
+        detail = body.decode("utf-8", errors="replace")[:200]
+    log_result(f"POST {url}", url, status, 200, detail, notes="System model infer")
+
+    # Verify result image is accessible
+    if result_url:
+        status2, _, _ = curl(result_url)
+        log_result(f"GET {result_url}", result_url, status2, 200, "", notes="System model result image")
+
+
 def test_openapi_docs():
     """Test OpenAPI documentation endpoints."""
     print("\n=== Testing OpenAPI / Docs ===")
@@ -656,7 +726,7 @@ def generate_report():
     lines.append("- **基础接口**: /health、/regions、/regions/harbin、/regions/haidian 均正常返回 JSON 数据。")
     lines.append("- **专题任务接口**: change_detection/building_extraction/land_use_classification 的 result/prediction 正常返回；land_cover_classification/water_extraction 因无数据返回 404。")
     lines.append("- **Mosaic 大图接口**: /regions/harbin/mosaic 支持 s2/s1/landsat，返回 PNG 正常。")
-    lines.append("- **自定义模型接口**: /models 列表接口返回正常。")
+    lines.append("- **自定义模型接口**: /models 列表接口返回正常；/models/{model_id}/infer 与 /models/{model_id}/infer_batch 已支持系统预训练模型 ID。")
     lines.append("")
     lines.append("## Mosaic 接口调用示例")
     lines.append("")
@@ -696,6 +766,7 @@ def main():
     test_tiles_endpoints()
     test_mosaic_endpoints()
     test_model_endpoints()
+    test_system_model_via_models_endpoint()
     test_openapi_docs()
 
     generate_report()

@@ -1082,17 +1082,28 @@ curl -H 'Authorization: Bearer key_alice_xxx' http://60.31.21.42:22065/models
 
 ## 🤖 自定义模型
 
-### 14. 列出自定义模型
+### 14. 列出模型（自定义 + 系统预设）
 
-列出当前用户训练好的模型。
+列出当前用户训练好的模型。传入 `region_id` 后，会同时返回该区域可用的系统预训练模型。
 
 ```
 GET /models
+GET /models?region_id=harbin
 ```
+
+**查询参数**:
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `region_id` | string | 否 | 区域 ID，传入后会合并系统预训练模型 |
 
 **curl 示例**:
 ```bash
+# 只列自定义模型
 curl -s "http://60.31.21.42:22065/models"
+
+# 同时列出系统预训练模型
+curl -s "http://60.31.21.42:22065/models?region_id=harbin"
 ```
 
 **成功响应** (200):
@@ -1114,7 +1125,26 @@ curl -s "http://60.31.21.42:22065/models"
     "model_path": "users/default/models/model_ghi789.pkl",
     "description": "基于用户标注的建筑提取模型",
     "message": null,
-    "job_id": "job_jkl012"
+    "job_id": "job_jkl012",
+    "source": "custom"
+  },
+  {
+    "id": "building_extraction",
+    "name": "建筑物提取",
+    "type": "classification",
+    "task_type": "building_extraction",
+    "status": "ready",
+    "created_at": "1970-01-01T00:00:00",
+    "completed_at": "1970-01-01T00:00:00",
+    "classes": [...],
+    "accuracy": null,
+    "n_samples": null,
+    "model_path": null,
+    "description": "OSM 建筑物提取",
+    "message": null,
+    "job_id": null,
+    "source": "system",
+    "versions": ["v2", "v1"]
   }
 ]
 ```
@@ -1125,7 +1155,7 @@ curl -s "http://60.31.21.42:22065/models"
 | `name` | string | 模型名称 |
 | `type` | string | 模型类型：`classification` 或 `change_detection` |
 | `task_type` | string | 任务类型 |
-| `status` | string | 状态：`training` / `completed` / `failed` |
+| `status` | string | 状态：`training` / `completed` / `failed` / `ready`（系统模型） |
 | `created_at` | string | 创建时间 |
 | `completed_at` | string | 完成时间 |
 | `classes` | object[] | 模型类别列表 |
@@ -1135,6 +1165,8 @@ curl -s "http://60.31.21.42:22065/models"
 | `description` | string | 模型描述 |
 | `message` | string | 失败原因或提示信息 |
 | `job_id` | string | 关联的训练任务 ID |
+| `source` | string | 模型来源：`custom`（用户训练）或 `system`（系统预训练） |
+| `versions` | string[] | 系统模型可用 checkpoint 版本 |
 
 ---
 
@@ -1281,27 +1313,40 @@ curl -s -X POST "http://60.31.21.42:22065/models" \
 
 ### 16. 获取模型详情
 
-获取单个模型的状态。
+获取单个模型（自定义或系统预设）的详情。
 
 ```
 GET /models/{model_id}
+GET /models/building_extraction?region_id=harbin
 ```
 
 **路径参数**:
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `model_id` | string | 是 | 模型 ID |
+| `model_id` | string | 是 | 自定义模型 ID 或系统预训练任务 ID（`building_extraction` / `land_cover_classification` / `water_extraction`） |
+
+**查询参数**:
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `region_id` | string | 条件 | `model_id` 为系统任务 ID 时必填 |
+| `version` | string | 否 | 系统模型 checkpoint 版本，默认 `v2` |
 
 **curl 示例**:
 ```bash
+# 自定义模型
 curl -s "http://60.31.21.42:22065/models/model_ghi789"
+
+# 系统预训练模型
+curl -s "http://60.31.21.42:22065/models/building_extraction?region_id=harbin"
 ```
 
 **成功响应** (200): 与列出模型中的单个模型结构相同。
 
 **错误响应**:
 - `404`: 模型不存在
+- `422`: 系统模型缺少 `region_id`
 
 ---
 
@@ -1371,7 +1416,7 @@ curl -s -X DELETE "http://60.31.21.42:22065/models/model_ghi789"
 
 ### 19. 单 Patch 推理
 
-使用训练完成的模型对单个 Patch 进行推理。
+使用训练完成的自定义模型，或系统预训练模型，对单个 Patch 进行推理。
 
 ```
 POST /models/{model_id}/infer
@@ -1381,7 +1426,7 @@ POST /models/{model_id}/infer
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `model_id` | string | 是 | 模型 ID |
+| `model_id` | string | 是 | 自定义模型 ID 或系统预训练任务 ID（`building_extraction` / `land_cover_classification` / `water_extraction`） |
 
 **请求体**:
 
@@ -1392,8 +1437,9 @@ POST /models/{model_id}/infer
 | `month` | string | 条件 | 单期任务必填，如 `2025-04` |
 | `before_month` | string | 条件 | 变化检测必填，如 `2025-04` |
 | `after_month` | string | 条件 | 变化检测必填，如 `2025-06` |
+| `version` | string | 否 | 系统模型 checkpoint 版本，默认 `v2`；自定义模型忽略 |
 
-**curl 示例 — 分类模型**:
+**curl 示例 — 自定义分类模型**:
 ```bash
 curl -s -X POST "http://60.31.21.42:22065/models/model_ghi789/infer" \
   -H 'Content-Type: application/json' \
@@ -1413,6 +1459,18 @@ curl -s -X POST "http://60.31.21.42:22065/models/model_ghi789/infer" \
     "patch_id": "patch_000000",
     "before_month": "2025-04",
     "after_month": "2025-06"
+  }'
+```
+
+**curl 示例 — 系统预训练模型**:
+```bash
+curl -s -X POST "http://60.31.21.42:22065/models/building_extraction/infer" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "region_id": "harbin",
+    "patch_id": "patch_000000",
+    "month": "2025-04",
+    "version": "v2"
   }'
 ```
 
@@ -1423,14 +1481,17 @@ curl -s -X POST "http://60.31.21.42:22065/models/model_ghi789/infer" \
 }
 ```
 
+> 系统模型的 `result_url` 路径为 `/system-models/results/{filename}`，请用该路径下载图片。
+
 **错误响应**:
-- `400`: 模型未训练完成或不存在
+- `400`: 自定义模型未训练完成或不存在
+- `422`: 系统模型缺少 `month` 或请求参数错误
 
 ---
 
 ### 20. 批量推理
 
-对最多 100 个 Patch 批量推理。
+对最多 100 个 Patch 批量推理。支持自定义模型和系统预训练模型。
 
 ```
 POST /models/{model_id}/infer_batch
@@ -1440,7 +1501,7 @@ POST /models/{model_id}/infer_batch
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `model_id` | string | 是 | 模型 ID |
+| `model_id` | string | 是 | 自定义模型 ID 或系统预训练任务 ID |
 
 **请求体**:
 
@@ -1451,8 +1512,9 @@ POST /models/{model_id}/infer_batch
 | `month` | string | 条件 | 单期任务必填，如 `2025-04` |
 | `before_month` | string | 条件 | 变化检测必填，如 `2025-04` |
 | `after_month` | string | 条件 | 变化检测必填，如 `2025-06` |
+| `version` | string | 否 | 系统模型 checkpoint 版本，默认 `v2`；自定义模型忽略 |
 
-**curl 示例 — 分类模型**:
+**curl 示例 — 自定义分类模型**:
 ```bash
 curl -s -X POST "http://60.31.21.42:22065/models/model_ghi789/infer_batch" \
   -H 'Content-Type: application/json' \
@@ -1472,6 +1534,18 @@ curl -s -X POST "http://60.31.21.42:22065/models/model_ghi789/infer_batch" \
     "patch_ids": ["patch_000000", "patch_000001"],
     "before_month": "2025-04",
     "after_month": "2025-06"
+  }'
+```
+
+**curl 示例 — 系统预训练模型**:
+```bash
+curl -s -X POST "http://60.31.21.42:22065/models/building_extraction/infer_batch" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "region_id": "harbin",
+    "patch_ids": ["patch_000000", "patch_000001"],
+    "month": "2025-04",
+    "version": "v2"
   }'
 ```
 
@@ -1492,6 +1566,8 @@ curl -s -X POST "http://60.31.21.42:22065/models/model_ghi789/infer_batch" \
   }
 ]
 ```
+
+> 系统模型的 `result_url` 路径为 `/system-models/results/{filename}`。
 
 | 字段 | 类型 | 说明 |
 |------|------|------|

@@ -215,3 +215,60 @@ class TestModels:
         payload["annotations"]["features"][0]["properties"]["class_id"] = "cls_missing"
         r = client.post("/models", json=payload)
         assert r.status_code == 422
+
+    def test_list_models_includes_system_models_with_region(self):
+        r = client.get("/models?region_id=harbin")
+        assert r.status_code == 200
+        data = r.json()
+        system_ids = {m["id"] for m in data if m.get("source") == "system"}
+        assert "building_extraction" in system_ids
+        for m in data:
+            if m.get("source") == "system":
+                assert m["status"] == "ready"
+                assert "versions" in m
+
+    def test_get_system_model_via_models_endpoint(self):
+        r = client.get("/models/building_extraction?region_id=harbin")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["id"] == "building_extraction"
+        assert data["source"] == "system"
+        assert data["status"] == "ready"
+        assert len(data["classes"]) > 0
+
+    def test_infer_system_model_via_models_endpoint(self):
+        r = client.post(
+            "/models/building_extraction/infer",
+            json={
+                "region_id": "harbin",
+                "patch_id": "patch_000000",
+                "month": "2025-04",
+                "version": "v2",
+            },
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["result_url"].startswith("/system-models/results/")
+
+        # Result image should be downloadable
+        filename = data["result_url"].split("/")[-1]
+        r2 = client.get(f"/system-models/results/{filename}")
+        assert r2.status_code == 200
+        assert r2.headers["content-type"] == "image/png"
+
+    def test_infer_batch_system_model_via_models_endpoint(self):
+        r = client.post(
+            "/models/building_extraction/infer_batch",
+            json={
+                "region_id": "harbin",
+                "patch_ids": ["patch_000000", "patch_000001"],
+                "month": "2025-04",
+                "version": "v2",
+            },
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert len(data) == 2
+        for item in data:
+            assert item["status"] == "success"
+            assert item["result_url"].startswith("/system-models/results/")

@@ -4,9 +4,9 @@
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Path as PathParam
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Path as PathParam, Query
 from fastapi.responses import FileResponse
 
 from app.schemas.models import (
@@ -23,6 +23,11 @@ from app.services.auth_service import get_current_user
 from app.services.data_service import DataValidationError
 from app.services.inference_engine import InferenceEngine
 from app.services.model_registry import get_model_registry
+from app.services.system_model_service import (
+    get_system_model_info,
+    infer_system_model,
+    is_system_task,
+)
 from app.services.training_engine import (
     ChangeDetectionTrainingEngine,
     ClassificationTrainingEngine,
@@ -35,13 +40,37 @@ _training_jobs: dict[str, dict] = {}
 
 
 @router.get("", response_model=List[ModelOut])
-async def list_models(user: dict = Depends(get_current_user)) -> List[dict]:
-    """获取当前用户训练好的自定义模型列表。
+async def list_models(
+    region_id: Optional[str] = Query(
+        None,
+        description="可选，传入区域 ID 后会在列表中同时返回该区域可用的系统预训练模型。",
+        examples=["harbin"],
+    ),
+    user: dict = Depends(get_current_user),
+) -> List[dict]:
+    """获取当前用户训练好的自定义模型列表，可一并返回系统预训练模型。
 
     用于模型管理页展示模型名称、类型、状态、精度等信息。
+    传入 `region_id` 后，系统预训练模型会附加 `source: "system"` 与 `versions` 字段。
     返回 JSON 列表。
     """
-    return get_model_registry(user["user_id"]).list_models()
+    models = get_model_registry(user["user_id"]).list_models()
+    for m in models:
+        m.setdefault("source", "custom")
+
+    if region_id:
+        from app.services.system_model_service import list_system_models
+
+        for sys_model in list_system_models(region_id):
+            task_id = sys_model["id"]
+            try:
+                info = get_system_model_info(region_id, task_id)
+                models.append(info)
+            except Exception:
+                # Skip system models that cannot be loaded for this region/version.
+                pass
+
+    return models
 
 
 _CLASSIFICATION_EXAMPLE = {
@@ -205,20 +234,52 @@ async def create_model(
 async def get_model(
     model_id: str = PathParam(
         ...,
-        description="Model ID returned by POST /models. Replace with the real ID from the create response.",
+        description="模型 ID。可以是 POST /models 返回的自定义模型 ID，也可以是系统预训练任务 ID（如 'building_extraction'、'land_cover_classification'、'water_extraction'）。",
         examples=["model_ghi789"],
+        openapi_examples={
+            "custom": {"summary": "自定义模型", "value": "model_ghi789"},
+            "system_building": {"summary": "系统预设-建筑物提取", "value": "building_extraction"},
+            "system_land_cover": {"summary": "系统预设-土地覆盖分类", "value": "land_cover_classification"},
+            "system_water": {"summary": "系统预设-水体提取", "value": "water_extraction"},
+        },
+    ),
+    region_id: Optional[str] = Query(
+        None,
+        description="当 model_id 是系统预训练任务 ID 时，需要传入区域 ID 以定位 checkpoint。",
+        examples=["harbin"],
+    ),
+    version: Optional[str] = Query(
+        "v2",
+        description="当 model_id 是系统预训练任务 ID 时，选择 checkpoint 版本。",
+        examples=["v2"],
     ),
     user: dict = Depends(get_current_user),
 ) -> dict:
-    """获取单个自定义模型的状态。
+    """获取单个模型（自定义或系统预设）的详情。
 
-    用于在模型详情页查看训练进度、精度、完成时间等信息。
-    返回模型状态的 JSON 详情。
+    用于在模型详情页查看训练进度、精度、类别定义等信息。
+    如果是系统预训练模型，需要同时传入 `region_id`；返回状态固定为 `ready`。
     """
-    model = get_model_registry(user["user_id"]).get_model(model_id)
-    if not model:
-        raise HTTPException(status_code=404, detail="Model not found")
-    return model
+    registry = get_model_registry(user["user_id"])
+    model = registry.get_model(model_id)
+    if model:
+        model.setdefault("source", "custom")
+        return model
+
+    if is_system_task(model_id):
+        if not region_id:
+            raise HTTPException(
+                status_code=422,
+                detail=f"System model '{model_id}' requires region_id query parameter",
+            )
+        try:
+            return get_system_model_info(region_id, model_id, version=version)
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+    raise HTTPException(status_code=404, detail="Model not found")
 
 
 @router.patch("/{model_id}", response_model=Dict[str, str])
@@ -262,7 +323,7 @@ async def delete_model(
 
 _INFER_EXAMPLES: Dict[str, Any] = {
     "classification": {
-        "summary": "分类模型推理",
+        "summary": "自定义分类模型推理",
         "description": "分类模型只需传入 month。",
         "value": {
             "region_id": "harbin",
@@ -271,13 +332,23 @@ _INFER_EXAMPLES: Dict[str, Any] = {
         },
     },
     "change_detection": {
-        "summary": "变化检测模型推理",
+        "summary": "自定义变化检测模型推理",
         "description": "变化检测模型需同时传入 before_month 和 after_month，不要传 month。",
         "value": {
             "region_id": "harbin",
             "patch_id": "patch_000000",
             "before_month": "2025-04",
             "after_month": "2025-06",
+        },
+    },
+    "system_model": {
+        "summary": "系统预训练模型推理",
+        "description": "把系统任务 ID（如 building_extraction）作为 model_id，传入 region_id、patch_id、month，可选 version。",
+        "value": {
+            "region_id": "harbin",
+            "patch_id": "patch_000000",
+            "month": "2025-04",
+            "version": "v2",
         },
     },
 }
@@ -287,19 +358,53 @@ _INFER_EXAMPLES: Dict[str, Any] = {
 async def infer(
     model_id: str = PathParam(
         ...,
-        description="Model ID returned by POST /models. Replace with the real ID from the create response.",
+        description="模型 ID。可以是 POST /models 返回的自定义模型 ID，也可以是系统预训练任务 ID（如 'building_extraction'）。",
         examples=["model_ghi789"],
+        openapi_examples={
+            "custom": {"summary": "自定义模型", "value": "model_ghi789"},
+            "system_building": {"summary": "系统预设-建筑物提取", "value": "building_extraction"},
+            "system_land_cover": {"summary": "系统预设-土地覆盖分类", "value": "land_cover_classification"},
+            "system_water": {"summary": "系统预设-水体提取", "value": "water_extraction"},
+        },
     ),
     req: InferRequest = Body(..., openapi_examples=_INFER_EXAMPLES),
     user: dict = Depends(get_current_user),
 ) -> dict:
-    """对单个 Patch 运行自定义模型推理。
+    """对单个 Patch 运行模型推理（支持自定义模型和系统预训练模型）。
 
-    用于获取某个 Patch 的预测结果图片，通常在模型训练完成后调用。
+    用于获取某个 Patch 的预测结果图片。
+    自定义模型需要训练完成；系统预训练模型状态为 ready，直接可用。
     返回结果图片的访问 URL。
     """
     registry = get_model_registry(user["user_id"])
     model = registry.get_model(model_id)
+
+    # System pre-trained model
+    if not model and is_system_task(model_id):
+        if not req.month:
+            raise HTTPException(
+                status_code=422,
+                detail="System models require 'month' in the request body",
+            )
+        results_dir = Path(f"users/{user['user_id']}/system_model_results")
+        try:
+            result_path = infer_system_model(
+                req.region_id,
+                model_id,
+                req.patch_id,
+                req.month,
+                version=req.version or "v2",
+                results_dir=results_dir,
+            )
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+        except DataValidationError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+        filename = Path(result_path).name
+        return {"result_url": f"/system-models/results/{filename}"}
+
     if not model or model.get("status") != "completed":
         raise HTTPException(
             status_code=400, detail="Model not trained or not found"
@@ -328,7 +433,7 @@ async def infer(
 
 _INFER_BATCH_EXAMPLES: Dict[str, Any] = {
     "classification": {
-        "summary": "分类模型批量推理",
+        "summary": "自定义分类模型批量推理",
         "description": "分类模型批量推理只需传入 month。",
         "value": {
             "region_id": "harbin",
@@ -337,13 +442,23 @@ _INFER_BATCH_EXAMPLES: Dict[str, Any] = {
         },
     },
     "change_detection": {
-        "summary": "变化检测模型批量推理",
+        "summary": "自定义变化检测模型批量推理",
         "description": "变化检测模型批量推理需同时传入 before_month 和 after_month，不要传 month。",
         "value": {
             "region_id": "harbin",
             "patch_ids": ["patch_000000", "patch_000001"],
             "before_month": "2025-04",
             "after_month": "2025-06",
+        },
+    },
+    "system_model": {
+        "summary": "系统预训练模型批量推理",
+        "description": "把系统任务 ID 作为 model_id，传入 region_id、patch_ids、month，可选 version。",
+        "value": {
+            "region_id": "harbin",
+            "patch_ids": ["patch_000000", "patch_000001"],
+            "month": "2025-04",
+            "version": "v2",
         },
     },
 }
@@ -353,13 +468,19 @@ _INFER_BATCH_EXAMPLES: Dict[str, Any] = {
 async def infer_batch(
     model_id: str = PathParam(
         ...,
-        description="Model ID returned by POST /models. Replace with the real ID from the create response.",
+        description="模型 ID。可以是 POST /models 返回的自定义模型 ID，也可以是系统预训练任务 ID（如 'building_extraction'）。",
         examples=["model_ghi789"],
+        openapi_examples={
+            "custom": {"summary": "自定义模型", "value": "model_ghi789"},
+            "system_building": {"summary": "系统预设-建筑物提取", "value": "building_extraction"},
+            "system_land_cover": {"summary": "系统预设-土地覆盖分类", "value": "land_cover_classification"},
+            "system_water": {"summary": "系统预设-水体提取", "value": "water_extraction"},
+        },
     ),
     req: BatchInferRequest = Body(..., openapi_examples=_INFER_BATCH_EXAMPLES),
     user: dict = Depends(get_current_user),
 ) -> List[dict]:
-    """对最多 100 个 Patch 批量运行自定义模型推理。
+    """对最多 100 个 Patch 批量运行模型推理（支持自定义模型和系统预训练模型）。
 
     用于一次性对多个 Patch 生成预测结果，提高处理效率。
     返回每个 Patch 的推理状态及结果图片 URL。
@@ -371,6 +492,54 @@ async def infer_batch(
 
     registry = get_model_registry(user["user_id"])
     model = registry.get_model(model_id)
+
+    # System pre-trained model batch inference
+    if not model and is_system_task(model_id):
+        if not req.month:
+            raise HTTPException(
+                status_code=422,
+                detail="System models require 'month' in the request body",
+            )
+        results_dir = Path(f"users/{user['user_id']}/system_model_results")
+        results = []
+        for patch_id in req.patch_ids:
+            try:
+                result_path = infer_system_model(
+                    req.region_id,
+                    model_id,
+                    patch_id,
+                    req.month,
+                    version=req.version or "v2",
+                    results_dir=results_dir,
+                )
+                results.append(
+                    {
+                        "patch_id": patch_id,
+                        "status": "success",
+                        "result_path": str(result_path),
+                    }
+                )
+            except Exception as e:
+                results.append(
+                    {
+                        "patch_id": patch_id,
+                        "status": "error",
+                        "error": str(e),
+                        "result_path": None,
+                    }
+                )
+        return [
+            {
+                "patch_id": r["patch_id"],
+                "status": r["status"],
+                "result_url": f"/system-models/results/{Path(r['result_path']).name}"
+                if r.get("result_path")
+                else None,
+                "error": r.get("error"),
+            }
+            for r in results
+        ]
+
     if not model or model.get("status") != "completed":
         raise HTTPException(
             status_code=400, detail="Model not trained or not found"

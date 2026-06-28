@@ -306,16 +306,24 @@ class ModelOut(BaseModel):
     name: str = Field(..., description="Model name.")
     type: str = Field(..., description="Model type ('classification' or 'change_detection').")
     task_type: Optional[str] = Field(None, description="Downstream task type.")
-    status: str = Field(..., description="Training status: running, completed, or failed.")
+    status: str = Field(..., description="Training status: running, completed, failed, or ready (system models).")
     created_at: str = Field(..., description="ISO timestamp when the model was created.")
     completed_at: Optional[str] = Field(None, description="ISO timestamp when training completed.")
-    classes: List[Dict[str, Any]] = Field(..., description="Classes used to train the model.")
+    classes: List[Dict[str, Any]] = Field(..., description="Classes used by the model.")
     accuracy: Optional[float] = Field(None, description="Training accuracy, if available.")
     n_samples: Optional[int] = Field(None, description="Number of training samples.")
     model_path: Optional[str] = Field(None, description="Path to the saved model artifact.")
-    description: Optional[str] = Field(None, description="User-provided model description.")
+    description: Optional[str] = Field(None, description="Model description.")
     message: Optional[str] = Field(None, description="Status or error message.")
     job_id: Optional[str] = Field(None, description="Training job identifier.")
+    source: Optional[Literal["custom", "system"]] = Field(
+        "custom",
+        description="Model source: 'custom' (user-trained) or 'system' (pre-trained).",
+    )
+    versions: Optional[List[str]] = Field(
+        None,
+        description="Available checkpoint versions (system models only).",
+    )
 
 
 class ModelRenameRequest(BaseModel):
@@ -353,6 +361,11 @@ class InferRequest(BaseModel):
         None,
         description="After month for change-detection inference, e.g. 2025-06.",
         examples=["2025-06"],
+    )
+    version: Optional[str] = Field(
+        "v2",
+        description="Checkpoint version for system pre-trained models. Allowed values: v1, v2. Ignored for custom models.",
+        examples=["v2"],
     )
 
     @model_validator(mode="after")
@@ -393,6 +406,11 @@ class BatchInferRequest(BaseModel):
         None,
         description="After month for change-detection inference, e.g. 2025-06.",
         examples=["2025-06"],
+    )
+    version: Optional[str] = Field(
+        "v2",
+        description="Checkpoint version for system pre-trained models. Allowed values: v1, v2. Ignored for custom models.",
+        examples=["v2"],
     )
 
     @model_validator(mode="after")

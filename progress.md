@@ -109,3 +109,29 @@
   - `pytest -q -m "not slow"` → `96 passed, 5 deselected`。
 - 重启 watchdog 服务，Swagger 已刷新。
 - 已推送 GitHub：`c213a82`。
+
+
+## 2026-06-28 支持系统预设模型走统一推理入口
+
+- 前端同事反馈：想把系统预训练模型 ID 传给 `/models/{model_id}/infer` 做推理。
+- 问题总结：系统模型原来只有独立的 `/system-models/{task_id}/infer`，前端需要维护两套调用逻辑。
+- 实施方案（统一推理入口）：
+  1. `app/schemas/models.py`：
+     - 给 `ModelOut` 增加 `source`（`custom`/`system`）和 `versions` 字段。
+     - 给 `InferRequest` / `BatchInferRequest` 增加 `version` 字段（默认 `v2`）。
+  2. `app/services/system_model_service.py`：
+     - 新增 `is_system_task()`、`get_system_model_info()` 辅助函数。
+     - 将系统模型输出尺寸从 `256×256` 统一为 `128×128`。
+  3. `app/routers/models.py`：
+     - `/models` 列表传入 `region_id` 时合并系统模型。
+     - `/models/{model_id}` 支持系统任务 ID。
+     - `/models/{model_id}/infer` 与 `/models/{model_id}/infer_batch` 优先查找自定义模型，找不到则按系统任务 ID 调用 `infer_system_model`，返回 `/system-models/results/{filename}`。
+     - 更新 `model_id` 参数描述与推理请求示例，加入系统模型示例。
+  4. `docs/API.md`：更新“列出模型”“获取模型详情”“单 Patch 推理”“批量推理”章节，说明系统模型用法与 `result_url` 路径差异。
+  5. `tests/test_models.py`：新增 4 个用例覆盖系统模型列表、详情、单 Patch 推理、批量推理。
+  6. `test_output_agent/test_api.py`：新增系统模型统一推理测试，并支持 POST JSON body。
+- 验证结果：
+  - `test_api.py` → `101 passed, 4 failed (expected-ish), 0 unexpected`。
+  - `pytest -q -m "not slow"` → `100 passed, 5 deselected`。
+- 重启 watchdog 服务，接口已生效。
+- 已推送 GitHub：待提交。
