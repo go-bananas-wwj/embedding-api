@@ -48,11 +48,13 @@ regions:
 
   haidian:
     name: "海淀区"
-    patches_meta: "/data/haidian/patches_meta_v2.json"
+    patches_meta: "/data/haidian/patches_meta_v1.json"
     embeddings:
-      aef: "/data/haidian/aef_embeddings/haidian_2025_patches"
-      cache: "/data/embeddings_cache/olmoearth"
-      viz: "/data/haidian/viz_multi_source"
+      v1:
+        path: "/data/haidian/embeddings/v1"
+        template: "{month}/{patch_id}.{fmt}"
+        formats: ["npy", "png", "json"]
+        alt_templates: ["{month}/{patch_id}.png"]
     tasks:
       change_detection:
         name: "变化检测"
@@ -60,8 +62,36 @@ regions:
         versions: {}
       building_extraction:
         name: "建筑物提取"
-        description: "建筑物提取"
-        versions: {}
+        description: "基于海淀 V1 embedding 的 OSM 建筑物提取"
+        versions:
+          v1:
+            results: "/data/haidian/tasks/building_extraction/v1/results"
+            predictions: "/data/haidian/tasks/building_extraction/v1/predictions"
+            labels: "/data/haidian/tasks/building_extraction/v1/labels"
+      road_extraction:
+        name: "道路提取"
+        description: "基于海淀 V1 embedding 的 OSM 路网提取"
+        versions:
+          v1:
+            results: "/data/haidian/tasks/road_extraction/v1/results"
+            predictions: "/data/haidian/tasks/road_extraction/v1/predictions"
+            labels: "/data/haidian/tasks/road_extraction/v1/labels"
+      construction:
+        name: "施工地检测"
+        description: "基于海淀 V1 embedding 的施工地检测"
+        versions:
+          v1:
+            results: "/data/haidian/tasks/construction/v1/results"
+            predictions: "/data/haidian/tasks/construction/v1/predictions"
+            labels: "/data/haidian/tasks/construction/v1/labels"
+      construction_joint:
+        name: "施工地联合检测"
+        description: "construction_joint 任务中的海淀子集结果"
+        versions:
+          v1:
+            results: "/data/haidian/tasks/construction_joint/v1/results"
+            predictions: "/data/haidian/tasks/construction_joint/v1/predictions"
+            labels: "/data/haidian/tasks/construction_joint/v1/labels"
       land_use_classification:
         name: "土地利用分类"
         description: "土地利用分类"

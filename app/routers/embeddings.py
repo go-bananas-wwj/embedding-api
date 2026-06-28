@@ -1,6 +1,8 @@
 """Embedding service router."""
 
 import asyncio
+import json
+import logging
 import os
 import re
 from typing import Literal, Optional
@@ -15,6 +17,7 @@ from app.services.data_service import (
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 EMB_FORMATS = Literal["png", "npy", "json"]
 
@@ -76,6 +79,11 @@ def _load_npz_embedding(path: str):
             f"Array too large: {elements} elements (max {MAX_NPY_ELEMENTS})"
         )
     return arr
+
+
+def _load_embedding_json(path: str) -> dict:
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
 
 
 @router.get(
@@ -201,7 +209,17 @@ async def get_embedding(
 
     if format == "json":
         try:
-            if emb_path.endswith(".npy"):
+            if emb_path.endswith(".json"):
+                meta = await asyncio.to_thread(_load_embedding_json, emb_path)
+                return EmbeddingStats(
+                    patch_id=meta.get("patch_id", patch_id),
+                    shape=meta.get("shape", []),
+                    dtype=str(meta.get("dtype", "")),
+                    min=float(meta.get("min", 0.0)),
+                    max=float(meta.get("max", 0.0)),
+                    mean=float(meta.get("mean", 0.0)),
+                )
+            elif emb_path.endswith(".npy"):
                 arr = await asyncio.to_thread(_load_npy_array, emb_path)
             elif emb_path.endswith(".npz"):
                 arr = await asyncio.to_thread(_load_npz_embedding, emb_path)

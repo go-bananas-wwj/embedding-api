@@ -23,6 +23,7 @@
 - **区域马赛克大图**: 按日期/传感器拼接整区域 S2/S1/Landsat 大图，用于前端展示。
 - **SAM3 交互式分割**: 基于 Sentinel-2 影像的点提示实例分割。
 - **配置热重载**: 修改 `config.yaml` 后无需重启即可生效。
+- **海淀 V1(P2A)**: 海淀区 `v1` 使用 xuannv P2A embedding，支持建筑物提取、道路提取、施工地检测与 construction_joint 海淀子集结果。
 
 > 自定义训练前端接入指南: [`docs/custom-training-workflow.md`](docs/custom-training-workflow.md)  
 > 完整接口文档: [`docs/API.md`](docs/API.md)
@@ -53,6 +54,27 @@ python service_watchdog.py stop   # 停止
 
 ```bash
 DOCS_URL=/docs uvicorn app.main:app --reload --host 0.0.0.0 --port 9061
+```
+
+### 下载海淀 V1 资产
+
+海淀区 V1 的模型、embedding、任务结果和训练数据归档托管在 ModelScope
+数据集 `WeijieWu/xuannv_embdding_api` 的 `haidian/v1` 目录下。部署时先安装
+ModelScope CLI，然后下载 API-ready 目录：
+
+```bash
+export MODELSCOPE_TOKEN="..."  # 私有数据集需要；不要写入代码
+python pipelines/haidian/download_modelscope_assets.py \
+  --repo WeijieWu/xuannv_embdding_api \
+  --prefix haidian/v1/api_ready \
+  --target .
+```
+
+下载后可直接访问：
+
+```bash
+curl "http://localhost:9061/regions/haidian/patches/patch_000000/embedding?format=json&version=v1&month=202512"
+curl "http://localhost:9061/regions/haidian/patches/patch_000000/tasks/road_extraction/result?format=png&version=v1" -o /tmp/haidian_road.png
 ```
 
 ### Docker
@@ -92,6 +114,9 @@ docker-compose up -d
 - `GET /regions/{region_id}/tasks` — 任务列表
 - `GET /regions/{region_id}/tasks/{task_type}/summary` — 任务汇总
 - `GET /regions/{region_id}/patches/{patch_id}/tasks/{task_type}/result?format=png|npy&version=...` — Patch 级结果
+
+海淀区 `v1` 额外提供 `road_extraction`、`construction` 和
+`construction_joint` 任务；其中 `construction_joint` 只包含海淀子集结果。
 
 ### 区域马赛克大图
 - `GET /regions/{region_id}/mosaic?date=YYYY-MM&sensor_type=s2|s1|landsat&format=png` — 整区域马赛克大图，支持 Sentinel-2 / Sentinel-1 / Landsat

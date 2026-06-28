@@ -222,6 +222,8 @@ class ModelCreate(BaseModel):
     def validate_model_type_consistency(self):
         valid_classification_tasks = {
             "building_extraction",
+            "road_extraction",
+            "construction",
             "land_use_classification",
             "land_cover_classification",
             "water_extraction",
