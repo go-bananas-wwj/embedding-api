@@ -157,4 +157,18 @@
   - `README.md` 新增「下载哈尔滨 V1/V2 资产」小节。
   - 新增 `pipelines/harbin/README.md` 说明打包/下载/校验流程。
 - 海淀 V1 数据**不下载到本机**，避免磁盘/内存不足。
-- 待完成：正式上传并校验。
+- 第一次直接上传目录树失败：ModelScope 单目录文件数超过 50,000 限制。
+- 改用 tar 归档方案：
+  - `data_harbin.tar` (12.59 GB)
+  - `models_harbin.tar` (422 MB)
+  - `models_sam3.tar` (3.22 GB)
+  - `raw_harbin.tar` (2.80 GB)
+  - `raw_harbin_scenes.tar` (12.12 GB)
+  - 共 5 个归档 + `manifest.json` + `checksums.sha256`。
+- 正式上传到 `WeijieWu/xuannv_embdding_api` 的 `harbin/v1/api_ready`：
+  - 7 个文件，总计 31.14 GB，耗时约 6 分钟，全部成功。
+- 上传后校验：
+  - 从 ModelScope 下载 `manifest.json` 与 `checksums.sha256`。
+  - 与本地生成的文件对比，内容一致。
+- 代码变更已推送 GitHub：`fe9ae22`。
+- 当前后端服务未重启、未受影响。
