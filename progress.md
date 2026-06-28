@@ -91,3 +91,21 @@
 - 单元测试：`pytest -q -m "not slow"` → `96 passed, 5 deselected`。
 - 确认 `docs/API.md` 已包含 `/regions/{region_id}/mosaic`、自定义模型、训练工作流等完整中文说明与 curl 示例。
 - 提交并推送。
+
+
+## 2026-06-28 mosaic 接口补充具体示例与参数取值表
+
+- 更新 `app/routers/regions.py`：
+  - 为 `region_id`、`date`、`sensor_type`、`format`、`patch_ids` 添加中文描述与 `openapi_examples`。
+  - 明确 `sensor_type` 可取 `s2/s1/landsat`，`format` 可取 `png/tif`，`version` 可留空。
+- 更新 `docs/API.md`：
+  - 新增「参数取值表」和「`date` 与季度文件映射表」。
+  - 给出 4 条完整 curl 示例（全区域 S2 PNG、S1 两 patch 预览、Landsat GeoTIFF、本地调试）。
+- 更新 `test_output_agent/test_api.py`：
+  - 在 `report.md` 中新增「Mosaic 接口调用示例」与参数取值说明。
+- 将 `test_output_agent/test_api.py` 与 `report.md` 加入 Git 跟踪（原 `.gitignore` 忽略整个目录）。
+- 重新运行测试：
+  - `test_api.py` → `97 passed, 4 failed (expected-ish), 0 unexpected`。
+  - `pytest -q -m "not slow"` → `96 passed, 5 deselected`。
+- 重启 watchdog 服务，Swagger 已刷新。
+- 已推送 GitHub：`c213a82`。
