@@ -134,4 +134,27 @@
   - `test_api.py` → `101 passed, 4 failed (expected-ish), 0 unexpected`。
   - `pytest -q -m "not slow"` → `100 passed, 5 deselected`。
 - 重启 watchdog 服务，接口已生效。
-- 已推送 GitHub：待提交。
+- 已推送 GitHub：`12f2e1a`。
+
+
+## 2026-06-28 合并 Haidian V1 PR 并准备哈尔滨 ModelScope 资产上传
+
+- 合并 GitHub PR #1（Haidian V1 P2A 支持 + ModelScope 下载流程）：
+  - 使用 `git fetch origin pull/1/head:pr-haidian-v1` + `git merge --no-ff` 安全合并。
+  - 合并后未重启服务，当前后端继续运行。
+- 新增哈尔滨资产上传/下载流水线：
+  - `pipelines/harbin/paths.py`：集中定义哈尔滨本地源路径与 ModelScope 默认仓库/前缀。
+  - `pipelines/harbin/prepare_harbin_api_assets.py`：把 `data/harbin`、`models/harbin`、`models/sam3`、`/workspace/raw/harbin`、`/workspace/raw/harbin_scenes` 打包到 `api_ready`，自动生成 `manifest.json` 与 `checksums.sha256`。
+  - `pipelines/harbin/download_modelscope_assets.py`：从 ModelScope 下载并按真实文件系统路径展开（含 `/workspace/raw/...`）。
+- 上传范围（约 31 GB，149,498 个文件）：
+  - `data/harbin`：12.59 GB
+  - `models/harbin`：422 MB
+  - `models/sam3`：3.22 GB
+  - `/workspace/raw/harbin`：2.80 GB
+  - `/workspace/raw/harbin_scenes`：11.94 GB
+- 已用 Token 对数据集 `WeijieWu/xuannv_embdding_api` 做写入测试，权限正常。
+- 文档更新：
+  - `README.md` 新增「下载哈尔滨 V1/V2 资产」小节。
+  - 新增 `pipelines/harbin/README.md` 说明打包/下载/校验流程。
+- 海淀 V1 数据**不下载到本机**，避免磁盘/内存不足。
+- 待完成：正式上传并校验。

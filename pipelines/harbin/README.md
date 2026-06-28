@@ -1,99 +1,68 @@
-# Harbin 区域复现程序
+# Harbin ModelScope Asset Pipeline
 
-本目录包含哈尔滨新区遥感监测任务的完整复现程序，覆盖 embedding 可视化、任务头推理、标签生成和结果可视化。
+本目录包含把哈尔滨新区静态资产上传到 ModelScope，以及后续从 ModelScope
+下载这些资产的工具脚本。
 
-## 目录结构
+## 为什么用 tar 归档？
 
-```
-pipelines/harbin/
-├── paths.py                    # 统一路径管理（基于 embedding-api 项目根目录）
-├── generate_embedding_tiles.py # 将 NPY embedding 转为 PCA-RGB PNG 预览图
-├── train_task_head.py          # v1 任务头训练（单期 embedding）
-├── train_task_head_v2.py       # v2 任务头训练（两期 embedding 差分）
-├── inference_task_head.py      # v1 任务头推理 → predictions
-├── inference_task_head_v2.py   # v2 任务头推理 → predictions
-├── generate_prediction_tiles.py    # v1 从 predictions 生成 result tiles
-├── generate_prediction_tiles_v2.py # v2 从 predictions 生成 result tiles
-├── shp_to_patch_masks.py       # v1 从 shapefile 生成 labels
-├── shp_to_patch_masks_v2.py    # v2 从 shapefile + Excel 生成 labels
-└── visualize_labels_v2.py      # 生成 label_vis_v2 可视化图
-```
+ModelScope 数据集对单个目录树下的文件/目录总数有限制（约 50,000 个）。
+哈尔滨新区共有约 15 万个静态文件，因此上传前把它们按类别打包成少量 tar
+归档，下载后再自动解压。
 
-## 数据依赖
+## 资产归档
 
-运行本目录脚本需要以下外部数据（未复制到 embedding-api）：
+| 归档文件名 | 本地源路径 | 说明 |
+|------------|------------|------|
+| `data_harbin.tar` | `data/harbin` | embedding、任务结果/预测/标签、patches_meta |
+| `models_harbin.tar` | `models/harbin` | 哈尔滨系统模型 checkpoint |
+| `models_sam3.tar` | `models/sam3` | SAM3 交互式分割权重 |
+| `raw_harbin.tar` | `/workspace/raw/harbin` | mosaic 大图接口使用的 S2/S1/Landsat 原始 TIFF |
+| `raw_harbin_scenes.tar` | `/workspace/raw/harbin_scenes` | SAM3/embedding 使用的多时相 S2 场景 |
 
-| 数据 | 默认路径 | 环境变量覆盖 |
-|------|----------|--------------|
-| 原始 Embedding NPY | `/workspace/raw/xuannv_modelscope_upload/embeddings/v5_mixed_scale/monthly_embeddings_2025` | `RAW_EMBEDDINGS_DIR` |
-| S2 原始影像 | `/workspace/raw/harbin_scenes/s2` | `S2_DIR` |
-| Shapefile | `/workspace/哈尔滨松北新区变化检测汇总文件/变化检测shp文件` | `SHP_DIR` |
-| Excel 清单 | `/workspace/哈尔滨松北新区变化检测汇总文件/变化检测清单` | `EXCEL_DIR` |
+ModelScope 数据集地址：`https://www.modelscope.cn/datasets/WeijieWu/xuannv_embdding_api`  
+数据集内前缀：`harbin/v1/api_ready`
 
-## 复现流程
-
-### 1. 生成 Embedding 可视化 PNG
+## 打包上传（维护者）
 
 ```bash
-cd /workspace/embedding-api
-python pipelines/harbin/generate_embedding_tiles.py \
-  --embeddings-dir /path/to/embeddings \
-  --output-dir data/harbin/embeddings \
-  --max-patches 500
+# 1. 先 dry run 查看文件数量和总体积
+python pipelines/harbin/prepare_harbin_api_assets.py \
+  --output-root /workspace/modelscope_upload/harbin/v1 \
+  --dry-run
+
+# 2. 生成 tar 归档（默认输出到 /workspace/modelscope_upload/harbin/v1/api_ready）
+python pipelines/harbin/prepare_harbin_api_assets.py \
+  --output-root /workspace/modelscope_upload/harbin/v1
+
+# 3. 上传到 ModelScope（Token 从环境变量读取，不要写死在命令历史中）
+export MODELSCOPE_TOKEN="..."
+modelscope upload --repo-type dataset --token "$MODELSCOPE_TOKEN" \
+  --max-workers 8 \
+  --commit-message "Add Harbin V1 static assets" \
+  WeijieWu/xuannv_embdding_api \
+  /workspace/modelscope_upload/harbin/v1/api_ready \
+  harbin/v1/api_ready
 ```
 
-### 2. 训练任务头（可选，已有模型在 `models/harbin/`）
+> 如果只需要上传不带原始卫星场景的小包，可加上 `--skip-raw-scenes`。
+
+## 下载部署（使用者）
 
 ```bash
-# v1
-python pipelines/harbin/train_task_head.py --task construction --device cuda
-
-# v2
-python pipelines/harbin/train_task_head_v2.py --task construction --device cuda
+export MODELSCOPE_TOKEN="..."  # 私有数据集需要
+python pipelines/harbin/download_modelscope_assets.py \
+  --repo WeijieWu/xuannv_embdding_api \
+  --prefix harbin/v1/api_ready \
+  --target . \
+  --verify-checksums
 ```
 
-### 3. 任务头推理 → Predictions
+脚本会把归档下载到 `.modelscope_cache/harbin_v1`，校验 `checksums.sha256` 后
+自动解压：`data/harbin`、`models/harbin`、`models/sam3` 放到项目根目录，
+原始卫星场景放到真实的 `/workspace/raw/...` 路径，与 `config.yaml` 中的绝对
+路径保持一致。
 
-```bash
-# v1
-python pipelines/harbin/inference_task_head.py --task construction --month 2025-10 --device cuda
+## 校验
 
-# v2
-python pipelines/harbin/inference_task_head_v2.py --task construction --device cuda
-```
-
-输出到 `data/harbin/tasks/{task}/{version}/predictions/`。
-
-### 4. 生成 Result Tiles
-
-```bash
-# v1
-python pipelines/harbin/generate_prediction_tiles.py --task construction --month 2025-10
-
-# v2
-python pipelines/harbin/generate_prediction_tiles_v2.py --task construction
-```
-
-### 5. 生成 Labels（从 Shapefile）
-
-```bash
-# v1
-python pipelines/harbin/shp_to_patch_masks.py
-
-# v2
-python pipelines/harbin/shp_to_patch_masks_v2.py
-```
-
-### 6. 生成 Label 可视化
-
-```bash
-python pipelines/harbin/visualize_labels_v2.py
-```
-
-输出到 `data/harbin/tasks/{task}/v2/label_vis/{period}/`。
-
-## 路径说明
-
-- 所有**数据输出路径**已指向 `embedding-api/data/harbin/` 下的统一结构
-- 所有**模型路径**已指向 `embedding-api/models/harbin/v{version}/`，其中 `v1` 对应单期 embedding 任务头（V4 架构），`v2` 对应两期 embedding 差分任务头（V5 架构）
-- 外部大文件（原始 embedding、S2 影像）通过环境变量配置，保持在外部存储
+上传包中生成 `manifest.json` 与 `checksums.sha256`。下载时加 `--verify-checksums`
+可对归档做完整性校验后再解压。

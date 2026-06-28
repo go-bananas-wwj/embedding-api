@@ -77,6 +77,29 @@ curl "http://localhost:9061/regions/haidian/patches/patch_000000/embedding?forma
 curl "http://localhost:9061/regions/haidian/patches/patch_000000/tasks/road_extraction/result?format=png&version=v1" -o /tmp/haidian_road.png
 ```
 
+### 下载哈尔滨 V1/V2 资产
+
+哈尔滨新区的 embedding、任务结果、系统模型 checkpoint、SAM3 权重以及原始卫星
+场景数据同样托管在 ModelScope 数据集 `WeijieWu/xuannv_embdding_api` 的
+`harbin/v1/api_ready` 目录下。由于 ModelScope 对单目录文件数量有限制，
+哈尔滨资产被打包成几个 tar 归档，下载后自动解压。
+
+```bash
+export MODELSCOPE_TOKEN="..."  # 私有数据集需要；不要写入代码
+python pipelines/harbin/download_modelscope_assets.py \
+  --repo WeijieWu/xuannv_embdding_api \
+  --prefix harbin/v1/api_ready \
+  --target . \
+  --verify-checksums
+```
+
+下载后可直接访问：
+
+```bash
+curl "http://localhost:9061/regions/harbin/patches/patch_000000/embedding?format=json&version=v2&month=2025-04"
+curl "http://localhost:9061/regions/harbin/patches/patch_000000/tasks/building_extraction/result?format=png&version=v1" -o /tmp/harbin_building.png
+```
+
 ### Docker
 
 ```bash
