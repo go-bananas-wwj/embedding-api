@@ -20,7 +20,7 @@
 - **Embedding**: 按 Patch/月份获取 PNG 可视化、NPY 数组、JSON 统计。
 - **专题任务**: 5 类统一任务 — 变化检测、建筑物提取、土地利用分类、土地覆盖分类、水体提取。
 - **自定义模型**: 前端提交 GeoJSON 标注包（支持多类别、多标注），后端训练分类/变化检测头并推理，结果图为 128×128 PNG。
-- **区域马赛克大图**: 按日期/传感器拼接整区域预览图，用于前端展示。
+- **区域马赛克大图**: 按日期/传感器拼接整区域 S2/S1/Landsat 大图，用于前端展示。
 - **SAM3 交互式分割**: 基于 Sentinel-2 影像的点提示实例分割。
 - **配置热重载**: 修改 `config.yaml` 后无需重启即可生效。
 
@@ -94,7 +94,7 @@ docker-compose up -d
 - `GET /regions/{region_id}/patches/{patch_id}/tasks/{task_type}/result?format=png|npy&version=...` — Patch 级结果
 
 ### 区域马赛克大图
-- `GET /regions/{region_id}/mosaic?date=YYYY-MM&sensor_type=s2&format=png` — 整区域马赛克大图（当前仅支持 Sentinel-2）
+- `GET /regions/{region_id}/mosaic?date=YYYY-MM&sensor_type=s2|s1|landsat&format=png` — 整区域马赛克大图，支持 Sentinel-2 / Sentinel-1 / Landsat
 
 ### 自定义模型
 - `GET /models` — 模型列表

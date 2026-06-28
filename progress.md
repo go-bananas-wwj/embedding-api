@@ -43,3 +43,16 @@
 - 已分析当前代码与数据现状，整理到 `findings.md`。
 - 已编写 `task_plan.md` 前端反馈处理计划，包含三个待决策问题及可选方案。
 - 等待用户确认方案后执行。
+
+
+## 2026-06-28 前端反馈执行完成
+
+- 已按用户确认的决策完成三项前端反馈处理：
+  1. 保留 `model_type` + `task_type`，优化 Swagger 示例和字段描述。
+  2. `infer_batch` 保持 XOR 校验，Swagger 提供分类/变化检测两套示例。
+  3. 新增 `GET /regions/{region_id}/mosaic` 整区域马赛克大图接口（当前仅支持 Sentinel-2）。
+- 新增 `app/services/mosaic_service.py`、`tests/test_mosaic.py`。
+- 更新 `README.md`、`docs/API.md`。
+- 全量测试通过：`99 passed, 1 skipped`。
+- 已推送 GitHub：`6e6e4c2`。
+- 服务已重启，`/regions/harbin/mosaic?date=2025-04&sensor_type=s2&version=v2&format=png` 返回 4.9MB PNG。

@@ -11,13 +11,23 @@ from app.services.mosaic_service import build_mosaic
 from app.services.data_service import DataNotFoundError, DataValidationError
 
 
-def test_build_mosaic_png_returns_rgba_image():
+@pytest.fixture(scope="module")
+def shared_cache(tmp_path_factory):
+    return tmp_path_factory.mktemp("mosaic")
+
+
+def _sample_patches(n: int = 5):
+    return [f"patch_{i:06d}" for i in range(n)]
+
+
+def test_build_mosaic_png_returns_rgba_image(shared_cache):
     data, mime = build_mosaic(
         region_id="harbin",
         date="2025-04",
         sensor_type="s2",
-        version="v2",
         fmt="png",
+        patch_ids=_sample_patches(),
+        cache_dir=str(shared_cache),
     )
     assert mime == "image/png"
     img = Image.open(io.BytesIO(data))
@@ -25,25 +35,46 @@ def test_build_mosaic_png_returns_rgba_image():
     assert img.width > 0 and img.height > 0
 
 
-def test_build_mosaic_uses_cache(tmp_path):
-    cache_dir = tmp_path / "mosaic"
-    data1, _ = build_mosaic(
+def test_build_mosaic_s1(shared_cache):
+    data, mime = build_mosaic(
         region_id="harbin",
         date="2025-04",
-        sensor_type="s2",
-        version="v2",
+        sensor_type="s1",
         fmt="png",
-        cache_dir=str(cache_dir),
+        patch_ids=_sample_patches(),
+        cache_dir=str(shared_cache),
     )
-    cache_file = cache_dir / "harbin_s2_v2_2025-04.png"
+    assert mime == "image/png"
+    img = Image.open(io.BytesIO(data))
+    assert img.mode == "RGBA"
+
+
+def test_build_mosaic_landsat(shared_cache):
+    data, mime = build_mosaic(
+        region_id="harbin",
+        date="2025-04",
+        sensor_type="landsat",
+        fmt="png",
+        patch_ids=_sample_patches(),
+        cache_dir=str(shared_cache),
+    )
+    assert mime == "image/png"
+    img = Image.open(io.BytesIO(data))
+    assert img.mode == "RGBA"
+
+
+def test_build_mosaic_uses_cache(shared_cache):
+    sample = _sample_patches()
+    cache_file = shared_cache / f"harbin_s2_2025Q2_{'_'.join(sorted(sample))}.png"
     assert cache_file.exists()
+    data1 = cache_file.read_bytes()
     data2, _ = build_mosaic(
         region_id="harbin",
         date="2025-04",
         sensor_type="s2",
-        version="v2",
         fmt="png",
-        cache_dir=str(cache_dir),
+        patch_ids=sample,
+        cache_dir=str(shared_cache),
     )
     assert data1 == data2
 
@@ -53,7 +84,7 @@ def test_build_mosaic_unsupported_sensor():
         build_mosaic(
             region_id="harbin",
             date="2025-04",
-            sensor_type="s1",
+            sensor_type="modis",
             fmt="png",
         )
 
@@ -73,25 +104,24 @@ def test_build_mosaic_missing_date():
             region_id="harbin",
             date="2099-01",
             sensor_type="s2",
-            version="v2",
             fmt="png",
         )
 
 
-def test_build_mosaic_geotiff(tmp_path):
+@pytest.mark.slow
+def test_build_mosaic_geotiff(shared_cache):
     try:
         import rasterio  # noqa: F401
     except ImportError:
         pytest.skip("rasterio not installed")
 
-    cache_dir = tmp_path / "mosaic"
     data, mime = build_mosaic(
         region_id="harbin",
         date="2025-04",
         sensor_type="s2",
-        version="v2",
         fmt="tif",
-        cache_dir=str(cache_dir),
+        patch_ids=_sample_patches(),
+        cache_dir=str(shared_cache),
     )
     assert mime == "image/tiff"
     assert len(data) > 0

@@ -1,7 +1,7 @@
 """Region management router."""
 
 import io
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Path, Query
 from fastapi.responses import StreamingResponse
@@ -114,13 +114,18 @@ async def get_region_mosaic(
     ),
     version: Optional[str] = Query(
         None,
-        description="Embedding version. Defaults to 'v2' for Sentinel-2.",
+        description="保留字段，对原始卫星传感器数据无效。",
         examples=["v2"],
     ),
     format: str = Query(
         "png",
         description="Output format: 'png' (default) or 'tif' (GeoTIFF with WGS84).",
         examples=["png"],
+    ),
+    patch_ids: Optional[List[str]] = Query(
+        None,
+        description="可选，只拼接指定的 Patch ID 列表（用于快速预览或局部大图）。",
+        examples=[["patch_000000", "patch_000001"]],
     ),
 ):
     """获取指定日期、区域的整区域马赛克大图。
@@ -136,6 +141,7 @@ async def get_region_mosaic(
             sensor_type=sensor_type,
             version=version,
             fmt=format,
+            patch_ids=patch_ids,
         )
     except DataValidationError as e:
         raise HTTPException(status_code=400, detail=str(e))

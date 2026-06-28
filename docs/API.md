@@ -242,6 +242,7 @@ docker-compose up -d
 | **任务** | `/regions/{region_id}/patches/{patch_id}/tasks/{task_type}/label` | GET | 标签数据 |
 | **瓦片** | `/regions/{region_id}/tasks/{task_type}/tiles` | GET | 列出可用瓦片 |
 | **瓦片** | `/regions/{region_id}/tasks/{task_type}/tiles/{z}/{x}/{y}.png` | GET | 标准 XYZ 瓦片（暂未实现） |
+| **马赛克** | `/regions/{region_id}/mosaic` | GET | 整区域 S2/S1/Landsat 马赛克大图 |
 | **自定义模型** | `/models` | GET/POST | 模型列表 / 创建训练 |
 | **自定义模型** | `/models/{model_id}` | GET/PATCH/DELETE | 模型详情 / 重命名 / 删除 |
 | **自定义模型** | `/models/{model_id}/infer` | POST | 单 Patch 推理 |
@@ -1572,10 +1573,10 @@ curl -s "http://60.31.21.42:22065/models/results/infer_model_ghi789_harbin_patch
 
 ### 23. 获取整区域马赛克大图
 
-将某个区域、某个日期/月份下所有 Patch 的预览图按地理范围拼接成一张大图返回，用于前端展示整区域遥感影像。
+将某个区域、某个日期/月份下所有 Patch 的原始卫星 TIFF 按地理范围拼接成一张大图返回，用于前端展示整区域遥感影像。
 
 ```
-GET /regions/{region_id}/mosaic?date=YYYY-MM&sensor_type=s2&version=v2&format=png
+GET /regions/{region_id}/mosaic?date=YYYY-MM&sensor_type=s2&format=png
 ```
 
 **路径参数**:
@@ -1588,20 +1589,32 @@ GET /regions/{region_id}/mosaic?date=YYYY-MM&sensor_type=s2&version=v2&format=pn
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `date` | string | 是 | 日期/月份，哈尔滨格式为 `YYYY-MM`，如 `2025-04` |
-| `sensor_type` | string | 否 | 传感器类型，当前仅支持 `s2`（Sentinel-2），默认 `s2` |
-| `version` | string | 否 | Embedding 版本，默认 `v2` |
-| `format` | string | 否 | 输出格式：`png`（默认）或 `tif`（GeoTIFF，带 WGS84 地理坐标） |
+| `date` | string | 是 | 日期/月份，哈尔滨格式为 `YYYY-MM`，如 `2025-04`；会自动映射到季度文件 `2025Q2` |
+| `sensor_type` | string | 否 | 传感器类型：`s2`（默认）、`s1`、`landsat` |
+| `version` | string | 否 | 保留字段，对原始传感器数据无效 |
+| `format` | string | 否 | 输出格式：`png`（默认，可视化 RGB）或 `tif`（GeoTIFF，保留原始多波段与 UTM 坐标） |
+| `patch_ids` | string[] | 否 | 可选，只拼接指定 Patch ID 列表（可多次传入），不传则拼接全区域 |
+
+**波段合成规则**：
+
+| 传感器 | PNG 合成 | 说明 |
+|--------|----------|------|
+| `s2` | B4(R) / B3(G) / B2(B) | Sentinel-2 真彩色 |
+| `landsat` | B4(R) / B3(G) / B2(B) | Landsat 真彩色 |
+| `s1` | R=VV, G=VH, B=VH/VV | Sentinel-1 伪彩色合成 |
 
 **curl 示例**:
 ```bash
-curl -s "http://60.31.21.42:22065/regions/harbin/mosaic?date=2025-04&sensor_type=s2&version=v2&format=png" -o /tmp/harbin_2025-04.png
+# 全区域 S2 大图
+curl -s "http://60.31.21.42:22065/regions/harbin/mosaic?date=2025-04&sensor_type=s2&format=png" -o /tmp/harbin_s2_2025-04.png
+
+# 只拼前两个 patch（快速预览）
+curl -s "http://60.31.21.42:22065/regions/harbin/mosaic?date=2025-04&sensor_type=s1&format=png&patch_ids=patch_000000&patch_ids=patch_000001" -o /tmp/harbin_s1_preview.png
 ```
 
 **成功响应** (200): 返回 PNG 或 GeoTIFF 图片。
 
-> 首次生成后会缓存到 `users/default/mosaic/{region_id}_{sensor_type}_{version}_{date}.{format}`，后续直接读取。
-> 当前仅支持 Sentinel-2；S1、Landsat 等传感器数据尚未接入，传入会返回 `400`。
+> 首次生成后会缓存到 `users/default/mosaic/{region_id}_{sensor_type}_{date}.{format}`，后续直接读取。
 
 ---
 
