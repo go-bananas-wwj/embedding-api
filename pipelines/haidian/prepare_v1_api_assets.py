@@ -514,6 +514,154 @@ def write_manifest(root: Path, summary: dict[str, object]) -> None:
     )
 
 
+def write_modelscope_readme(root: Path) -> None:
+    readme = """# Haidian V1 P2A API Assets
+
+This ModelScope dataset folder contains the Haidian V1 deployment package for
+`go-bananas-wwj/embedding-api`.  The API assets are built from the xuannv P2A
+embedding model and cover imagery from December 2025 through May 2026.
+
+## What Is Included
+
+```text
+haidian/v1/
+  README.md
+  manifest.json
+  checksums.sha256
+  api_ready/
+    data/haidian/
+      patches_meta_v1.json
+      embeddings/v1/{month}/{patch_id}.npy
+      embeddings/v1/{month}/{patch_id}.png
+      embeddings/v1/{month}/{patch_id}.json
+      tasks/{task}/v1/predictions/{patch_id}.npy
+      tasks/{task}/v1/results/tiles/{patch_id}.png
+      tasks/{task}/v1/labels/{patch_id}.npy
+    models/haidian/v1/
+      embedding/best.pt
+      embedding/config.yaml
+      task_heads/{task}/{head}/best.pt
+      task_heads/{task}/{head}/metrics.json
+  archive/
+    raw_training_data/haidian_202512_202605/
+    processed_training_data/haidian_202512_202605.tar
+    training_output/
+    downstream_osm_eval/
+    benchmark_eval/
+    training_data_summary.json
+```
+
+Months:
+
+- `202512`
+- `202601`
+- `202602`
+- `202603`
+- `202604`
+- `202605`
+
+API tasks:
+
+- `building_extraction`: building segmentation from OSM-derived labels
+- `road_extraction`: road extraction from OSM-derived labels
+- `construction`: Haidian construction-change detection
+- `construction_joint`: construction-change detection using the joint benchmark
+
+## Quick Deployment
+
+Clone the API project:
+
+```bash
+git clone git@github.com:go-bananas-wwj/embedding-api.git
+cd embedding-api
+```
+
+Install the ModelScope CLI if needed:
+
+```bash
+pip install modelscope
+```
+
+Download the API-ready Haidian V1 assets into the project root:
+
+```bash
+export MODELSCOPE_TOKEN="YOUR_TOKEN"  # only needed if the dataset is private
+python pipelines/haidian/download_modelscope_assets.py \
+  --repo WeijieWu/xuannv_embdding_api \
+  --prefix haidian/v1/api_ready \
+  --target .
+```
+
+The command installs:
+
+```text
+data/haidian/...
+models/haidian/...
+```
+
+Then start the API:
+
+```bash
+DOCS_URL=/docs uvicorn app.main:app --host 0.0.0.0 --port 9061
+```
+
+Open:
+
+```text
+http://localhost:9061/docs
+```
+
+## Minimal Smoke Test
+
+```bash
+curl -s "http://localhost:9061/regions/haidian" | python -m json.tool
+curl -s "http://localhost:9061/regions/haidian/patches?page=1&page_size=2" | python -m json.tool
+curl -s "http://localhost:9061/regions/haidian/patches/patch_000000/embedding?format=json&version=v1&month=202512" | python -m json.tool
+curl -s "http://localhost:9061/regions/haidian/patches/patch_000000/tasks/road_extraction/result?format=png&version=v1" -o /tmp/haidian_road.png
+```
+
+## Direct ModelScope CLI Download
+
+If you do not use the helper script, download only the API-ready package:
+
+```bash
+modelscope download \
+  --dataset WeijieWu/xuannv_embdding_api \
+  --include "haidian/v1/api_ready/**" "haidian/v1/manifest.json" "haidian/v1/README.md" \
+  --local_dir ./modelscope_cache
+```
+
+Then copy the contents of:
+
+```text
+modelscope_cache/haidian/v1/api_ready/
+```
+
+into the `embedding-api` project root.
+
+## File Formats
+
+- Embeddings: NumPy arrays, shape `[C, H, W]`, stored as `.npy`.
+- Embedding previews: PCA RGB `.png` images.
+- Prediction arrays: probability maps stored as `.npy`.
+- Prediction previews: red foreground on white background, stored as `.png`.
+- Labels: uint8 NumPy masks where available.
+- Checkpoints: PyTorch `.pt` files.
+
+## Integrity Files
+
+- `manifest.json`: package metadata, month list, task list, and file summary.
+- `checksums.sha256`: SHA-256 checksums for uploaded package files.
+- `api_ready/checksums.sha256`: checksums for the deployable API subset.
+
+## Notes
+
+The `archive/` directory is for reproducibility and experiment review.  Normal
+API deployment only needs `haidian/v1/api_ready`.
+"""
+    (root / "README.md").write_text(readme, encoding="utf-8")
+
+
 def main() -> None:
     args = parse_args()
     root = args.output_root
@@ -543,6 +691,7 @@ def main() -> None:
 
     summary = {"embeddings": emb_summary, "tasks": task_summary}
     write_manifest(root, summary)
+    write_modelscope_readme(root)
     write_checksums(api_root)
     write_checksums(root)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
