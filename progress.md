@@ -205,7 +205,14 @@
   - 哈尔滨新区 V1/V2 版本信息、时间范围、ModelScope 路径。
   - 哈尔滨新区 tar 归档结构说明（`data_harbin.tar`、`models_harbin.tar`、`models_sam3.tar`、`raw_harbin.tar`、`raw_harbin_scenes.tar`）。
   - 哈尔滨新区支持的接口与任务（embedding、变化检测、建筑物提取、土地利用分类、土地覆盖分类、水体提取）。
+  - 哈尔滨新区容量说明表：
+    - `data_harbin.tar`：约 12.59G
+    - `models_harbin.tar`：约 422.42MB
+    - `models_sam3.tar`：约 3.22G
+    - `raw_harbin.tar`：约 2.80G
+    - `raw_harbin_scenes.tar`：约 12.12G
+    - 完整包总计：约 31.14G
   - 哈尔滨新区快速部署命令（完整资产 + embedding-only）。
   - 使用 ModelScope CLI 直接下载哈尔滨资产的示例。
   - API 快速检查命令（包含哈尔滨示例）。
-- 验证：重新下载 README.md，确认哈尔滨新区相关内容已写入。
+- 验证：重新下载 README.md，确认哈尔滨新区版本、结构、容量和任务说明均已写入。
