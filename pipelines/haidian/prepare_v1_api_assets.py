@@ -564,6 +564,32 @@ haidian/v1/
 - `manifest.json`：资产包的基本信息，例如区域、版本、月份、任务数量等。
 - `checksums.sha256`：文件校验表，用于检查文件是否完整。
 
+## 容量说明
+
+下面是当前海淀区 V1 资产的大致大小，实际显示会因为文件系统和压缩方式略有差异：
+
+| 内容 | 路径 | 大小 |
+|---|---|---:|
+| 完整海淀区 V1 包 | `haidian/v1/` | 约 95G |
+| API 部署必需内容 | `haidian/v1/api_ready/` | 约 9.5G |
+| API 数据部分 | `haidian/v1/api_ready/data/haidian/` | 约 7.8G |
+| 6 个月 embedding 总量 | `haidian/v1/api_ready/data/haidian/embeddings/` | 约 7.6G |
+| 每个月 embedding | `haidian/v1/api_ready/data/haidian/embeddings/v1/{月份}/` | 约 1.3G/月 |
+| 下游任务预测和可视化总量 | `haidian/v1/api_ready/data/haidian/tasks/` | 约 117M |
+| 建筑物提取结果 | `haidian/v1/api_ready/data/haidian/tasks/building_extraction/` | 约 33M |
+| 道路提取结果 | `haidian/v1/api_ready/data/haidian/tasks/road_extraction/` | 约 33M |
+| 施工变化检测结果 | `haidian/v1/api_ready/data/haidian/tasks/construction/` | 约 26M |
+| 联合施工变化检测结果 | `haidian/v1/api_ready/data/haidian/tasks/construction_joint/` | 约 27M |
+| API 模型权重 | `haidian/v1/api_ready/models/haidian/` | 约 1.8G |
+| 复现归档总量 | `haidian/v1/archive/` | 约 86G |
+| 原始训练数据 | `haidian/v1/archive/raw_training_data/` | 约 64G |
+| 预处理训练数据归档 | `haidian/v1/archive/processed_training_data/` | 约 15G |
+| P2A 训练输出 | `haidian/v1/archive/training_output/` | 约 7.2G |
+| OSM 下游测评输出 | `haidian/v1/archive/downstream_osm_eval/` | 约 134M |
+| 变化检测基准测评输出 | `haidian/v1/archive/benchmark_eval/` | 约 42M |
+
+如果只是部署 API，通常只需要下载 `haidian/v1/api_ready/`，大约 `9.5G`；不需要下载 `archive/`。
+
 ## 覆盖月份
 
 海淀区 V1 包含以下 6 个月份的 embedding：
