@@ -515,13 +515,19 @@ def write_manifest(root: Path, summary: dict[str, object]) -> None:
 
 
 def write_modelscope_readme(root: Path) -> None:
-    readme = """# Haidian V1 P2A API Assets
+    readme = """# 玄女 Embedding API 资产库
 
-This ModelScope dataset folder contains the Haidian V1 deployment package for
-`go-bananas-wwj/embedding-api`.  The API assets are built from the xuannv P2A
-embedding model and cover imagery from December 2025 through May 2026.
+这个 ModelScope 数据集用于存放 `go-bananas-wwj/embedding-api` 项目的部署资产，包括模型权重、嵌入结果、下游任务头、预测结果、可视化结果和复现实验所需的数据归档。
 
-## What Is Included
+当前已经发布的是 **海淀区 V1 版本**，底座模型为 xuannv P2A embedding 模型，覆盖时间范围为 **2025 年 12 月到 2026 年 5 月**。
+
+## 当前可用版本
+
+| 区域 | API 版本 | 模型 | 时间范围 | ModelScope 路径 | 状态 |
+|---|---|---|---|---|---|
+| 海淀区 | `v1` | xuannv P2A | 2025-12 到 2026-05 | `haidian/v1` | 可用 |
+
+## 海淀区 V1 包含哪些内容
 
 ```text
 haidian/v1/
@@ -531,17 +537,17 @@ haidian/v1/
   api_ready/
     data/haidian/
       patches_meta_v1.json
-      embeddings/v1/{month}/{patch_id}.npy
-      embeddings/v1/{month}/{patch_id}.png
-      embeddings/v1/{month}/{patch_id}.json
-      tasks/{task}/v1/predictions/{patch_id}.npy
-      tasks/{task}/v1/results/tiles/{patch_id}.png
-      tasks/{task}/v1/labels/{patch_id}.npy
+      embeddings/v1/{月份}/{patch_id}.npy
+      embeddings/v1/{月份}/{patch_id}.png
+      embeddings/v1/{月份}/{patch_id}.json
+      tasks/{任务}/v1/predictions/{patch_id}.npy
+      tasks/{任务}/v1/results/tiles/{patch_id}.png
+      tasks/{任务}/v1/labels/{patch_id}.npy
     models/haidian/v1/
       embedding/best.pt
       embedding/config.yaml
-      task_heads/{task}/{head}/best.pt
-      task_heads/{task}/{head}/metrics.json
+      task_heads/{任务}/{下游头}/best.pt
+      task_heads/{任务}/{下游头}/metrics.json
   archive/
     raw_training_data/haidian_202512_202605/
     processed_training_data/haidian_202512_202605.tar
@@ -551,7 +557,16 @@ haidian/v1/
     training_data_summary.json
 ```
 
-Months:
+其中：
+
+- `api_ready/`：部署 API 时真正需要下载的内容。
+- `archive/`：训练数据、训练输出、测评输出等归档内容，主要用于复现和审计。
+- `manifest.json`：资产包的基本信息，例如区域、版本、月份、任务数量等。
+- `checksums.sha256`：文件校验表，用于检查文件是否完整。
+
+## 覆盖月份
+
+海淀区 V1 包含以下 6 个月份的 embedding：
 
 - `202512`
 - `202601`
@@ -560,58 +575,68 @@ Months:
 - `202604`
 - `202605`
 
-API tasks:
+## 支持的下游任务
 
-- `building_extraction`: building segmentation from OSM-derived labels
-- `road_extraction`: road extraction from OSM-derived labels
-- `construction`: Haidian construction-change detection
-- `construction_joint`: construction-change detection using the joint benchmark
+| 任务名 | 说明 |
+|---|---|
+| `building_extraction` | 建筑物提取，标签主要来自 OSM 派生结果 |
+| `road_extraction` | 道路/路网提取，标签主要来自 OSM 派生结果 |
+| `construction` | 海淀区施工变化检测 |
+| `construction_joint` | 联合施工变化检测基准中的海淀区子集 |
 
-## Quick Deployment
+每个任务都包含：
 
-Clone the API project:
+- `.npy` 概率图：用于程序读取和后续分析。
+- `.png` 可视化图：红色表示预测前景，白色表示背景，方便人工查看。
+- 下游任务头权重：保存在 `models/haidian/v1/task_heads/` 下。
+
+## 快速部署方式
+
+先克隆 API 项目：
 
 ```bash
 git clone git@github.com:go-bananas-wwj/embedding-api.git
 cd embedding-api
 ```
 
-Install the ModelScope CLI if needed:
+安装 ModelScope 命令行工具：
 
 ```bash
 pip install modelscope
 ```
 
-Download the API-ready Haidian V1 assets into the project root:
+下载海淀区 V1 的 API 部署资产：
 
 ```bash
-export MODELSCOPE_TOKEN="YOUR_TOKEN"  # only needed if the dataset is private
+export MODELSCOPE_TOKEN="你的 ModelScope Token"  # 如果数据集是公开的，可以不设置
 python pipelines/haidian/download_modelscope_assets.py \
   --repo WeijieWu/xuannv_embdding_api \
   --prefix haidian/v1/api_ready \
   --target .
 ```
 
-The command installs:
+下载完成后，项目根目录下会出现：
 
 ```text
 data/haidian/...
 models/haidian/...
 ```
 
-Then start the API:
+然后启动 API：
 
 ```bash
 DOCS_URL=/docs uvicorn app.main:app --host 0.0.0.0 --port 9061
 ```
 
-Open:
+启动后打开：
 
 ```text
 http://localhost:9061/docs
 ```
 
-## Minimal Smoke Test
+## 快速检查 API 是否可用
+
+可以用下面几条命令做最小化检查：
 
 ```bash
 curl -s "http://localhost:9061/regions/haidian" | python -m json.tool
@@ -620,9 +645,11 @@ curl -s "http://localhost:9061/regions/haidian/patches/patch_000000/embedding?fo
 curl -s "http://localhost:9061/regions/haidian/patches/patch_000000/tasks/road_extraction/result?format=png&version=v1" -o /tmp/haidian_road.png
 ```
 
-## Direct ModelScope CLI Download
+如果这些接口能正常返回，就说明海淀区 V1 资产已经部署成功。
 
-If you do not use the helper script, download only the API-ready package:
+## 直接使用 ModelScope CLI 下载
+
+如果不使用项目里的下载脚本，也可以直接下载 `api_ready` 部分：
 
 ```bash
 modelscope download \
@@ -631,33 +658,30 @@ modelscope download \
   --local_dir ./modelscope_cache
 ```
 
-Then copy the contents of:
+然后把下面这个目录里的内容复制到 `embedding-api` 项目根目录：
 
 ```text
 modelscope_cache/haidian/v1/api_ready/
 ```
 
-into the `embedding-api` project root.
+## 文件格式说明
 
-## File Formats
+- Embedding 文件：`.npy`，形状为 `[C, H, W]`。
+- Embedding 预览图：`.png`，由 PCA 降到 RGB 后生成。
+- 任务预测结果：`.npy`，表示每个像素属于目标类别的概率。
+- 任务可视化图：`.png`，红色为预测前景，白色为背景。
+- 标签文件：`.npy`，uint8 mask。
+- 模型权重：`.pt`，PyTorch checkpoint。
 
-- Embeddings: NumPy arrays, shape `[C, H, W]`, stored as `.npy`.
-- Embedding previews: PCA RGB `.png` images.
-- Prediction arrays: probability maps stored as `.npy`.
-- Prediction previews: red foreground on white background, stored as `.png`.
-- Labels: uint8 NumPy masks where available.
-- Checkpoints: PyTorch `.pt` files.
+## 普通部署只需要哪些内容
 
-## Integrity Files
+如果只是部署 API，只需要下载：
 
-- `manifest.json`: package metadata, month list, task list, and file summary.
-- `checksums.sha256`: SHA-256 checksums for uploaded package files.
-- `api_ready/checksums.sha256`: checksums for the deployable API subset.
+```text
+haidian/v1/api_ready/
+```
 
-## Notes
-
-The `archive/` directory is for reproducibility and experiment review.  Normal
-API deployment only needs `haidian/v1/api_ready`.
+`archive/` 目录很大，里面主要是原始训练数据、预处理数据、训练日志和测评结果，普通部署不需要下载。
 """
     (root / "README.md").write_text(readme, encoding="utf-8")
 
