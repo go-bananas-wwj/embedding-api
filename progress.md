@@ -194,4 +194,18 @@
   - 仅启用海淀区 embedding 查询接口。
   - 专题任务结果与 SAM3 分割需要额外下载完整资产，本次因空间/范围限制未下载。
 - 文档更新：`README.md` 增加「仅部署 embedding 接口」说明。
-- 已推送 GitHub：待提交。
+- 已推送 GitHub：`89944e0`。
+
+
+## 2026-06-29 更新 ModelScope 数据集 README
+
+- 参考数据集原有海淀区 V1 说明结构，补齐哈尔滨新区 V1/V2 资产说明。
+- 更新后的 README 已上传至 `WeijieWu/xuannv_embdding_api/README.md`。
+- 新增内容包括：
+  - 哈尔滨新区 V1/V2 版本信息、时间范围、ModelScope 路径。
+  - 哈尔滨新区 tar 归档结构说明（`data_harbin.tar`、`models_harbin.tar`、`models_sam3.tar`、`raw_harbin.tar`、`raw_harbin_scenes.tar`）。
+  - 哈尔滨新区支持的接口与任务（embedding、变化检测、建筑物提取、土地利用分类、土地覆盖分类、水体提取）。
+  - 哈尔滨新区快速部署命令（完整资产 + embedding-only）。
+  - 使用 ModelScope CLI 直接下载哈尔滨资产的示例。
+  - API 快速检查命令（包含哈尔滨示例）。
+- 验证：重新下载 README.md，确认哈尔滨新区相关内容已写入。
