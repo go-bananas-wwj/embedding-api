@@ -128,6 +128,12 @@ regions:
             results: "data/harbin/tasks/construction/v2/results"
             predictions: "data/harbin/tasks/construction/v2/predictions"
             labels: "data/harbin/tasks/construction/v2/labels"
+      road_extraction:
+        name: "道路提取"
+        description: "基于 OpenStreetMap 路网数据栅格化的道路提取"
+        versions:
+          v1:
+            results: "data/harbin/tasks/road_extraction/v1/results"
       land_use_classification:
         name: "土地利用分类"
         description: "土地利用分类与转换监测（映射原 farmland / land_conversion 任务）"
@@ -198,12 +204,20 @@ regions:
             labels: "data/haidian/tasks/construction_joint/v1/labels"
       land_use_classification:
         name: "土地利用分类"
-        description: "土地利用分类"
-        versions: {}
+        description: "海淀区 V1 月度土地利用分类 (Dynamic World Linear Probe)"
+        versions:
+          v1:
+            results: "data/haidian/tasks/land_use_classification/v1/results"
+            predictions: "data/haidian/tasks/land_use_classification/v1/predictions"
+            labels: "data/haidian/tasks/land_use_classification/v1/labels"
       land_cover_classification:
         name: "土地覆盖分类"
-        description: "土地覆盖分类"
-        versions: {}
+        description: "海淀区 V1 月度土地覆盖分类 (WorldCover Linear Probe)"
+        versions:
+          v1:
+            results: "data/haidian/tasks/land_cover_classification/v1/results"
+            predictions: "data/haidian/tasks/land_cover_classification/v1/predictions"
+            labels: "data/haidian/tasks/land_cover_classification/v1/labels"
       water_extraction:
         name: "水体提取"
         description: "基于海淀 V1 OSM-assisted 诊断图的水体提取"

@@ -289,15 +289,14 @@ async def get_task_result(
                     filename=f"{patch_id}_{task_type}_prediction.npy",
                 )
         else:
-            # Classification tasks: prefer xuannv_show static seg_tiles or system model masks
+            # Classification tasks: prefer xuannv_show static seg_tiles if available
             if task_type in _CLASS_TASK_TO_XUANNV_HEAD and class_month:
-                tile_path = _resolve_classification_tile(
-                    region_id, task_type, patch_id, class_month, version
-                )
-                if tile_path:
-                    return FileResponse(tile_path, media_type="image/png")
+                head = _CLASS_TASK_TO_XUANNV_HEAD[task_type]
+                static_path = _XUANNV_SHOW_SEG_TILE_DIR / head / class_month / f"{patch_id}.png"
+                if static_path.exists():
+                    return FileResponse(str(static_path), media_type="image/png")
 
-            # Try configured result files (change_detection / few-shot custom heads)
+            # Try configured result files / tiles (e.g. haidian land use/cover)
             path = DataService.get_task_result_path(
                 region_id, patch_id, task_type, "png", version, effective_period
             )
@@ -309,6 +308,14 @@ async def get_task_result(
             )
             if path and path.lower().endswith(".png"):
                 return FileResponse(path, media_type="image/png")
+
+            # Last resort: run system model inference (harbin land cover / water)
+            if task_type in _CLASS_TASK_TO_XUANNV_HEAD and class_month and is_system_task(task_type):
+                tile_path = _resolve_classification_tile(
+                    region_id, task_type, patch_id, class_month, version
+                )
+                if tile_path:
+                    return FileResponse(tile_path, media_type="image/png")
     except DataValidationError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
