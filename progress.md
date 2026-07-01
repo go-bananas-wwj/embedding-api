@@ -292,7 +292,7 @@
   - `/workspace` 可用 198 GB，新增下载约 1.9 GB，完全足够。
   - 推理峰值显存 < 2 GB（本次未触发推理）。
 - 注意事项：
-  - 海淀区 `land_use_classification` / `land_cover_classification` / `water_extraction` 暂无预训练分类模型，仍返回 404。
+  - 海淀区 `land_use_classification` / `land_cover_classification` 暂无预训练分类模型，仍返回 404（后续 `water_extraction` 已通过 OSM-assisted 归档补充）。
   - `data/` 和 `models/` 目录被 `.gitignore` 忽略，模型/结果文件不进入 git，只在部署机存在。
 
 
@@ -312,7 +312,7 @@
   - `app/services/data_service.py` 增加 `results/tiles/{patch_id}.png` fallback，支持 per-patch tile 返回。
 - 默认月份设置为 `202605`，接口未指定月份时自动回退到该期。
 - 服务重启并验证：
-  - 4 个任务 `GET /regions/haidian/patches/patch_000000/tasks/{task}/result?format=png&before_month=202605&after_month=202605` 均返回 128×128 PNG。
+  - 4 个任务 `GET /regions/haidian/patches/patch_000000/tasks/{task}/result?format=png&month=202605` 均返回 128×128 PNG。
   - `pytest -q -m "not slow"` → `100 passed, 5 deselected`。
 - 重新生成全域可视化大图：
   - 单任务全区域马赛克：`test_output/hd_v2/full_region_{building_extraction,road_extraction,construction,water_extraction}.png`（3072×3072）。

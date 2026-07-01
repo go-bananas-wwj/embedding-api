@@ -862,11 +862,12 @@ curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/tasks/chan
 - `404`: 该 Patch 在该任务下没有结果
 
 > **海淀区 V1 示例**（OSM-assisted 诊断图后处理面板，已按月份归档）：
+> 单期任务使用 `month` 参数指定 6 位月份（如 `202605`），`change_detection` 才使用 `before_month`/`after_month`。
 > ```bash
-> curl -s "http://60.31.21.42:22065/regions/haidian/patches/patch_000000/tasks/building_extraction/result?format=png&before_month=202605&after_month=202605" -o /tmp/hd_be.png
-> curl -s "http://60.31.21.42:22065/regions/haidian/patches/patch_000000/tasks/road_extraction/result?format=png&before_month=202605&after_month=202605" -o /tmp/hd_re.png
-> curl -s "http://60.31.21.42:22065/regions/haidian/patches/patch_000000/tasks/construction/result?format=png&before_month=202605&after_month=202605" -o /tmp/hd_con.png
-> curl -s "http://60.31.21.42:22065/regions/haidian/patches/patch_000000/tasks/water_extraction/result?format=png&before_month=202605&after_month=202605" -o /tmp/hd_water.png
+> curl -s "http://60.31.21.42:22065/regions/haidian/patches/patch_000000/tasks/building_extraction/result?format=png&month=202605" -o /tmp/hd_be.png
+> curl -s "http://60.31.21.42:22065/regions/haidian/patches/patch_000000/tasks/road_extraction/result?format=png&month=202605" -o /tmp/hd_re.png
+> curl -s "http://60.31.21.42:22065/regions/haidian/patches/patch_000000/tasks/construction/result?format=png&month=202605" -o /tmp/hd_con.png
+> curl -s "http://60.31.21.42:22065/regions/haidian/patches/patch_000000/tasks/water_extraction/result?format=png&month=202605" -o /tmp/hd_water.png
 > ```
 > 返回结果为 128×128 PNG，内容取自 OSM-assisted 诊断图的“后处理结果”面板。
 >
@@ -2264,7 +2265,7 @@ function getResultImageUrl(regionId: string, patchId: string, taskType: string, 
 | 数据源 | Sentinel-2, Sentinel-1, Landsat, 高分光学, 高分 SAR, WorldCover 等 |
 | 嵌入格式 | NPY 多通道数组 / PNG PCA 预览 / JSON 统计 |
 | 下游任务 | `building_extraction`, `road_extraction`, `construction`, `construction_joint`, `land_use_classification`, `land_cover_classification`, `water_extraction` |
-| 有预生成结果的任务 | `building_extraction` V1、`road_extraction` V1、`construction` V1、`construction_joint` V1 |
+| 有预生成结果的任务 | `building_extraction` V1、`road_extraction` V1、`construction` V1、`construction_joint` V1、`water_extraction` V1 |
 | 可用接口 | `/regions/haidian/patches/*`、`/regions/haidian/patches/*/embedding`、`/regions/haidian/patches/*/tasks/*/result` |
 
 ---
