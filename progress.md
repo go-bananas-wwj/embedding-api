@@ -243,3 +243,30 @@
   - `land_cover_classification` / `water_extraction` 若前端需要走任务结果接口，需要在该接口中为 `versions: {}` 的任务 fallback 到系统模型推理。
 - 单元测试：`pytest -q -m "not slow"` → `100 passed, 5 deselected`。
 - 已推送 GitHub：`00d79cb`。
+
+
+## 2026-07-01 进一步修复：任务结果接口对齐 xuannv_show 真实文件
+
+- 用户反馈：之前返回的文件仍不是 xuannv_show 里真实使用的文件。
+- 根因：
+  - xuannv_show 前端对 `building_extraction`、`land_use_classification`、`land_cover_classification`、`water_extraction` 这几个分类任务，调用的是 `/api/heads/{head_id}/patch/{patch_id}/tile`。
+  - 该路由优先使用 `static_assets/data/seg_tiles/{head_id}/{month}/{patch_id}.png` 预生成语义掩膜 tile；缺失时才用系统模型实时推理。
+  - 我们的 `/regions/{region_id}/patches/{patch_id}/tasks/{task_type}/result` 只读 `config.yaml` 里配置的 `results` 目录，导致：
+    - `building_extraction` 被映射到 `construction` 的概率热力图；
+    - `land_use_classification` 被映射到 `farmland` / `land_conversion`；
+    - `land_cover_classification` / `water_extraction` 没有配置，直接 404。
+- 修复内容：
+  - `app/services/system_model_service.py`：新增 `land_use_classification` → `dynamic_world` 别名，使其成为系统预训练模型任务。
+  - `app/routers/tasks.py`：
+    - 对 4 个分类任务优先查找 xuannv_show 静态 seg tile；
+    - 静态 tile 缺失时自动调用 `infer_system_model` 实时推理生成；
+    - 变化检测和 few-shot 自定义头仍走原预计算概率图。
+  - `docs/API.md`：更新说明，指出分类任务现在走 xuannv_show 语义掩膜。
+- 验证：
+  - `building_extraction`（patch_000003）返回红色建筑物掩膜，不再是 jet 热力图。
+  - `land_use_classification`（patch_000019）返回 Dynamic World 多类别语义图。
+  - `land_cover_classification` 返回 WorldCover 语义图。
+  - `water_extraction` 返回蓝色水体掩膜。
+  - `change_detection` 仍返回变化概率热力图。
+  - `pytest -q -m "not slow"` → `100 passed, 5 deselected`。
+- 已推送 GitHub：`bc17e36`。
