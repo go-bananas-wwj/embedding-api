@@ -603,6 +603,16 @@ class DataService:
                     if path:
                         available.append(task_name)
                         break
+                # Fallback: treat task as available if a result tile exists when
+                # predictions/labels are not found.
+                results = ver_info.get("results")
+                if results:
+                    path = DataService.get_task_result_path(
+                        region_id, patch_id, task_name, "tile", ver_name, None
+                    )
+                    if path:
+                        available.append(task_name)
+                        break
         result = list(set(available))
 
         DataService._available_tasks_cache.set(cache_key, result)

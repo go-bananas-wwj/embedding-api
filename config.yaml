@@ -182,7 +182,7 @@ regions:
             labels: "data/haidian/tasks/road_extraction/v1/labels"
       construction:
         name: "施工地检测"
-        description: "基于海淀 V1 embedding 的施工地检测"
+        description: "基于海淀 V1 OSM-assisted 诊断图的施工地检测（原 construction_site_extraction）"
         versions:
           v1:
             results: "data/haidian/tasks/construction/v1/results"
@@ -206,5 +206,9 @@ regions:
         versions: {}
       water_extraction:
         name: "水体提取"
-        description: "水体提取"
-        versions: {}
+        description: "基于海淀 V1 OSM-assisted 诊断图的水体提取"
+        versions:
+          v1:
+            results: "data/haidian/tasks/water_extraction/v1/results"
+            predictions: "data/haidian/tasks/water_extraction/v1/predictions"
+            labels: "data/haidian/tasks/water_extraction/v1/labels"

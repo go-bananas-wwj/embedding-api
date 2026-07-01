@@ -294,3 +294,28 @@
 - 注意事项：
   - 海淀区 `land_use_classification` / `land_cover_classification` / `water_extraction` 暂无预训练分类模型，仍返回 404。
   - `data/` 和 `models/` 目录被 `.gitignore` 忽略，模型/结果文件不进入 git，只在部署机存在。
+
+
+## 2026-07-01 替换海淀区 V1 结果为 OSM-assisted 月度诊断归档
+
+- 用 `scripts/replace_haidian_results_from_osm_archives.py` 替换海淀区旧 V1 结果：
+  - 来源：ModelScope `WeijieWu/xuannv_embdding_api/haidian/v1/reports/monthly_osm_assisted_patch_tiles/archives/`。
+  - 共 6 个月 tar 归档（202512–202605），约 2.1 GB。
+  - 从 1312×342 诊断图中提取第 4 面板“后处理结果”，缩放为 128×128，保持与前端 tile 接口兼容。
+- 任务映射：
+  - `building_extraction` / `road_extraction` / `water_extraction` 直接使用新归档对应任务。
+  - `construction_site_extraction` → `construction`。
+  - `construction_joint` 保持原有旧结果，未做替换。
+- 配置更新：
+  - `config.yaml` 新增 `water_extraction` v1 结果/预测/标签路径。
+  - `construction` 描述更新为“基于海淀 V1 OSM-assisted 诊断图的施工地检测（原 construction_site_extraction）”。
+  - `app/services/data_service.py` 增加 `results/tiles/{patch_id}.png` fallback，支持 per-patch tile 返回。
+- 默认月份设置为 `202605`，接口未指定月份时自动回退到该期。
+- 服务重启并验证：
+  - 4 个任务 `GET /regions/haidian/patches/patch_000000/tasks/{task}/result?format=png&before_month=202605&after_month=202605` 均返回 128×128 PNG。
+  - `pytest -q -m "not slow"` → `100 passed, 5 deselected`。
+- 重新生成全域可视化大图：
+  - 单任务全区域马赛克：`test_output/hd_v2/full_region_{building_extraction,road_extraction,construction,water_extraction}.png`（3072×3072）。
+  - 2×2 综合预览：`test_output/hd_v2/full_region_all_tasks.png`（3072×3132，带中文标题与 footer）。
+- 文档更新：`docs/API.md` 海淀区 V1 示例更新为 OSM-assisted 诊断图后处理面板说明；`progress.md` 追加本记录。
+- 提交非数据变更：`config.yaml`、`app/services/data_service.py`、`scripts/replace_haidian_results_from_osm_archives.py`、`docs/API.md`、`progress.md`。
