@@ -7,6 +7,7 @@ regenerate them from downloaded V1 embeddings and task-head checkpoints.
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 import numpy as np
@@ -90,12 +91,22 @@ def build_head(head_type: str, embed_dim: int = 192) -> nn.Module:
     raise ValueError(f"Unsupported head type: {head_type}")
 
 
-def prob_to_red_png(prob: np.ndarray) -> np.ndarray:
-    prob = np.clip(prob.astype(np.float32), 0, 1)
+def prob_to_red_png(prob: np.ndarray, threshold: float) -> np.ndarray:
+    mask = prob.astype(np.float32) >= threshold
     rgb = np.full((prob.shape[0], prob.shape[1], 3), 255, dtype=np.uint8)
-    rgb[..., 1] = ((1.0 - prob) * 255).astype(np.uint8)
-    rgb[..., 2] = ((1.0 - prob) * 255).astype(np.uint8)
+    rgb[mask] = np.array([255, 0, 0], dtype=np.uint8)
     return rgb
+
+
+def load_threshold(models_dir: Path, task: str, head_type: str, fallback: float = 0.5) -> float:
+    metrics = models_dir / "task_heads" / task / head_type / "metrics.json"
+    if not metrics.exists():
+        return fallback
+    data = json.loads(metrics.read_text(encoding="utf-8"))
+    for key in ("val_threshold", "threshold", "best_threshold"):
+        if key in data:
+            return float(data[key])
+    return fallback
 
 
 def load_embedding(embeddings_dir: Path, month: str, patch_id: str) -> np.ndarray:
@@ -120,6 +131,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--models-dir", type=Path, default=HAIDIAN_V1_MODELS_DIR)
     parser.add_argument("--predictions-dir", type=Path, default=None)
     parser.add_argument("--results-dir", type=Path, default=None)
+    parser.add_argument(
+        "--threshold",
+        type=float,
+        default=None,
+        help="Visualization threshold. Defaults to the task head metrics threshold.",
+    )
     parser.add_argument("--max-patches", type=int, default=0)
     return parser.parse_args()
 
@@ -133,7 +150,11 @@ def main() -> None:
     model.load_state_dict(torch.load(ckpt, map_location="cpu"))
     model.eval()
 
-    import json
+    threshold = (
+        args.threshold
+        if args.threshold is not None
+        else load_threshold(args.models_dir, args.task, head_type)
+    )
 
     patches = json.loads(args.patches_meta.read_text(encoding="utf-8"))
     patch_ids = [p["patch_id"] for p in patches]
@@ -153,10 +174,10 @@ def main() -> None:
             batch.append(torch.from_numpy(make_concat_diff(before, after)))
             batch_ids.append(patch_id)
             if len(batch) >= args.batch_size:
-                save_batch(model, batch, batch_ids, pred_dir, tile_dir, device)
+                save_batch(model, batch, batch_ids, pred_dir, tile_dir, device, threshold)
                 batch, batch_ids = [], []
         if batch:
-            save_batch(model, batch, batch_ids, pred_dir, tile_dir, device)
+            save_batch(model, batch, batch_ids, pred_dir, tile_dir, device, threshold)
 
 
 def save_batch(
@@ -166,12 +187,13 @@ def save_batch(
     pred_dir: Path,
     tile_dir: Path,
     device: torch.device,
+    threshold: float,
 ) -> None:
     x = torch.stack(batch).to(device)
     prob = torch.sigmoid(model(x)[:, 1]).cpu().numpy()
     for patch_id, arr in zip(patch_ids, prob):
         np.save(pred_dir / f"{patch_id}.npy", arr.astype(np.float32))
-        Image.fromarray(prob_to_red_png(arr)).save(tile_dir / f"{patch_id}.png")
+        Image.fromarray(prob_to_red_png(arr, threshold)).save(tile_dir / f"{patch_id}.png")
 
 
 if __name__ == "__main__":

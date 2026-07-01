@@ -379,18 +379,32 @@ def build_patches_meta(api_root: Path) -> None:
     out.write_text(json.dumps(patches, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def prob_to_red_png(prob: np.ndarray) -> np.ndarray:
-    prob = np.clip(prob.astype(np.float32), 0, 1)
+def prob_to_red_png(prob: np.ndarray, threshold: float) -> np.ndarray:
+    mask = prob.astype(np.float32) >= threshold
     rgb = np.full((prob.shape[0], prob.shape[1], 3), 255, dtype=np.uint8)
-    rgb[..., 1] = ((1.0 - prob) * 255).astype(np.uint8)
-    rgb[..., 2] = ((1.0 - prob) * 255).astype(np.uint8)
+    rgb[mask] = np.array([255, 0, 0], dtype=np.uint8)
     return rgb
+
+
+def task_visual_threshold(info: dict[str, object]) -> float:
+    head_dirs = info.get("head_dirs", {})
+    if isinstance(head_dirs, dict):
+        unet_dir = head_dirs.get("unet")
+        if isinstance(unet_dir, Path):
+            metrics = unet_dir / "metrics.json"
+            if metrics.exists():
+                data = json.loads(metrics.read_text(encoding="utf-8"))
+                for key in ("val_threshold", "threshold", "best_threshold"):
+                    if key in data:
+                        return float(data[key])
+    return 0.5
 
 
 def write_task_assets(api_root: Path, models_root: Path, mode: str) -> dict[str, object]:
     task_counts: dict[str, int] = {}
     for task, info in TASK_SOURCES.items():
         pred_dir: Path = info["prediction_dir"]
+        threshold = task_visual_threshold(info)
         out_task = api_root / "data/haidian/tasks" / task / "v1"
         pred_out = out_task / "predictions"
         tiles_out = out_task / "results" / "tiles"
@@ -399,6 +413,7 @@ def write_task_assets(api_root: Path, models_root: Path, mode: str) -> dict[str,
         tiles_out.mkdir(parents=True, exist_ok=True)
 
         count = 0
+        positive_pixels = 0
         for src in sorted(pred_dir.glob("*_prob.tif")):
             patch_id = src.name[: -len("_prob.tif")]
             if info.get("haidian_prefix_only"):
@@ -408,8 +423,22 @@ def write_task_assets(api_root: Path, models_root: Path, mode: str) -> dict[str,
             with rasterio.open(src) as ds:
                 prob = ds.read(1).astype(np.float32)
             np.save(pred_out / f"{patch_id}.npy", prob)
-            Image.fromarray(prob_to_red_png(prob)).save(tiles_out / f"{patch_id}.png")
+            Image.fromarray(prob_to_red_png(prob, threshold)).save(
+                tiles_out / f"{patch_id}.png"
+            )
+            positive_pixels += int((prob >= threshold).sum())
             count += 1
+
+        visualization_threshold = threshold
+        threshold_note = "metrics_threshold"
+        if count > 0 and positive_pixels == 0 and threshold > 0.5:
+            visualization_threshold = 0.5
+            threshold_note = "fallback_0.5_metrics_threshold_was_empty"
+            for pred in sorted(pred_out.glob("*.npy")):
+                prob = np.load(pred).astype(np.float32)
+                Image.fromarray(prob_to_red_png(prob, visualization_threshold)).save(
+                    tiles_out / f"{pred.stem}.png"
+                )
 
         summary = {
             "task": task,
@@ -417,6 +446,8 @@ def write_task_assets(api_root: Path, models_root: Path, mode: str) -> dict[str,
             "total_patches": count,
             "positive_patches": None,
             "negative_patches": None,
+            "visualization_threshold": visualization_threshold,
+            "visualization_threshold_source": threshold_note,
             "source_prediction_dir": str(pred_dir),
         }
         (out_task / "summary.json").write_text(
