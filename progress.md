@@ -216,3 +216,30 @@
   - 使用 ModelScope CLI 直接下载哈尔滨资产的示例。
   - API 快速检查命令（包含哈尔滨示例）。
 - 验证：重新下载 README.md，确认哈尔滨新区版本、结构、容量和任务说明均已写入。
+
+
+## 2026-07-01 检查下游专题结果可视化并修复 month 参数问题
+
+- 用户反馈：专题结果可视化看起来不对。
+- 抽样检查（以 `patch_000019` 为例）：
+  - `building_extraction`：返回的是 construction 旧任务的概率热力图，不是建筑物二值掩膜。
+  - `land_use_classification`：返回的是 farmland 旧任务的类别索引图，整片绿色，语义与“土地利用分类”不符。
+  - `change_detection`：返回的是 land_conversion 旧任务结果，颜色/样式与预期不一致。
+  - `land_cover_classification` / `water_extraction`：任务结果接口没有预生成结果，返回 404。
+- 发现的问题：
+  1. **API 参数不匹配**：`/regions/{region_id}/patches/{patch_id}/tasks/{task_type}/result` 只接受 `period`，但前端通常传 `month` / `before_month` / `after_month`，导致 `period` 为空，代码会随机匹配第一个 `{patch_id}_*.png` 文件，返回错误时间/错误文件。
+  2. **任务语义不匹配**：哈尔滨新区新 5 类专题（`change_detection`、`building_extraction`、`land_use_classification`、`land_cover_classification`、`water_extraction`）在 `config.yaml` 中被临时映射到旧任务目录（`construction`、`farmland`、`land_conversion`），导致返回的结果图名义和实际语义不一致。
+  3. **土地覆盖/水体没有预生成结果**：这两个任务是系统预训练模型，原本就走 `/models/{task_id}/infer` 实时推理，任务结果接口没有实现 fallback。
+  4. **可视化风格不一致**：旧结果图是概率热力图/类别索引图，README 中写的是红前景白背景的二值图，说明与实现不一致。
+- 已修复（本次）：
+  - 在 `app/routers/tasks.py` 的 `get_task_result` 中新增 `month`、`before_month`、`after_month` 查询参数。
+  - 当 `period` 未指定时，单期任务自动使用 `month`，变化检测任务自动拼接 `before_month` 和 `after_month`。
+  - 更新 `docs/API.md` 示例，使用 `month` / `before_month` / `after_month`。
+  - 重启服务并验证：传 `month=2025-10` 的 building_extraction 结果与传 `period=2025-10` 完全一致；传 `before_month`/`after_month` 的变化检测返回了正确的对应周期文件。
+- 仍需解决：
+  - `building_extraction`、`land_use_classification`、`change_detection` 的预计算结果来自旧任务，语义不匹配。要得到真正符合新专题的结果，需要：
+    - 用新的标注数据重新训练专题头；或
+    - 对 `building_extraction` 等单类别任务直接采用系统预训练模型 `/models/{task_id}/infer` 实时推理并缓存。
+  - `land_cover_classification` / `water_extraction` 若前端需要走任务结果接口，需要在该接口中为 `versions: {}` 的任务 fallback 到系统模型推理。
+- 单元测试：`pytest -q -m "not slow"` → `100 passed, 5 deselected`。
+- 已推送 GitHub：`00d79cb`。
