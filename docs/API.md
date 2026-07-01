@@ -831,18 +831,22 @@ GET /regions/{region_id}/patches/{patch_id}/tasks/{task_type}/result?format=png&
 |------|------|------|--------|------|
 | `format` | string | 否 | `png` | `png` 返回图片，`npy` 返回原始数组 |
 | `version` | string | 否 | `v1` | 版本号 |
-| `period` | string | 否 | - | 时间周期（V2 任务需要），如 `2025-04_vs_2025-06` |
+| `period` | string | 否 | - | 时间周期，如 `2025-04_vs_2025-06`；若已传 `period`，则优先使用 |
+| `month` | string | 否 | - | 单期任务（建筑物提取、土地利用分类等）的月份，如 `2025-10` |
+| `before_month` | string | 否 | - | 变化检测任务的起始月份 |
+| `after_month` | string | 否 | - | 变化检测任务的结束月份 |
 
 **curl 示例**:
 ```bash
-# V1 单期结果
-curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/tasks/building_extraction/result?format=png&version=v1" -o /tmp/be_patch_000000.png
-curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/tasks/land_use_classification/result?format=png&version=v1" -o /tmp/lu_patch_000000.png
+# 单期结果（传 month）
+curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/tasks/building_extraction/result?format=png&version=v1&month=2025-10" -o /tmp/be_patch_000000.png
+curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/tasks/land_use_classification/result?format=png&version=v1&month=2025-10" -o /tmp/lu_patch_000000.png
 
-# V2 变化检测结果
+# 变化检测结果（传 before_month / after_month）
+curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/tasks/change_detection/result?format=png&version=v1&before_month=2025-04&after_month=2025-06" -o /tmp/cd_patch_000000.png
+
+# 也可以直接传 period
 curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/tasks/change_detection/result?format=png&version=v1&period=2025-04_vs_2025-06" -o /tmp/cd_patch_000000.png
-curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/tasks/building_extraction/result?format=png&version=v2&period=2025-04_vs_2025-06" -o /tmp/be_v2_patch_000000.png
-curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/tasks/land_use_classification/result?format=png&version=v2&period=2025-04_vs_2025-06" -o /tmp/lu_v2_patch_000000.png
 ```
 
 **成功响应**:

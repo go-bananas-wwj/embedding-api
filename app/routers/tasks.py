@@ -172,20 +172,45 @@ async def get_task_result(
     ),
     period: Optional[str] = Query(
         None,
-        description="Comparison period for time-series tasks, e.g. 2025-04_vs_2025-06.",
+        description="对比周期，变化检测任务使用，例如 2025-04_vs_2025-06。",
         examples=["2025-04_vs_2025-06"],
+    ),
+    month: Optional[str] = Query(
+        None,
+        description="单期任务（建筑物提取、土地利用分类等）的月份，例如 2025-04。",
+        examples=["2025-04"],
+    ),
+    before_month: Optional[str] = Query(
+        None,
+        description="变化检测任务的起始月份，例如 2025-04。",
+        examples=["2025-04"],
+    ),
+    after_month: Optional[str] = Query(
+        None,
+        description="变化检测任务的结束月份，例如 2025-06。",
+        examples=["2025-06"],
     ),
 ):
     """获取某个 Patch 在指定任务下的结果。
 
     用于在地图上点击 Patch 后展示变化检测、建筑物提取等监测结果图片。
     支持 `png` 和 `npy` 两种格式，返回 PNG 图片或二进制 NumPy 数组。
+    单期任务请传 `month`；变化检测任务请传 `before_month` 和 `after_month`。
     注意：Swagger UI 对二进制响应支持有限，建议在浏览器或 `<img>` 标签中查看图片。
     """
     if format not in ("png", "npy"):
         raise HTTPException(
             status_code=422, detail=f"Invalid format '{format}'. Use: png, npy"
         )
+
+    # Derive period from month / before+after when not explicitly provided.
+    effective_period = period
+    if not effective_period:
+        if task_type == "change_detection":
+            if before_month and after_month:
+                effective_period = f"{before_month}_vs_{after_month}"
+        elif month:
+            effective_period = month
 
     config = get_config()
     if not config.region_exists(region_id):
@@ -201,7 +226,7 @@ async def get_task_result(
     try:
         if format == "npy":
             path = DataService.get_task_result_path(
-                region_id, patch_id, task_type, "npy", version, period
+                region_id, patch_id, task_type, "npy", version, effective_period
             )
             if path:
                 return FileResponse(
@@ -212,13 +237,13 @@ async def get_task_result(
         else:
             # Try summary image first, then fallback to per-patch tile
             path = DataService.get_task_result_path(
-                region_id, patch_id, task_type, "png", version, period
+                region_id, patch_id, task_type, "png", version, effective_period
             )
             if path and path.lower().endswith(".png"):
                 return FileResponse(path, media_type="image/png")
             # Fallback: per-patch tile image (results/.../tiles/patch_*.png)
             path = DataService.get_task_result_path(
-                region_id, patch_id, task_type, "tile", version, period
+                region_id, patch_id, task_type, "tile", version, effective_period
             )
             if path and path.lower().endswith(".png"):
                 return FileResponse(path, media_type="image/png")
