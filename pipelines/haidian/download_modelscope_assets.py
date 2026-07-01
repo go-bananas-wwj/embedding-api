@@ -33,24 +33,46 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Overwrite existing files under the target directory.",
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the ModelScope download command without downloading files.",
+    )
     return parser.parse_args()
 
 
-def run(cmd: list[str]) -> None:
+def masked_command(cmd: list[str]) -> list[str]:
     printable = list(cmd)
     for idx, item in enumerate(printable[:-1]):
         if item == "--token":
             printable[idx + 1] = "***"
+    return printable
+
+
+def run(cmd: list[str], dry_run: bool = False) -> None:
+    printable = masked_command(cmd)
     print("+", " ".join(printable))
+    if dry_run:
+        return
     subprocess.run(cmd, check=True)
 
 
-def download_with_cli(repo: str, cache_dir: Path) -> Path:
+def download_with_cli(repo: str, prefix: str, cache_dir: Path, dry_run: bool) -> Path:
     token = os.environ.get("MODELSCOPE_TOKEN")
-    cmd = ["modelscope", "download", "--dataset", repo, "--local_dir", str(cache_dir)]
+    include = [f"{prefix.rstrip('/')}/**"]
+    cmd = [
+        "modelscope",
+        "download",
+        "--dataset",
+        repo,
+        "--include",
+        *include,
+        "--local_dir",
+        str(cache_dir),
+    ]
     if token:
         cmd.extend(["--token", token])
-    run(cmd)
+    run(cmd, dry_run=dry_run)
     return cache_dir
 
 
@@ -71,7 +93,9 @@ def copy_tree(src: Path, dst: Path, force: bool) -> None:
 def main() -> None:
     args = parse_args()
     args.cache_dir.mkdir(parents=True, exist_ok=True)
-    cache_root = download_with_cli(args.repo, args.cache_dir)
+    cache_root = download_with_cli(args.repo, args.prefix, args.cache_dir, args.dry_run)
+    if args.dry_run:
+        return
     src = cache_root / args.prefix
     copy_tree(src, args.target, args.force)
     print(f"Haidian V1 assets installed into {args.target}")

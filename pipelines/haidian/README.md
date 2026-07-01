@@ -52,6 +52,14 @@ python pipelines/haidian/download_modelscope_assets.py \
   --target .
 ```
 
+The helper downloads only `haidian/v1/api_ready/**`, which is the deployable
+subset.  It does not download the large `haidian/v1/archive` training-data
+archive.  To inspect the generated ModelScope command without downloading:
+
+```bash
+python pipelines/haidian/download_modelscope_assets.py --dry-run
+```
+
 After download, start the API normally:
 
 ```bash
@@ -101,4 +109,3 @@ curl -s "http://localhost:9061/regions/haidian/patches/patch_000000/embedding?fo
 curl -s "http://localhost:9061/regions/haidian/patches/patch_000000/tasks/building_extraction/result?format=png&version=v1" -o /tmp/haidian_building.png
 curl -s "http://localhost:9061/regions/haidian/patches/patch_000000/tasks/road_extraction/prediction?version=v1" -o /tmp/haidian_road.npy
 ```
-
