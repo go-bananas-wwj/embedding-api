@@ -449,16 +449,15 @@ class DataService:
                     path = _resolve_path(str(tiles_dir), f"{patch_id}_{period}.png")
                     if path:
                         return path
-                else:
-                    # v1 fallback: dynamic discovery in {base}/tiles/ only when no
-                    # period is requested, so an explicit period is honored.
-                    tiles_dir = Path(base) / "tiles"
-                    path = DataService._find_first_file(str(tiles_dir), f"{patch_id}_*.png")
-                    if path:
-                        return path
-                    path = _resolve_path(str(tiles_dir), f"{patch_id}.png")
-                    if path:
-                        return path
+                # Fallback: per-patch tile without period (Haidian V1 layout and
+                # any other result set where each patch has a single tile).
+                tiles_dir = Path(base) / "tiles"
+                path = DataService._find_first_file(str(tiles_dir), f"{patch_id}_*.png")
+                if path:
+                    return path
+                path = _resolve_path(str(tiles_dir), f"{patch_id}.png")
+                if path:
+                    return path
         return None
 
     @staticmethod

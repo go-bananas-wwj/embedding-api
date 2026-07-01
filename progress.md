@@ -270,3 +270,27 @@
   - `change_detection` 仍返回变化概率热力图。
   - `pytest -q -m "not slow"` → `100 passed, 5 deselected`。
 - 已推送 GitHub：`bc17e36`。
+
+
+## 2026-07-01 海淀区下游任务部署上线
+
+- 目标：让海淀区 `building_extraction`、`road_extraction`、`construction`、`construction_joint` 四个任务的结果接口可用。
+- 资产来源：ModelScope `WeijieWu/xuannv_embdding_api/haidian/v1/api_ready`，总大小 9.47 GB，包含：
+  - embedding（7.57 GB，本机已存在）
+  - P2A embedding 模型（1.79 GB）
+  - 4 个任务头 checkpoint（约 7 MB）
+  - 4 个任务的 predictions + labels + results/tiles（约 100 MB）
+- 部署方式（方案 A）：只下载缺失的模型和任务结果，跳过已存在的 embedding。
+- 实际执行：
+  - 使用 `modelscope download` 分别下载 `models/haidian/**` 和 `data/haidian/tasks/**` 到缓存目录。
+  - 复制到 `models/haidian/v1/` 和 `data/haidian/tasks/`。
+  - 在 `app/services/data_service.py` 的 tile 路径解析中增加 `{base}/tiles/{patch_id}.png` 的 fallback，使海淀区 per-patch tile 能被正确返回。
+  - 重启服务并验证：4 个任务 `GET /regions/haidian/patches/patch_000000/tasks/{task}/result?format=png&before_month=202512&after_month=202605` 均返回 200 且可视化正确（红前景白背景掩膜）。
+  - `pytest -q -m "not slow"` → `100 passed, 5 deselected`。
+  - 更新 `docs/API.md` 补充海淀区示例。
+- 磁盘/内存评估：
+  - `/workspace` 可用 198 GB，新增下载约 1.9 GB，完全足够。
+  - 推理峰值显存 < 2 GB（本次未触发推理）。
+- 注意事项：
+  - 海淀区 `land_use_classification` / `land_cover_classification` / `water_extraction` 暂无预训练分类模型，仍返回 404。
+  - `data/` 和 `models/` 目录被 `.gitignore` 忽略，模型/结果文件不进入 git，只在部署机存在。

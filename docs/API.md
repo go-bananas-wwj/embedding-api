@@ -861,6 +861,14 @@ curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/tasks/chan
 **错误响应**:
 - `404`: 该 Patch 在该任务下没有结果
 
+> **海淀区 V1 示例**（P2A embedding，任务结果为单张 per-patch tile）：
+> ```bash
+> curl -s "http://60.31.21.42:22065/regions/haidian/patches/patch_000000/tasks/building_extraction/result?format=png&before_month=202512&after_month=202605" -o /tmp/hd_be.png
+> curl -s "http://60.31.21.42:22065/regions/haidian/patches/patch_000000/tasks/road_extraction/result?format=png&before_month=202512&after_month=202605" -o /tmp/hd_re.png
+> curl -s "http://60.31.21.42:22065/regions/haidian/patches/patch_000000/tasks/construction/result?format=png&before_month=202512&after_month=202605" -o /tmp/hd_con.png
+> curl -s "http://60.31.21.42:22065/regions/haidian/patches/patch_000000/tasks/construction_joint/result?format=png&before_month=202512&after_month=202605" -o /tmp/hd_conjoint.png
+> ```
+>
 > **注意**: 该接口现在对分类任务优先返回 **xuannv_show 预生成的语义掩膜 tile**，顺序如下：
 > - `building_extraction` → `/workspace/xuannv_show/static_assets/data/seg_tiles/building_extraction/{month}/{patch_id}.png`
 > - `land_use_classification` → `/workspace/xuannv_show/static_assets/data/seg_tiles/dynamic_world/{month}/{patch_id}.png`
