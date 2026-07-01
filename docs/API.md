@@ -358,7 +358,7 @@ curl -s "http://60.31.21.42:22065/regions"
 | `patch_count` | int | 该区域包含的 Patch 总数 |
 | `tasks` | string[] | 该区域支持的下游任务列表 |
 
-**注意**: 海淀区 `v1` 使用 xuannv P2A 模型，embedding 月份为 `202512` 至 `202605`。当前可用任务包括 `building_extraction`、`road_extraction`、`construction` 和 `construction_joint`；`land_cover_classification` 与 `water_extraction` 仍保留任务入口，但没有预生成结果。
+**注意**: 海淀区 `v1` 使用 xuannv P2A 模型，embedding 月份为 `202512` 至 `202605`。当前可用任务包括 `building_extraction`、`road_extraction`、`construction`、`construction_joint` 和 `water_extraction`；`land_use_classification` 与 `land_cover_classification` 仍保留任务入口，但没有预生成结果。
 
 ---
 
@@ -803,7 +803,7 @@ curl -s "http://60.31.21.42:22065/regions/harbin/tasks/land_use_classification/s
 
 **业务含义**: `positive_patches` / `total_patches` 就是异常检出率。例如 31/424 ≈ 7.3% 的 Patch 发现了建筑工地。
 
-> **注意**: `land_cover_classification` 和 `water_extraction` 当前 `versions` 为空，调用摘要接口会返回 `404`。
+> **注意**: 对于哈尔滨新区，`land_cover_classification` 和 `water_extraction` 当前 `versions` 为空，调用摘要接口会返回 `404`。对于海淀区，`land_use_classification` 和 `land_cover_classification` 的 `versions` 为空；`water_extraction` V1 已可查询单 Patch 结果图，但由于缺少 `labels/meta.json`，调用其摘要接口仍会返回 `404`。
 
 ---
 
