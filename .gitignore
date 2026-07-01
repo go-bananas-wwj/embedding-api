@@ -30,6 +30,8 @@ env/
 *~
 .DS_Store
 
+.worktrees/
+
 # Runtime files
 server.log
 server.pid
