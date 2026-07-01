@@ -327,3 +327,14 @@
   - 生成 4×5 随机结果预览图 `test_output/hd_api_test/sample_grid.png`。
   - 重新生成无底图的全域马赛克 `test_output/hd_v3/full_region_all_tasks.png`。
   - 服务重启后 `pytest -q -m "not slow"` 仍为 `100 passed, 5 deselected`。
+
+- 2026-07-01 再次替换为新版 mask-only 归档
+  - 发现之前 OSM-assisted 诊断图版仍带卫星底图，用户上传了新版 `haidian/v1/reports/monthly_mask_only_patch_tiles/` 归档。
+  - 新增脚本 `scripts/replace_haidian_results_from_mask_only_archives.py`：
+    - 下载 6 个月 tar（202512–202605），共约 48 MB。
+    - 每个 PNG 为 256×286（顶部标题栏 + 256×256 掩膜内容），裁剪底部 256×256 并缩放为 128×128。
+    - 任务映射：`construction_site_extraction` → `construction`，其余同名。
+  - 替换 `data/haidian/tasks/` 下 4 任务的结果 tile（4×6×320 = 7680 张）。
+  - 重启服务，随机 API 测试 20 次全部返回 128×128 PNG。
+  - 生成新的全域马赛克 `test_output/hd_v4/full_region_all_tasks.png` 和随机结果预览 `test_output/hd_api_test/sample_grid.png`。
+  - `pytest -q -m "not slow"` 仍为 `100 passed, 5 deselected`。
