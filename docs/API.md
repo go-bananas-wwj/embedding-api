@@ -861,7 +861,7 @@ curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/tasks/chan
 **错误响应**:
 - `404`: 该 Patch 在该任务下没有结果
 
-> **海淀区 V1 示例**（OSM-assisted 诊断图后处理面板，已按月份归档）：
+> **海淀区 V1 示例**（mask-only 结果，已按月份归档）：
 > 单期任务使用 `month` 参数指定 6 位月份（如 `202605`），`change_detection` 才使用 `before_month`/`after_month`。
 > ```bash
 > curl -s "http://60.31.21.42:22065/regions/haidian/patches/patch_000000/tasks/building_extraction/result?format=png&month=202605" -o /tmp/hd_be.png
@@ -869,7 +869,9 @@ curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/tasks/chan
 > curl -s "http://60.31.21.42:22065/regions/haidian/patches/patch_000000/tasks/construction/result?format=png&month=202605" -o /tmp/hd_con.png
 > curl -s "http://60.31.21.42:22065/regions/haidian/patches/patch_000000/tasks/water_extraction/result?format=png&month=202605" -o /tmp/hd_water.png
 > ```
-> 返回结果为 128×128 PNG，内容取自 `monthly_mask_only_patch_tiles` 归档，无卫星底图，仅保留红色前景掩膜。
+> 返回结果为 128×128 PNG，无卫星底图，仅保留红色前景掩膜。
+> `building_extraction`、`road_extraction`、`water_extraction` 来自 `monthly_mask_only_patch_tiles`；
+> `construction` 来自 `construction_model_only_oracle_threshold`。
 >
 > **注意**: 该接口现在对分类任务优先返回 **xuannv_show 预生成的语义掩膜 tile**，顺序如下：
 > - `building_extraction` → `/workspace/xuannv_show/static_assets/data/seg_tiles/building_extraction/{month}/{patch_id}.png`

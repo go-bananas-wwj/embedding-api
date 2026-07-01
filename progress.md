@@ -338,3 +338,12 @@
   - 重启服务，随机 API 测试 20 次全部返回 128×128 PNG。
   - 生成新的全域马赛克 `test_output/hd_v4/full_region_all_tasks.png` 和随机结果预览 `test_output/hd_api_test/sample_grid.png`。
   - `pytest -q -m "not slow"` 仍为 `100 passed, 5 deselected`。
+
+- 2026-07-01 替换 construction 为 model-only oracle threshold 版
+  - 用户反馈施工地效果不佳，使用 `haidian/v1/reports/construction_model_only_oracle_threshold/archives/haidian_v1_construction_model_only_no_osm_oracle_threshold.zip` 重新替换。
+  - 新增脚本 `scripts/replace_haidian_construction_from_model_only.py`：
+    - 从 zip 中解压 `mask_only/patch_XXXXXX_mask_model_only.png`（128×128，红底白底）。
+    - 备份并清空旧 construction 结果，将 320 张 mask 复制到 `results/tiles/` 及 6 个月份子目录。
+  - 重启服务，随机 API 测试 5 次全部返回 200。
+  - 重新生成全域马赛克 `test_output/hd_v5/full_region_all_tasks.png`。
+  - `pytest -q -m "not slow"` 仍为 `100 passed, 5 deselected`。
