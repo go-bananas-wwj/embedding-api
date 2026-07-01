@@ -869,7 +869,7 @@ curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/tasks/chan
 > curl -s "http://60.31.21.42:22065/regions/haidian/patches/patch_000000/tasks/construction/result?format=png&month=202605" -o /tmp/hd_con.png
 > curl -s "http://60.31.21.42:22065/regions/haidian/patches/patch_000000/tasks/water_extraction/result?format=png&month=202605" -o /tmp/hd_water.png
 > ```
-> 返回结果为 128×128 PNG，内容取自 OSM-assisted 诊断图的“后处理结果”面板。
+> 返回结果为 128×128 PNG，内容取自 OSM-assisted 诊断图的“后处理结果”面板，并已去除底图，仅保留前景掩膜（建筑/道路/施工地为红色，水体为蓝色）。
 >
 > **注意**: 该接口现在对分类任务优先返回 **xuannv_show 预生成的语义掩膜 tile**，顺序如下：
 > - `building_extraction` → `/workspace/xuannv_show/static_assets/data/seg_tiles/building_extraction/{month}/{patch_id}.png`

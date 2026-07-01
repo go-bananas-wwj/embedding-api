@@ -14,8 +14,10 @@ New archive tasks are mapped to the existing on-disk task IDs:
 
 The diagnostic PNG is a 1312x342 strip containing panels of approximately
 256x256 with their top-left y at 64 and x positions [16, 278, 540, 802, 1064].
-Panel index 3 (the 4th panel, labeled "后处理结果") is fully contained and is
-cropped and resized to 128x128.
+Panel index 3 (the 4th panel, labeled "后处理结果") is fully contained.
+The post-processed panel is converted to a binary mask: foreground pixels in
+the task color (red for building/road/construction, blue for water) on a white
+background, then resized to 128x128.
 
 Fallback tiles in `results/tiles/` are hardlinked (or copied) from the default
 period `202605` after all months have been processed.
@@ -33,6 +35,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+import numpy as np
 from PIL import Image
 
 # Geometry of the diagnostic strip, verified from archive samples.
@@ -165,8 +168,30 @@ def clear_old_tiles(out_root: Path, dry_run: bool) -> None:
         print(f"[clear] {task}: deleted {len(png_files)} old tiles")
 
 
-def extract_post_processed_panel(tar: tarfile.TarFile, member: tarfile.TarInfo) -> Image.Image:
-    """Extract a diagnostic strip member and return the resized post-processed panel."""
+def _panel_to_mask(panel: Image.Image, task: str) -> Image.Image:
+    """Convert the post-processed panel to a binary mask on white background."""
+    arr = np.array(panel.convert("RGB"))
+    hsv = np.array(panel.convert("HSV"))
+    hue, sat, val = hsv[:, :, 0], hsv[:, :, 1], hsv[:, :, 2]
+
+    if task == "water_extraction":
+        # Blue foreground used in the water post-processed panel.
+        mask = ((hue > 90) & (hue < 140) & (sat > 50) & (val > 50))
+        fg = np.array([0, 0, 255], dtype=np.uint8)
+    else:
+        # Red foreground used in building/road/construction panels.
+        mask = (((hue < 15) | (hue > 165)) & (sat > 50) & (val > 50))
+        fg = np.array([255, 0, 0], dtype=np.uint8)
+
+    out = np.full_like(arr, 255)
+    out[mask] = fg
+    return Image.fromarray(out)
+
+
+def extract_post_processed_mask(
+    tar: tarfile.TarFile, member: tarfile.TarInfo, task: str
+) -> Image.Image:
+    """Extract a diagnostic strip member and return the resized binary mask."""
     f = tar.extractfile(member)
     if f is None:
         raise ValueError(f"Member {member.name} is not a regular file")
@@ -180,8 +205,8 @@ def extract_post_processed_panel(tar: tarfile.TarFile, member: tarfile.TarInfo) 
     x = PANEL_XS[POST_PROCESS_PANEL_INDEX]
     y = PANEL_Y
     panel = img.crop((x, y, x + PANEL_SIZE[0], y + PANEL_SIZE[1]))
-    panel = panel.resize(OUTPUT_SIZE, RESAMPLE)
-    return panel
+    mask = _panel_to_mask(panel, task)
+    return mask.resize(OUTPUT_SIZE, Image.Resampling.NEAREST)
 
 
 def ensure_water_extraction_dirs(out_root: Path, dry_run: bool) -> None:
@@ -245,8 +270,8 @@ def process_archives(archives: List[Path], out_root: Path, dry_run: bool) -> int
                     continue
 
                 out_dir.mkdir(parents=True, exist_ok=True)
-                panel = extract_post_processed_panel(tar, member)
-                panel.save(out_path, "PNG")
+                mask = extract_post_processed_mask(tar, member, task)
+                mask.save(out_path, "PNG")
                 processed += 1
 
         print(f"[archive] Finished {archive_path.name}")

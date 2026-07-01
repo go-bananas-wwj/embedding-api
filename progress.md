@@ -319,3 +319,11 @@
   - 2×2 综合预览：`test_output/hd_v2/full_region_all_tasks.png`（3072×3132，带中文标题与 footer）。
 - 文档更新：`docs/API.md` 海淀区 V1 示例更新为 OSM-assisted 诊断图后处理面板说明；`progress.md` 追加本记录。
 - 提交非数据变更：`config.yaml`、`app/services/data_service.py`、`scripts/replace_haidian_results_from_osm_archives.py`、`docs/API.md`、`progress.md`。
+
+- 2026-07-01 后续调整：去除结果底图、随机 API 测试
+  - 将 `scripts/replace_haidian_results_from_osm_archives.py` 改为从诊断图后处理面板提取前景掩膜（建筑/道路/施工地为红色，水体为蓝色），背景设为白色，不再叠加卫星底图。
+  - 重新生成海淀区结果 tile（4 任务 × 6 个月 × 320 patches）和 fallback。
+  - 对每个任务接口随机调用 5 次（随机 patch_id 与月份），共 20 张结果图保存到 `test_output/hd_api_test/`。
+  - 生成 4×5 随机结果预览图 `test_output/hd_api_test/sample_grid.png`。
+  - 重新生成无底图的全域马赛克 `test_output/hd_v3/full_region_all_tasks.png`。
+  - 服务重启后 `pytest -q -m "not slow"` 仍为 `100 passed, 5 deselected`。
