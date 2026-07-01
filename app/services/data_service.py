@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from app.config import get_config
+from app.services.time_utils import normalize_month, normalize_period
 
 logger = logging.getLogger(__name__)
 
@@ -283,29 +284,31 @@ class DataService:
                 if fmt not in supported_formats and fmt != "cache":
                     continue
                 template = emb_config.get("template", "{patch_id}.{fmt}")
-                # Build format kwargs - include month if template needs it
-                format_kwargs = {"patch_id": patch_id, "fmt": fmt}
-                if month:
-                    format_kwargs["month"] = month
-                path = None
-                try:
-                    relative = template.format(**format_kwargs)
-                    path = _resolve_path(base, relative)
-                    if path:
-                        return path
-                except KeyError:
-                    # Template requires month but none provided - try fallback below
-                    pass
-                # Try alternative templates for backward compat
-                alt_templates = emb_config.get("alt_templates", [])
-                for alt in alt_templates:
+                # Try each recognized month format (YYYY-MM / YYYYMM / YYYYMMDD)
+                # so callers do not need region-specific date handling.
+                month_candidates = normalize_month(month) if month else [None]
+                for candidate in month_candidates:
+                    format_kwargs = {"patch_id": patch_id, "fmt": fmt}
+                    if candidate:
+                        format_kwargs["month"] = candidate
                     try:
-                        relative = alt.format(**format_kwargs)
+                        relative = template.format(**format_kwargs)
+                        path = _resolve_path(base, relative)
+                        if path:
+                            return path
                     except KeyError:
-                        continue
-                    path = _resolve_path(base, relative)
-                    if path:
-                        return path
+                        # Template requires month but none provided - try fallback below
+                        pass
+                    # Try alternative templates for backward compat
+                    alt_templates = emb_config.get("alt_templates", [])
+                    for alt in alt_templates:
+                        try:
+                            relative = alt.format(**format_kwargs)
+                        except KeyError:
+                            continue
+                        path = _resolve_path(base, relative)
+                        if path:
+                            return path
                 # Fallback: for patch-subdir structure (haidian), find first file in patch dir
                 patch_dir = Path(base) / patch_id
                 if patch_dir.is_dir():
@@ -384,16 +387,21 @@ class DataService:
         if not ver:
             return None
 
+        # Normalize period/month so both YYYY-MM and YYYYMM work across regions.
+        period_candidates = normalize_period(period) if period else [None]
+
         if format_type == "png":
             base = ver.get("results")
             if base:
-                if period:
+                for p in period_candidates:
+                    if p is None:
+                        continue
                     # Per-patch v2 structure: {base}/{period}/{patch_id}.png
-                    path = _resolve_path(base, f"{period}/{patch_id}.png")
+                    path = _resolve_path(base, f"{p}/{patch_id}.png")
                     if path:
                         return path
                     # Per-patch v1 structure: {base}/{patch_id}_{period}.png
-                    path = _resolve_path(base, f"{patch_id}_{period}.png")
+                    path = _resolve_path(base, f"{patch_id}_{p}.png")
                     if path:
                         return path
                 # No period-wide mosaic fallback; result must be patch-specific.
@@ -402,13 +410,15 @@ class DataService:
         elif format_type == "npy":
             base = ver.get("predictions") or ver.get("results")
             if base:
-                if period:
+                for p in period_candidates:
+                    if p is None:
+                        continue
                     # v2 structure: {base}/{period}/{patch_id}.npy
-                    path = _resolve_path(base, f"{period}/{patch_id}.npy")
+                    path = _resolve_path(base, f"{p}/{patch_id}.npy")
                     if path:
                         return path
                     # v1 structure: {base}/{patch_id}_{period}.npy
-                    path = _resolve_path(base, f"{patch_id}_{period}.npy")
+                    path = _resolve_path(base, f"{patch_id}_{p}.npy")
                     if path:
                         return path
                 # Dynamic discovery of per-patch prediction files
@@ -425,8 +435,10 @@ class DataService:
         elif format_type == "label":
             base = ver.get("labels")
             if base:
-                if period:
-                    period_dir = Path(base) / period
+                for p in period_candidates:
+                    if p is None:
+                        continue
+                    period_dir = Path(base) / p
                     path = _resolve_path(str(period_dir), f"{patch_id}.npy")
                     if path:
                         return path
@@ -439,14 +451,16 @@ class DataService:
         elif format_type == "tile":
             base = ver.get("results")
             if base:
-                if period:
+                for p in period_candidates:
+                    if p is None:
+                        continue
                     # v2 structure: {base}/{period}/tiles/{patch_id}.png
-                    path = _resolve_path(base, f"{period}/tiles/{patch_id}.png")
+                    path = _resolve_path(base, f"{p}/tiles/{patch_id}.png")
                     if path:
                         return path
                     # v1 structure: {base}/tiles/{patch_id}_{period}.png
                     tiles_dir = Path(base) / "tiles"
-                    path = _resolve_path(str(tiles_dir), f"{patch_id}_{period}.png")
+                    path = _resolve_path(str(tiles_dir), f"{patch_id}_{p}.png")
                     if path:
                         return path
                 # Fallback: per-patch tile without period (Haidian V1 layout and
@@ -485,17 +499,19 @@ class DataService:
 
         # Try labels directory first
         labels_base = ver.get("labels")
+        period_candidates = normalize_period(period) if period else [None]
         if labels_base:
-            if period:
-                meta_path = _resolve_path(labels_base, f"{period}/meta.json")
-            else:
-                meta_path = _resolve_path(labels_base, "meta.json")
-            if meta_path:
-                try:
-                    with open(meta_path, "r", encoding="utf-8") as f:
-                        return json.load(f)
-                except (json.JSONDecodeError, OSError) as e:
-                    logger.warning(f"Failed to load meta.json: {e}")
+            for p in period_candidates:
+                if p:
+                    meta_path = _resolve_path(labels_base, f"{p}/meta.json")
+                else:
+                    meta_path = _resolve_path(labels_base, "meta.json")
+                if meta_path:
+                    try:
+                        with open(meta_path, "r", encoding="utf-8") as f:
+                            return json.load(f)
+                    except (json.JSONDecodeError, OSError) as e:
+                        logger.warning(f"Failed to load meta.json: {e}")
 
         # Try summary.json in parent directory
         try:
@@ -508,8 +524,11 @@ class DataService:
                     if summary_path.exists():
                         with open(summary_path, "r", encoding="utf-8") as f:
                             data = json.load(f)
-                            if period and period in data:
-                                return data[period].get(task_type)
+                            for p in period_candidates:
+                                if p and p in data:
+                                    found = data[p].get(task_type)
+                                    if found is not None:
+                                        return found
                             if task_type in data:
                                 return data[task_type]
         except (json.JSONDecodeError, OSError) as e:

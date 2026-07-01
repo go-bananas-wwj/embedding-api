@@ -47,6 +47,7 @@ models/
 
 # User-generated annotations and trained models
 users/
+system_models/
 
 # Test outputs
 test_output/

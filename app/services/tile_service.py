@@ -6,6 +6,8 @@ import stat
 from pathlib import Path
 from typing import Optional
 
+from app.services.time_utils import normalize_period
+
 
 class TileService:
     """Service for serving map tiles.
@@ -96,7 +98,8 @@ class TileService:
         # Build list of tiles directories to scan
         tiles_dirs = []
         if period:
-            tiles_dirs.append(Path(base) / period / "tiles")
+            for p in normalize_period(period):
+                tiles_dirs.append(Path(base) / p / "tiles")
         tiles_dirs.append(Path(base) / "tiles")
 
         result = []

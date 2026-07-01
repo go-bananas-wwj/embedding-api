@@ -13,6 +13,7 @@ from rasterio.merge import merge as rio_merge
 
 from app.config import get_config
 from app.services.data_service import DataNotFoundError, DataValidationError
+from app.services.time_utils import normalize_quarter_date
 
 logger = logging.getLogger(__name__)
 
@@ -31,35 +32,24 @@ _SENSOR_RGB = {
 }
 
 
-def _resolve_period(date: str) -> str:
-    """Map YYYY-MM to quarterly filename, or return exact filename stem."""
-    if "Q" in date:
-        return date
-    if "-" in date:
-        year, month = date.split("-", 1)
-        try:
-            quarter = (int(month) - 1) // 3 + 1
-            return f"{year}Q{quarter}"
-        except ValueError:
-            pass
-    return date
-
-
 def _get_raw_tiff_path(
     region_id: str,
     patch_id: str,
     sensor_type: str,
-    period: str,
+    periods: List[str],
 ) -> Optional[str]:
     """Resolve a per-patch raw TIFF path.
 
     Layout: /workspace/raw/{region_id}/{sensor_type}/{patch_id}/{period}.tif
+    Tries each candidate period so that YYYY-MM, YYYYMM and YYYYMMDD inputs
+    can all locate the underlying scene file.
     """
-    path = os.path.join(
-        RAW_ROOT, region_id, sensor_type, patch_id, f"{period}.tif"
-    )
-    if os.path.exists(path) and os.path.isfile(path):
-        return path
+    for period in periods:
+        path = os.path.join(
+            RAW_ROOT, region_id, sensor_type, patch_id, f"{period}.tif"
+        )
+        if os.path.exists(path) and os.path.isfile(path):
+            return path
     return None
 
 
@@ -98,13 +88,19 @@ def build_mosaic(
     if fmt not in ("png", "tif", "tiff"):
         raise DataValidationError("format must be 'png' or 'tif'")
 
-    period = _resolve_period(date)
+    periods = normalize_quarter_date(date)
+    if not periods:
+        raise DataValidationError(f"Invalid date format: '{date}'")
+    # Use the quarterly form for cache naming when available, otherwise the
+    # first candidate, so cache keys remain deterministic.
+    cache_period = next((p for p in periods if "Q" in p), periods[0])
+
     allowed_ids = set(patch_ids) if patch_ids else None
     cache_suffix = ""
     if allowed_ids:
         cache_suffix = "_" + "_".join(sorted(allowed_ids))[:64]
     ext = "tif" if fmt in ("tif", "tiff") else "png"
-    cache_path = Path(cache_dir) / f"{region_id}_{sensor_type}_{period}{cache_suffix}.{ext}"
+    cache_path = Path(cache_dir) / f"{region_id}_{sensor_type}_{cache_period}{cache_suffix}.{ext}"
     if cache_path.exists():
         return cache_path.read_bytes(), f"image/{ext}"
 
@@ -119,14 +115,14 @@ def build_mosaic(
             continue
         if allowed_ids is not None and patch_id not in allowed_ids:
             continue
-        path = _get_raw_tiff_path(region_id, patch_id, sensor_type, period)
+        path = _get_raw_tiff_path(region_id, patch_id, sensor_type, periods)
         if path:
             paths.append(path)
 
     if not paths:
         raise DataNotFoundError(
-            f"No raw {sensor_type} images found for {region_id}/{period}; "
-            "check date/sensor_type. Date 'YYYY-MM' is mapped to quarterly files."
+            f"No raw {sensor_type} images found for {region_id}/{date}; "
+            "check date/sensor_type. Supported formats: YYYY-MM, YYYYMM, YYYYMMDD."
         )
 
     with rasterio.Env():
