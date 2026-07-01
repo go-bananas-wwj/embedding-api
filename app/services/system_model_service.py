@@ -62,6 +62,7 @@ def list_system_models(region_id: Optional[str] = None) -> List[Dict[str, Any]]:
     # Unified thematic task IDs -> checkpoint keys in config
     task_aliases = {
         "land_cover_classification": ["worldcover", "dynamic_world"],
+        "land_use_classification": ["dynamic_world"],
         "water_extraction": ["jrc_water"],
         "building_extraction": ["osm_buildings"],
     }
@@ -93,6 +94,7 @@ def list_system_models(region_id: Optional[str] = None) -> List[Dict[str, Any]]:
 def _task_display_name(task_id: str) -> str:
     return {
         "land_cover_classification": "土地覆盖分类",
+        "land_use_classification": "土地利用分类",
         "water_extraction": "水体提取",
         "building_extraction": "建筑物提取",
     }.get(task_id, task_id)
@@ -101,12 +103,13 @@ def _task_display_name(task_id: str) -> str:
 def _task_description(task_id: str) -> str:
     return {
         "land_cover_classification": "WorldCover / Dynamic World 土地覆盖分类",
+        "land_use_classification": "Dynamic World 土地利用分类",
         "water_extraction": "JRC Global Surface Water 水体提取",
         "building_extraction": "OSM 建筑物提取",
     }.get(task_id, "")
 
 
-SYSTEM_TASK_IDS = {"land_cover_classification", "water_extraction", "building_extraction"}
+SYSTEM_TASK_IDS = {"land_cover_classification", "land_use_classification", "water_extraction", "building_extraction"}
 
 
 def is_system_task(task_id: str) -> bool:
@@ -169,6 +172,7 @@ def _resolve_model_path(
 
     alias_map = {
         "land_cover_classification": ["worldcover", "dynamic_world"],
+        "land_use_classification": ["dynamic_world"],
         "water_extraction": ["jrc_water"],
         "building_extraction": ["osm_buildings"],
     }

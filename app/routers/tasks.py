@@ -1,5 +1,6 @@
 """Downstream task router."""
 
+from pathlib import Path
 from typing import Literal, Optional
 from fastapi import APIRouter, HTTPException, Query, Path as PathParam
 from fastapi.responses import FileResponse
@@ -9,6 +10,7 @@ from app.schemas.models import (
     TasksResponse, TaskInfo, TaskSummary, TilesResponse, TileInfo, ErrorResponse,
 )
 from app.services.data_service import DataService, DataServiceError, DataValidationError
+from app.services.system_model_service import infer_system_model, is_system_task
 from app.services.tile_service import TileService
 
 router = APIRouter()
@@ -28,6 +30,53 @@ _VERSION_OPENAPI_EXAMPLES = {
     "v1": {"summary": "V4-based results", "value": "v1"},
     "v2": {"summary": "V5-based results", "value": "v2"},
 }
+
+# Classification tasks whose visualizations are stored in xuannv_show static seg_tiles.
+_XUANNV_SHOW_SEG_TILE_DIR = Path("/workspace/xuannv_show/static_assets/data/seg_tiles")
+_CLASS_TASK_TO_XUANNV_HEAD = {
+    "building_extraction": "building_extraction",
+    "land_use_classification": "dynamic_world",
+    "land_cover_classification": "worldcover",
+    "water_extraction": "jrc_water",
+}
+
+
+def _resolve_classification_tile(
+    region_id: str,
+    task_type: str,
+    patch_id: str,
+    month: str,
+    version: str,
+) -> Optional[str]:
+    """Resolve a semantic classification result tile.
+
+    First look for a pre-generated xuannv_show static seg tile. If not found and
+    the task is a supported system model, run inference on demand and return the
+    generated PNG path.
+    """
+    head = _CLASS_TASK_TO_XUANNV_HEAD.get(task_type)
+    if not head:
+        return None
+
+    static_path = _XUANNV_SHOW_SEG_TILE_DIR / head / month / f"{patch_id}.png"
+    if static_path.exists():
+        return str(static_path)
+
+    if is_system_task(task_type):
+        try:
+            result_path = infer_system_model(
+                region_id=region_id,
+                task_id=task_type,
+                patch_id=patch_id,
+                month=month,
+                version=version,
+                results_dir=Path("system_models/task_results"),
+            )
+            return str(result_path)
+        except FileNotFoundError:
+            return None
+
+    return None
 
 
 @router.get("/regions/{region_id}/tasks", response_model=TasksResponse)
@@ -212,6 +261,11 @@ async def get_task_result(
         elif month:
             effective_period = month
 
+    # Single-month value for classification tasks.
+    class_month = month or (
+        effective_period if effective_period and "_vs_" not in effective_period else None
+    )
+
     config = get_config()
     if not config.region_exists(region_id):
         raise HTTPException(status_code=404, detail=f"Region '{region_id}' not found")
@@ -235,7 +289,15 @@ async def get_task_result(
                     filename=f"{patch_id}_{task_type}_prediction.npy",
                 )
         else:
-            # Try summary image first, then fallback to per-patch tile
+            # Classification tasks: prefer xuannv_show static seg_tiles or system model masks
+            if task_type in _CLASS_TASK_TO_XUANNV_HEAD and class_month:
+                tile_path = _resolve_classification_tile(
+                    region_id, task_type, patch_id, class_month, version
+                )
+                if tile_path:
+                    return FileResponse(tile_path, media_type="image/png")
+
+            # Try configured result files (change_detection / few-shot custom heads)
             path = DataService.get_task_result_path(
                 region_id, patch_id, task_type, "png", version, effective_period
             )

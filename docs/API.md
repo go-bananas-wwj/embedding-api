@@ -861,7 +861,16 @@ curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/tasks/chan
 **错误响应**:
 - `404`: 该 Patch 在该任务下没有结果
 
-> **注意**: `land_cover_classification` 和 `water_extraction` 当前没有预生成结果图，调用此接口会返回 `404`。若需要结果，请使用「系统预训练模型」的 `/system-models/{task_id}/infer` 接口实时推理。
+> **注意**: 该接口现在对分类任务优先返回 **xuannv_show 预生成的语义掩膜 tile**，顺序如下：
+> - `building_extraction` → `/workspace/xuannv_show/static_assets/data/seg_tiles/building_extraction/{month}/{patch_id}.png`
+> - `land_use_classification` → `/workspace/xuannv_show/static_assets/data/seg_tiles/dynamic_world/{month}/{patch_id}.png`
+> - `land_cover_classification` → `/workspace/xuannv_show/static_assets/data/seg_tiles/worldcover/{month}/{patch_id}.png`
+> - `water_extraction` → `/workspace/xuannv_show/static_assets/data/seg_tiles/jrc_water/{month}/{patch_id}.png`
+>
+> 若静态 tile 不存在，则自动调用对应的系统预训练模型实时推理生成。
+> 因此 `building_extraction`、`land_use_classification` 的结果现在是正确的语义掩膜，不再是 `construction` / `farmland` 的概率热力图。
+>
+> `change_detection`、`construction`（v2 building_extraction）、`land_conversion`（v2 land_use）仍走原来的预计算变化概率图。
 
 ---
 
