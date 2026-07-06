@@ -8,7 +8,7 @@ downstream task head.
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import joblib
 import numpy as np
@@ -166,6 +166,11 @@ class ClassificationTrainingEngine:
 
         X_train = np.vstack(X_train)
         y_train = np.concatenate(y_train)
+        if np.unique(y_train).size < 2:
+            raise ValueError(
+                "Training requires at least two labels after sampling; "
+                "add background or another class annotation."
+            )
 
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(X_train)
@@ -330,6 +335,10 @@ class ChangeDetectionTrainingEngine:
 
         X_train = np.vstack(X_train)
         y_train = np.concatenate(y_train)
+        if np.unique(y_train).size < 2:
+            raise ValueError(
+                "Change-detection training requires positive and no-change samples."
+            )
 
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(X_train)

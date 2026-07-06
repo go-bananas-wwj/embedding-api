@@ -44,32 +44,51 @@ class TestSAM3RealModel:
             assert data["image"]["height"] == 256
 
     def test_segment_real(self):
-        """Test segment after embed."""
+        """Test segment with WGS84 prompts after embed."""
         # First embed
+        patch_id = "patch_000000"
+        month = "2025-10"
         embed_resp = client.post("/regions/harbin/sam3/embed", json={
-            "patch_id": "patch_000000",
-            "month": "2025-10",
+            "patch_id": patch_id,
+            "month": month,
+            "sensor_type": "s2",
         })
         if embed_resp.status_code != 200:
             pytest.skip("Embed failed, skipping segment test")
 
-        embedding_id = embed_resp.json()["embedding_id"]
+        from app.config import get_config
 
-        # Then segment
+        patch = next(
+            p
+            for p in get_config().get_patches("harbin")
+            if p.get("patch_id") == patch_id
+        )
+        minx, miny, maxx, maxy = patch["bounds_wgs84"]
+        point = [(minx + maxx) / 2, (miny + maxy) / 2]
+
+        # Then segment. The current SAM3 API accepts WGS84 prompt points and
+        # returns WGS84 GeoJSON mask polygon geometries.
         response = client.post("/regions/harbin/sam3/segment", json={
-            "embedding_id": embedding_id,
-            "point_coords": [[0.5, 0.5]],
-            "point_labels": [1],
+            "date": month,
+            "sensor_type": "s2",
+            "point_coords": [point],
             "multimask_output": True,
+            "include_masks": True,
         })
         assert response.status_code == 200
         data = response.json()
-        assert "masks" in data
+        assert data["type"] == "FeatureCollection"
+        assert len(data["features"]) > 0
+        for feature in data["features"]:
+            assert feature["geometry"]["type"] in ("Polygon", "MultiPolygon")
+            assert "bbox_wgs84" in feature["properties"]
+        assert data["masks"] is not None
         assert len(data["masks"]) > 0
         for mask in data["masks"]:
             assert "data" in mask
             assert "score" in mask
             assert "bbox" in mask
+            assert "bbox_wgs84" in mask
 
     def test_status_after_load(self):
         response = client.get("/regions/harbin/sam3/status")

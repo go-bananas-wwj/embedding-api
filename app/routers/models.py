@@ -6,15 +6,20 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Path as PathParam, Query
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Path as PathParam, Query, Request
 from fastapi.responses import FileResponse
 
 from app.schemas.models import (
     BatchInferRequest,
+    BatchInferResponse,
     BatchInferResult,
+    GeoJSONFeature,
+    GeoJSONFeatureCollection,
+    GeoJSONProperties,
     InferRequest,
     InferResult,
     JobStatusOut,
+    ModelClass,
     ModelCreate,
     ModelOut,
     ModelRenameRequest,
@@ -37,6 +42,26 @@ router = APIRouter(prefix="/models", tags=["models"])
 
 # In-memory job tracking. Training jobs are ephemeral; restart clears them.
 _training_jobs: dict[str, dict] = {}
+
+
+def _validate_result_filename(filename: str) -> None:
+    if (
+        "/" in filename
+        or "\\" in filename
+        or "\x00" in filename
+        or not filename.endswith(".png")
+    ):
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+
+def _batch_response(results: List[dict]) -> dict:
+    success_count = sum(1 for item in results if item.get("status") == "success")
+    return {
+        "total": len(results),
+        "success_count": success_count,
+        "error_count": len(results) - success_count,
+        "results": results,
+    }
 
 
 @router.get("", response_model=List[ModelOut])
@@ -168,7 +193,6 @@ _CHANGE_DETECTION_EXAMPLE = {
 @router.post("", response_model=ModelOut)
 async def create_model(
     background_tasks: BackgroundTasks = BackgroundTasks(),
-    user: dict = Depends(get_current_user),
     req: ModelCreate = Body(
         ...,
         openapi_examples={
@@ -176,12 +200,14 @@ async def create_model(
             "change_detection": _CHANGE_DETECTION_EXAMPLE,
         },
     ),
+    user: dict = Depends(get_current_user),
 ) -> dict:
     """创建模型并启动异步训练任务。
 
     前端提交用户定义的模型名称、分类列表和 GeoJSON 标注数据包；
     后端解析标注包，提取训练样本并训练下游任务头。
     返回模型信息及训练任务 ID，可在 `/models/jobs/{job_id}` 轮询进度。
+
     """
     registry = get_model_registry(user["user_id"])
 
@@ -203,6 +229,7 @@ async def create_model(
         region_id=req.region_id,
         description=req.description,
     )
+
     job_id = f"job_{uuid.uuid4().hex[:8]}"
     _training_jobs[job_id] = {
         "job_id": job_id,
@@ -210,7 +237,9 @@ async def create_model(
         "status": "running",
         "user_id": user["user_id"],
         "started_at": datetime.now().isoformat(),
+        "message": "Training started",
     }
+
     background_tasks.add_task(
         _do_training,
         job_id=job_id,
@@ -375,12 +404,12 @@ async def infer(
     用于获取某个 Patch 的预测结果图片。
     自定义模型需要训练完成；系统预训练模型状态为 ready，直接可用。
     返回结果图片的访问 URL。
+
     """
     registry = get_model_registry(user["user_id"])
     model = registry.get_model(model_id)
 
-    # System pre-trained model
-    if not model and is_system_task(model_id):
+    if is_system_task(model_id):
         if not req.month:
             raise HTTPException(
                 status_code=422,
@@ -424,6 +453,8 @@ async def infer(
         raise HTTPException(status_code=400, detail=str(e))
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -464,7 +495,7 @@ _INFER_BATCH_EXAMPLES: Dict[str, Any] = {
 }
 
 
-@router.post("/{model_id}/infer_batch", response_model=List[BatchInferResult])
+@router.post("/{model_id}/infer_batch", response_model=BatchInferResponse)
 async def infer_batch(
     model_id: str = PathParam(
         ...,
@@ -479,22 +510,17 @@ async def infer_batch(
     ),
     req: BatchInferRequest = Body(..., openapi_examples=_INFER_BATCH_EXAMPLES),
     user: dict = Depends(get_current_user),
-) -> List[dict]:
+) -> dict:
     """对最多 100 个 Patch 批量运行模型推理（支持自定义模型和系统预训练模型）。
 
     用于一次性对多个 Patch 生成预测结果，提高处理效率。
     返回每个 Patch 的推理状态及结果图片 URL。
-    """
-    if len(req.patch_ids) > 100:
-        raise HTTPException(
-            status_code=422, detail="Batch size exceeds 100 patches"
-        )
 
+    """
     registry = get_model_registry(user["user_id"])
     model = registry.get_model(model_id)
 
-    # System pre-trained model batch inference
-    if not model and is_system_task(model_id):
+    if is_system_task(model_id):
         if not req.month:
             raise HTTPException(
                 status_code=422,
@@ -528,7 +554,7 @@ async def infer_batch(
                         "result_path": None,
                     }
                 )
-        return [
+        items = [
             {
                 "patch_id": r["patch_id"],
                 "status": r["status"],
@@ -539,6 +565,7 @@ async def infer_batch(
             }
             for r in results
         ]
+        return _batch_response(items)
 
     if not model or model.get("status") != "completed":
         raise HTTPException(
@@ -554,7 +581,7 @@ async def infer_batch(
         before_month=req.before_month,
         after_month=req.after_month,
     )
-    return [
+    items = [
         {
             "patch_id": r["patch_id"],
             "status": r["status"],
@@ -565,6 +592,7 @@ async def infer_batch(
         }
         for r in results
     ]
+    return _batch_response(items)
 
 
 @router.get("/jobs/{job_id}", response_model=JobStatusOut)
@@ -612,6 +640,7 @@ async def get_result(
     返回 PNG 图片文件；Swagger UI 可能无法直接预览，建议使用 `<img>` 标签或浏览器访问。
     """
     results_dir = InferenceEngine(user["user_id"]).results_dir
+    _validate_result_filename(filename)
     file_path = results_dir / filename
 
     try:

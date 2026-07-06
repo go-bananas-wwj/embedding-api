@@ -203,13 +203,15 @@ class TestTasks:
         assert response.status_code == 200
         data = response.json()
         task_ids = [t["id"] for t in data["tasks"]]
-        assert "change_detection" in task_ids
         assert "building_extraction" in task_ids
         assert "road_extraction" in task_ids
         assert "construction" in task_ids
         assert "land_use_classification" in task_ids
         assert "land_cover_classification" in task_ids
         assert "water_extraction" in task_ids
+        # change_detection and construction_joint are not exposed for Haidian
+        assert "change_detection" not in task_ids
+        assert "construction_joint" not in task_ids
 
     def test_get_task_summary(self):
         response = client.get("/regions/harbin/tasks/building_extraction/summary?version=v1")

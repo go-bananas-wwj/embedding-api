@@ -32,24 +32,85 @@ _SENSOR_RGB = {
 }
 
 
+def _candidate_period_prefixes(periods: List[str]) -> List[str]:
+    """Return month/quarter prefixes to use for fuzzy filename matching.
+
+    Some raw scene archives store daily files (YYYYMMDD). When an exact
+    quarterly/monthly filename is missing, we fall back to any file whose
+    stem starts with the requested month or quarter prefix.
+    """
+    prefixes = []
+    for p in periods:
+        if p not in prefixes:
+            prefixes.append(p)
+        # YYYY-MM -> YYYYMM, YYYYQn -> YYYY
+        if len(p) >= 4 and p[:4].isdigit():
+            year = p[:4]
+            if year not in prefixes:
+                prefixes.append(year)
+        if len(p) >= 6 and p[:6].isdigit():
+            ym = p[:6]
+            if ym not in prefixes:
+                prefixes.append(ym)
+        if "Q" in p and len(p) >= 6:
+            # e.g. 2025Q2 -> 202504, 202505, 202506
+            year, q_str = p.split("Q", 1)
+            try:
+                q = int(q_str[0])
+                for m in range((q - 1) * 3 + 1, q * 3 + 1):
+                    ym = f"{year}{m:02d}"
+                    if ym not in prefixes:
+                        prefixes.append(ym)
+            except ValueError:
+                pass
+    return prefixes
+
+
 def _get_raw_tiff_path(
     region_id: str,
     patch_id: str,
     sensor_type: str,
     periods: List[str],
+    roots: Optional[List[str]] = None,
 ) -> Optional[str]:
-    """Resolve a per-patch raw TIFF path.
+    """Resolve a per-patch raw TIFF path across multiple storage layouts.
 
-    Layout: /workspace/raw/{region_id}/{sensor_type}/{patch_id}/{period}.tif
-    Tries each candidate period so that YYYY-MM, YYYYMM and YYYYMMDD inputs
-    can all locate the underlying scene file.
+    Tried layouts (in order):
+      1. {root}/{region_id}/{sensor_type}/{patch_id}/{period}.tif  (Harbin quarterly)
+      2. {root}/{patch_id}/{sensor_type}/{period}.tif              (Haidian/OLMO daily)
+
+    ``periods`` already contains YYYY-MM, YYYYMM, YYYYQn forms from
+    ``normalize_quarter_date``. If none of those match exactly, any daily
+    file whose stem starts with the requested month or quarter is accepted.
     """
-    for period in periods:
-        path = os.path.join(
-            RAW_ROOT, region_id, sensor_type, patch_id, f"{period}.tif"
-        )
-        if os.path.exists(path) and os.path.isfile(path):
-            return path
+    roots = roots or [RAW_ROOT]
+    # Derive fuzzy prefixes once for daily-scene fallback.
+    fuzzy_prefixes = _candidate_period_prefixes(periods)
+
+    for root in roots:
+        if not root:
+            continue
+        layouts = [
+            Path(root) / region_id / sensor_type / patch_id,
+            Path(root) / patch_id / sensor_type,
+        ]
+        for layout_dir in layouts:
+            # 1) Exact match
+            for period in periods:
+                path = layout_dir / f"{period}.tif"
+                if path.exists() and path.is_file():
+                    return str(path)
+            # 2) Fuzzy prefix match against daily files
+            if layout_dir.exists():
+                try:
+                    candidates = sorted(layout_dir.glob("*.tif"))
+                except OSError:
+                    candidates = []
+                for path in candidates:
+                    stem = path.stem
+                    for prefix in fuzzy_prefixes:
+                        if stem.startswith(prefix):
+                            return str(path)
     return None
 
 
@@ -76,6 +137,14 @@ def build_mosaic(
     config = get_config()
     if region_id not in config.list_regions():
         raise DataValidationError(f"Region '{region_id}' does not exist")
+
+    # Allow per-region raw scene directory (e.g. Haidian scenes live under
+    # /workspace/olmo/data/haidian/scenes, not /workspace/raw/haidian/s2).
+    region_cfg = config.get_region(region_id) or {}
+    s2_dir = region_cfg.get("s2_dir")
+    roots = [RAW_ROOT]
+    if s2_dir:
+        roots.append(s2_dir)
 
     sensor_type = sensor_type.lower()
     if sensor_type not in _SENSOR_RGB:
@@ -115,7 +184,7 @@ def build_mosaic(
             continue
         if allowed_ids is not None and patch_id not in allowed_ids:
             continue
-        path = _get_raw_tiff_path(region_id, patch_id, sensor_type, periods)
+        path = _get_raw_tiff_path(region_id, patch_id, sensor_type, periods, roots=roots)
         if path:
             paths.append(path)
 

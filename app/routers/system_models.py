@@ -15,6 +15,7 @@ from app.services.system_model_service import (
     infer_system_model,
     list_system_models,
 )
+from app.services.user_paths import get_user_dir
 
 router = APIRouter(prefix="/system-models", tags=["system-models"])
 
@@ -23,6 +24,16 @@ _SYSTEM_TASK_OPENAPI_EXAMPLES = {
     "land_cover_classification": {"summary": "Land cover classification", "value": "land_cover_classification"},
     "water_extraction": {"summary": "Water extraction", "value": "water_extraction"},
 }
+
+
+def _validate_result_filename(filename: str) -> None:
+    if (
+        "/" in filename
+        or "\\" in filename
+        or "\x00" in filename
+        or not filename.endswith(".png")
+    ):
+        raise HTTPException(status_code=400, detail="Invalid filename")
 
 
 @router.get("")
@@ -118,7 +129,7 @@ async def infer(
     用于快速获取建筑物提取、水体提取、土地覆盖分类等官方结果。
     返回结果图片的访问 URL。
     """
-    results_dir = Path(f"users/{user['user_id']}/system_model_results")
+    results_dir = get_user_dir(user["user_id"]) / "system_model_results"
     try:
         result_path = infer_system_model(
             region_id, task_id, patch_id, month, version, results_dir
@@ -148,7 +159,8 @@ async def get_result(
     用于在页面中展示官方预训练模型对 Patch 的预测结果。
     返回 PNG 图片文件；Swagger UI 可能无法直接预览，建议使用 `<img>` 标签或浏览器访问。
     """
-    results_dir = Path(f"users/{user['user_id']}/system_model_results")
+    results_dir = get_user_dir(user["user_id"]) / "system_model_results"
+    _validate_result_filename(filename)
     file_path = results_dir / filename
 
     try:

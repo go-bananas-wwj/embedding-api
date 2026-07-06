@@ -309,13 +309,6 @@ class DataService:
                         path = _resolve_path(base, relative)
                         if path:
                             return path
-                # Fallback: for patch-subdir structure (haidian), find first file in patch dir
-                patch_dir = Path(base) / patch_id
-                if patch_dir.is_dir():
-                    for ext in (".npz", ".npy", ".png"):
-                        first = DataService._find_first_file(str(patch_dir), f"*{ext}")
-                        if first:
-                            return first
         return None
 
     @staticmethod
@@ -465,13 +458,17 @@ class DataService:
                         return path
                 # Fallback: per-patch tile without period (Haidian V1 layout and
                 # any other result set where each patch has a single tile).
-                tiles_dir = Path(base) / "tiles"
-                path = DataService._find_first_file(str(tiles_dir), f"{patch_id}_*.png")
-                if path:
-                    return path
-                path = _resolve_path(str(tiles_dir), f"{patch_id}.png")
-                if path:
-                    return path
+                # Only use this fallback when no period was requested, to avoid
+                # returning an unrelated-time tile when a specific month/period
+                # was asked for.
+                if period is None:
+                    tiles_dir = Path(base) / "tiles"
+                    path = DataService._find_first_file(str(tiles_dir), f"{patch_id}_*.png")
+                    if path:
+                        return path
+                    path = _resolve_path(str(tiles_dir), f"{patch_id}.png")
+                    if path:
+                        return path
         return None
 
     @staticmethod

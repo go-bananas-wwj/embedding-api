@@ -1,7 +1,8 @@
 """Pydantic models for API request/response schemas."""
 
+import re
 from typing import Any, Dict, List, Literal, Optional, Union
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class HealthResponse(BaseModel):
@@ -161,7 +162,10 @@ class ModelCreate(BaseModel):
 
     The frontend submits a complete annotation package (`annotations` as GeoJSON
     FeatureCollection plus `classes`). The backend parses the package, extracts
-    training samples from embeddings, and trains a downstream task head.
+    training samples, and trains a downstream task head.
+
+    All core fields are required in production. Empty or malformed request
+    bodies must fail validation instead of silently creating a demo model.
     """
 
     model_config = {"protected_namespaces": ()}
@@ -243,8 +247,6 @@ class ModelCreate(BaseModel):
                 if cid not in class_ids:
                     raise ValueError(f"class_id '{cid}' is not defined in classes")
 
-        active_class_ids = set(self.class_ids) if self.class_ids else class_ids
-
         total_vertices = 0
         max_features = 10000
         max_vertices = 100_000
@@ -260,10 +262,6 @@ class ModelCreate(BaseModel):
             if props.class_id not in class_ids:
                 raise ValueError(
                     f"feature class_id '{props.class_id}' is not defined in classes"
-                )
-            if props.class_id not in active_class_ids:
-                raise ValueError(
-                    f"feature class_id '{props.class_id}' is not in class_ids"
                 )
             if props.task_type != self.task_type:
                 raise ValueError(
@@ -391,6 +389,8 @@ class BatchInferRequest(BaseModel):
     )
     patch_ids: List[str] = Field(
         ...,
+        min_length=1,
+        max_length=100,
         description="List of patch identifiers to infer (max 100).",
         examples=[["patch_000000", "patch_000001"]],
     )
@@ -415,6 +415,16 @@ class BatchInferRequest(BaseModel):
         examples=["v2"],
     )
 
+    @field_validator("patch_ids")
+    @classmethod
+    def validate_patch_ids(cls, v: List[str]) -> List[str]:
+        for patch_id in v:
+            if not re.fullmatch(r"patch_\d{6}", patch_id):
+                raise ValueError(
+                    "Each patch_id must match the form patch_000000"
+                )
+        return v
+
     @model_validator(mode="after")
     def validate_batch_infer_months(self):
         has_single = bool(self.month)
@@ -435,6 +445,16 @@ class BatchInferResult(BaseModel):
     status: str = Field(..., description="Inference status for this patch.")
     result_url: Optional[str] = Field(None, description="URL to the result PNG, if successful.")
     error: Optional[str] = Field(None, description="Error message, if failed.")
+
+
+class BatchInferResponse(BaseModel):
+    total: int = Field(..., description="Total number of requested patches.")
+    success_count: int = Field(..., description="Number of successful inferences.")
+    error_count: int = Field(..., description="Number of failed inferences.")
+    results: List[BatchInferResult] = Field(
+        ...,
+        description="Per-patch inference results.",
+    )
 
 
 class JobStatusOut(BaseModel):

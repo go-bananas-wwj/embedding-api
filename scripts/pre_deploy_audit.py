@@ -327,20 +327,28 @@ def audit_global(session: requests.Session, output_dir: Path, records: List[Dict
         add_record(records, endpoint, params, resp.status_code, ct, path, elapsed)
 
 
-def write_report(output_dir: Path, records: List[Dict[str, Any]]) -> None:
-    report_path = output_dir / "report.json"
-    report_path.write_text(json.dumps(records, indent=2, ensure_ascii=False), encoding="utf-8")
-
-    md = ["# Pre-deployment Endpoint Audit Report\n", f"Generated: {datetime.utcnow().isoformat()}Z\n", f"Base URL: {BASE_URL}\n\n"]
-    md.append("| # | Endpoint | Params | Status | Content-Type | Saved | Elapsed | Note |\n")
-    md.append("|---|----------|--------|--------|--------------|-------|---------|------|\n")
-    for i, rec in enumerate(records, 1):
+def _build_table_rows(records: List[Dict[str, Any]], start_index: int = 1) -> List[str]:
+    rows = []
+    for i, rec in enumerate(records, start_index):
         params = json.dumps(rec["params"], ensure_ascii=False) if rec["params"] else ""
         params = params.replace("|", "\\|")
         note = rec.get("note", "").replace("|", "\\|")
-        md.append(
+        rows.append(
             f"| {i} | `{rec['endpoint']}` | `{params}` | {rec['status']} | {rec['content_type']} | `{rec['saved_path']}` | {rec['elapsed_seconds']}s | {note} |\n"
         )
+    return rows
+
+
+def _write_single_report(
+    output_dir: Path,
+    filename: str,
+    title: str,
+    records: List[Dict[str, Any]],
+) -> None:
+    md = [f"# {title}\n", f"Generated: {datetime.utcnow().isoformat()}Z\n", f"Base URL: {BASE_URL}\n\n"]
+    md.append("| # | Endpoint | Params | Status | Content-Type | Saved | Elapsed | Note |\n")
+    md.append("|---|----------|--------|--------|--------------|-------|---------|------|\n")
+    md.extend(_build_table_rows(records))
 
     failures = [
         r for r in records
@@ -356,7 +364,21 @@ def write_report(output_dir: Path, records: List[Dict[str, Any]]) -> None:
         for rec in failures:
             md.append(f"- `{rec['endpoint']}` params={rec['params']} status={rec['status']}\n")
 
-    (output_dir / "report.md").write_text("".join(md), encoding="utf-8")
+    (output_dir / filename).write_text("".join(md), encoding="utf-8")
+
+
+def write_report(output_dir: Path, records: List[Dict[str, Any]]) -> None:
+    report_path = output_dir / "report.json"
+    report_path.write_text(json.dumps(records, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    global_records = [r for r in records if not r["endpoint"].startswith("/regions/")]
+    harbin_records = [r for r in records if r["endpoint"].startswith("/regions/harbin")]
+    haidian_records = [r for r in records if r["endpoint"].startswith("/regions/haidian")]
+
+    _write_single_report(output_dir, "report_global.md", "Global Endpoints", global_records)
+    _write_single_report(output_dir, "report_harbin.md", "Harbin New Area Endpoints", harbin_records)
+    _write_single_report(output_dir, "report_haidian.md", "Haidian District Endpoints", haidian_records)
+    _write_single_report(output_dir, "report_all.md", "All Endpoints", records)
 
 
 def main() -> None:

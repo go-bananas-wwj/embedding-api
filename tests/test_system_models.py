@@ -17,6 +17,19 @@ class TestSystemModels:
         assert "land_cover_classification" in task_ids
         assert "water_extraction" in task_ids
         assert "building_extraction" in task_ids
+        assert all(m["versions"] for m in data)
+
+    def test_list_system_models_haidian_excludes_unavailable_models(self):
+        response = client.get("/system-models?region_id=haidian")
+        assert response.status_code == 200
+        data = response.json()
+        task_ids = {m["id"] for m in data}
+        assert task_ids == {
+            "water_extraction",
+            "building_extraction",
+            "road_extraction",
+        }
+        assert all(m["versions"] for m in data)
 
     def test_get_system_model_classes(self):
         response = client.get(

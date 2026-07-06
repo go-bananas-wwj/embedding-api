@@ -11,10 +11,9 @@ layout used by Harbin.
 
 | API task | Source task | Default head | Status |
 |---|---|---|---|
-| `building_extraction` | `haidian_building_osm` | U-Net | ready |
-| `road_extraction` | `haidian_road_osm` | U-Net | ready |
-| `construction` | Haidian construction labels | U-Net | ready |
-| `construction_joint` | Haidian subset of `construction_joint` | U-Net | ready |
+| `building_extraction` | latest Haidian embedding | MLP | ready |
+| `road_extraction` | latest Haidian embedding | MLP | ready |
+| `water_extraction` | latest Haidian embedding | MLP | ready |
 
 The API version name is intentionally `v1` even though the underlying research
 experiment is called P2A.
@@ -31,24 +30,26 @@ data/haidian/
   tasks/{task}/v1/labels/...
 
 models/haidian/v1/
-  embedding/best.pt
-  embedding/config.yaml
-  task_heads/{task}/{head}/best.pt
+  embedding/haidian_embedding_v1_p10c_epoch800.pt
+  task_heads/building_mlp_fold0_best.pt
+  task_heads/road_mlp_fold0_best.pt
+  task_heads/water_mlp_fold0_best.pt
 ```
 
 Months are `202512`, `202601`, `202602`, `202603`, `202604`, and `202605`.
 
 ## Install Assets From ModelScope
 
-The large assets are stored in the ModelScope dataset
-`WeijieWu/xuannv_embdding_api` under `haidian/v1`.
+The latest assets are stored in the ModelScope dataset
+`WeijieWu/xuannv_haidian_embdding` under
+`artifacts/haidian-embedding-v1`.
 
 ```bash
 cd /workspace/embedding-api
 export MODELSCOPE_TOKEN="..."  # only needed for private datasets
 python pipelines/haidian/download_modelscope_assets.py \
-  --repo WeijieWu/xuannv_embdding_api \
-  --prefix haidian/v1/api_ready \
+  --repo WeijieWu/xuannv_haidian_embdding \
+  --prefix artifacts/haidian-embedding-v1 \
   --target .
 ```
 
@@ -91,8 +92,8 @@ python pipelines/haidian/inference_task_head.py \
   --device cuda
 ```
 
-Supported tasks are `building_extraction`, `road_extraction`, `construction`,
-and `construction_joint`.
+Supported downloaded heads are `building_extraction`, `road_extraction`, and
+`water_extraction`.
 
 ## Example API Calls
 
@@ -101,4 +102,3 @@ curl -s "http://localhost:9061/regions/haidian/patches/patch_000000/embedding?fo
 curl -s "http://localhost:9061/regions/haidian/patches/patch_000000/tasks/building_extraction/result?format=png&version=v1" -o /tmp/haidian_building.png
 curl -s "http://localhost:9061/regions/haidian/patches/patch_000000/tasks/road_extraction/prediction?version=v1" -o /tmp/haidian_road.npy
 ```
-

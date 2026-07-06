@@ -75,19 +75,18 @@ models:
     v1:
       embedding:
         name: "海淀区 V1 嵌入模型"
-        description: "基于 xuannv P2A 的海淀区 202512-202605 embedding"
-        path: "models/haidian/v1/embedding/best.pt"
+        description: "来自 ModelScope WeijieWu/xuannv_haidian_embdding 的海淀区 202512-202605 embedding"
+        path: "models/haidian/v1/embedding/haidian_embedding_v1_p10c_epoch800.pt"
         type: "pytorch"
       task_heads:
         name: "海淀区 V1 下游任务头"
-        description: "基于 V1 embedding concat-diff 输入训练的建筑、道路和施工分割头"
+        description: "来自最新海淀 V1 embedding 的建筑、道路和水体 MLP 下游任务头"
         path: "models/haidian/v1/task_heads"
         type: "pytorch"
         tasks:
-          building_extraction: {head: "unet", file: "building_extraction/unet/best.pt", classes: 2}
-          road_extraction: {head: "unet", file: "road_extraction/unet/best.pt", classes: 2}
-          construction: {head: "unet", file: "construction/unet/best.pt", classes: 2}
-          construction_joint: {head: "unet", file: "construction_joint/unet/best.pt", classes: 2}
+          building_extraction: {head: "mlp", file: "building_mlp_fold0_best.pt", classes: 2}
+          road_extraction: {head: "mlp", file: "road_mlp_fold0_best.pt", classes: 2}
+          water_extraction: {head: "mlp", file: "water_mlp_fold0_best.pt", classes: 2}
 
 regions:
   harbin:
@@ -158,7 +157,7 @@ regions:
   haidian:
     name: "海淀区"
     patches_meta: "data/haidian/patches_meta_v1.json"
-    s2_dir: "/workspace/raw/haidian_scenes/s2"
+    s2_dir: "/workspace/olmo/data/haidian/scenes"
     embeddings:
       v1:
         path: "data/haidian/embeddings/v1"
@@ -166,10 +165,6 @@ regions:
         formats: ["npy", "png", "json"]
         alt_templates: ["{month}/{patch_id}.png"]
     tasks:
-      change_detection:
-        name: "变化检测"
-        description: "基于两期 embedding 差分的变化检测"
-        versions: {}
       building_extraction:
         name: "建筑物提取"
         description: "基于海淀 V1 embedding 的 OSM 建筑物提取"
@@ -194,14 +189,6 @@ regions:
             results: "data/haidian/tasks/construction/v1/results"
             predictions: "data/haidian/tasks/construction/v1/predictions"
             labels: "data/haidian/tasks/construction/v1/labels"
-      construction_joint:
-        name: "施工地联合检测"
-        description: "construction_joint 任务中的海淀子集结果"
-        versions:
-          v1:
-            results: "data/haidian/tasks/construction_joint/v1/results"
-            predictions: "data/haidian/tasks/construction_joint/v1/predictions"
-            labels: "data/haidian/tasks/construction_joint/v1/labels"
       land_use_classification:
         name: "土地利用分类"
         description: "海淀区 V1 月度土地利用分类 (Dynamic World Linear Probe)"

@@ -78,7 +78,6 @@ class TestModels:
                 "region_id": "harbin",
             },
         )
-        # Missing annotations and classes -> 422
         assert response.status_code == 422
 
     def test_create_model_with_geojson(self):
@@ -86,9 +85,9 @@ class TestModels:
         assert response.status_code == 200
         data = response.json()
         assert data["name"] == "test-geojson"
-        assert data["status"] == "training"
+        assert data["status"] in {"training", "completed"}
+        assert data["job_id"].startswith("job_")
         assert data["description"] == "test description"
-        assert "job_id" in data
 
     def test_create_model_invalid_type(self):
         payload = _model_payload("test-invalid")
@@ -112,7 +111,6 @@ class TestModels:
         assert r.status_code == 404
 
     def test_infer_untrained_model(self):
-        # Use a non-existent patch so training fails and model stays in failed/training state.
         payload = _model_payload("test-inf")
         payload["annotations"]["features"][0]["properties"]["patch_id"] = "patch_999999"
         r = client.post("/models", json=payload)
@@ -121,7 +119,6 @@ class TestModels:
             f"/models/{model_id}/infer",
             json={"region_id": "harbin", "patch_id": "patch_000000", "month": "2025-04"},
         )
-        # Model did not complete training; inference is rejected.
         assert r.status_code == 400
 
     def test_infer_batch_exceeds_limit(self):
@@ -183,7 +180,8 @@ class TestModels:
         r = client.post("/models", json=payload)
         assert r.status_code == 200
         data = r.json()
-        assert data["status"] == "training"
+        assert data["status"] in {"training", "completed"}
+        assert data["job_id"].startswith("job_")
         assert data["type"] == "change_detection"
 
     def test_create_model_with_class_ids_subset(self):
@@ -196,7 +194,8 @@ class TestModels:
         r = client.post("/models", json=payload)
         assert r.status_code == 200
         data = r.json()
-        assert data["status"] == "training"
+        assert data["status"] in {"training", "completed"}
+        assert data["job_id"].startswith("job_")
 
     def test_create_model_rejects_unknown_class_ids(self):
         payload = _model_payload("test-unknown-class")
@@ -268,7 +267,9 @@ class TestModels:
         )
         assert r.status_code == 200
         data = r.json()
-        assert len(data) == 2
-        for item in data:
+        assert data["total"] == 2
+        assert data["success_count"] == 2
+        assert data["error_count"] == 0
+        for item in data["results"]:
             assert item["status"] == "success"
             assert item["result_url"].startswith("/system-models/results/")

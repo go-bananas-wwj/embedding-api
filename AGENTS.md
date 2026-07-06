@@ -1,291 +1,330 @@
-# AGENTS.md — Embedding API
+# AGENTS.md - Embedding API
 
-> This file is written for AI coding agents. It assumes no prior knowledge of the project. Information is derived directly from the codebase; do not rely on external assumptions.
+This file is for AI coding agents working in this repository. It should stay
+grounded in the current code and API docs. When behavior differs between docs
+and implementation, verify against `app/`, `config.yaml`, and tests before
+editing.
 
 ## Project Overview
 
-**Embedding API** is a Python FastAPI service that exposes a unified REST API for remote sensing embeddings and downstream monitoring task results. It currently serves two geographic regions:
+Embedding API is a Python FastAPI service for remote-sensing embeddings,
+regional patch metadata, downstream monitoring results, custom model training,
+system model inference, region mosaics, and SAM3 interactive segmentation.
 
-- **Harbin New Area (哈尔滨新区)** — 424 patches
-- **Haidian District (海淀区)** — 320 patches
+The service currently targets two configured regions:
 
-The API provides:
+- `harbin` - Harbin New Area, 424 patches.
+- `haidian` - Haidian District, 320 patches.
 
-- Embedding queries in PNG, NPY, NPZ, JSON, and cache-fallback formats.
-- 5 unified downstream thematic tasks: change detection, building extraction, land use classification, land cover classification, and water extraction.
-- Patch metadata, bbox filtering, pagination.
-- Map tile listing (XYZ tile serving is stubbed but not implemented).
-- SAM3 interactive segmentation (embed + segment with point prompts on Sentinel-2 imagery).
-- Custom model training and inference from frontend-submitted GeoJSON annotation packages (classification and change-detection heads).
-- GeoJSON-to-pixel-mask rasterization with WGS84 coordinate support.
-- System pre-trained model inference.
-- Optional API-Key authentication with per-user data isolation.
-- Hot-reload configuration via `watchdog`.
+Core API areas:
 
-### Technology Stack
+- Health and region metadata: `/health`, `/regions`, `/regions/{region_id}`.
+- Patch listing and detail with WGS84 bbox filtering.
+- Embedding retrieval as `png`, `npy`, `npz`-backed arrays, `json`, or `cache`.
+- Downstream task summaries, patch results, predictions, labels, and tile lists.
+- Region mosaic generation: `/regions/{region_id}/mosaic`.
+- Custom user models: `/models/*`.
+- System pre-trained models: `/system-models/*`.
+- SAM3 embed/segment/status endpoints under `/regions/{region_id}/sam3/*`.
 
-- **Runtime**: Python >= 3.9
-- **Web Framework**: FastAPI 0.104+, Pydantic v2
-- **Server**: uvicorn (ASGI)
-- **Configuration**: YAML (`config.yaml`), hot-reloaded with `watchdog`
-- **ML/DL**: PyTorch 2.5.1, torchvision 0.20.1, `sam3` (local package in `sam3_pkg/`)
-- **Image/Geo**: Pillow >= 11, rasterio >= 1.3, numpy 1.26.4
-- **Containerization**: Docker + docker-compose
-- **Process Supervision**: `service_watchdog.py` (optional)
+Primary frontend/API docs:
 
-### Repository Layout
+- `README.md` - high-level feature and deployment overview.
+- `docs/API.md` - frontend-facing API reference in Chinese.
+- `docs/custom-training-workflow.md` - custom training workflow for frontend
+  annotations.
 
+## Technology Stack
+
+- Runtime: Python 3.9+.
+- Web framework: FastAPI with Pydantic v2.
+- Server: uvicorn, optionally managed by `service_watchdog.py`.
+- Config: YAML via `config.yaml`; hot-reloaded through `watchdog`.
+- ML: PyTorch, torchvision, local vendored `sam3` package in `sam3_pkg/`.
+- Geo/image: Pillow, rasterio, numpy.
+- Containerization: Docker and docker-compose.
+
+There is no root `pyproject.toml`. Install runtime dependencies from
+`requirements.txt`. The `sam3_pkg/pyproject.toml` belongs only to the bundled
+SAM3 package.
+
+## Repository Map
+
+```text
+app/
+  main.py                 FastAPI app, CORS, docs URLs, router inclusion
+  config.py               Config manager, hot reload, patch metadata cache
+  routers/
+    regions.py            Region metadata and `/regions/{id}/mosaic`
+    patches.py            Patch list/detail
+    embeddings.py         Embedding retrieval and safety limits
+    tasks.py              Downstream task summary/result/prediction/label/tile APIs
+    models.py             Custom model CRUD, training, inference, result download
+    system_models.py      System model listing/classes/inference/result download
+    sam3.py               SAM3 embed/segment/status API
+  schemas/                Pydantic request/response models
+  services/
+    data_service.py       Secure path resolution for embeddings/tasks
+    mosaic_service.py     Region-wide S2/S1/Landsat mosaic building and cache
+    tile_service.py       Patch tile listing; XYZ tile serving is stubbed
+    sam3_service.py       Lazy SAM3 model loading, imagery loading, cache
+    auth_service.py       Optional API-key auth
+    user_paths.py         Per-user storage paths
+    geojson_adapter.py    WGS84 GeoJSON to pixel-mask rasterization
+    model_registry.py     Custom model/job metadata
+    training_engine.py    Lightweight downstream head training
+    inference_engine.py   Custom/system inference helpers
+data/                     Regional metadata, embeddings, task outputs
+docs/                     API and workflow docs
+models/                   Checkpoints and generated model artifacts
+pipelines/                ModelScope asset download/preparation scripts
+sam3_pkg/                 Vendored SAM3 package
+tests/                    Pytest suite
 ```
-embedding-api/
-├── app/                      # Application source
-│   ├── main.py               # FastAPI app factory, CORS, router inclusion
-│   ├── config.py             # YAML config manager with hot-reload
-│   ├── routers/              # FastAPI route handlers
-│   │   ├── regions.py
-│   │   ├── patches.py
-│   │   ├── embeddings.py
-│   │   ├── tasks.py
-│   │   ├── models.py
-│   │   ├── system_models.py
-│   │   └── sam3.py
-│   ├── schemas/              # Pydantic request/response models
-│   │   ├── models.py
-│   │   └── sam3.py
-│   └── services/             # Business logic
-│       ├── data_service.py
-│       ├── tile_service.py
-│       ├── sam3_service.py
-│       ├── auth_service.py
-│       ├── user_paths.py
-│       ├── geojson_adapter.py
-│       ├── model_registry.py
-│       ├── training_engine.py
-│       └── inference_engine.py
-├── tests/                    # pytest test suite
-├── data/                     # Regional patch metadata and task outputs
-├── models/                   # Trained model checkpoints
-├── sam3_pkg/                 # Local SAM3 package (has its own pyproject.toml)
-├── docs/API.md               # Frontend-oriented API documentation (Chinese)
-├── config.yaml               # Default runtime configuration
-├── config.docker.yaml        # Docker-specific configuration
-├── requirements.txt          # Python dependencies
-├── Dockerfile
-├── docker-compose.yml
-└── service_watchdog.py       # Optional process supervisor
-```
 
-There is **no root `pyproject.toml`**. Dependency management is done through `requirements.txt`. The `sam3_pkg/pyproject.toml` belongs only to the bundled SAM3 package.
+## Run Commands
 
-## Build and Run Commands
-
-### Install Dependencies
+Install dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-The `sam3` package is installed from the local `sam3_pkg/` directory; `requirements.txt` does not include it, but the import path works because the package is vendored in the repo.
-
-### Local Development
+Local development:
 
 ```bash
 uvicorn app.main:app --reload --host 0.0.0.0 --port 9061
 ```
 
-- Swagger UI (if enabled): `http://localhost:9061/docs`
-- ReDoc (if enabled): `http://localhost:9061/redoc`
+The current `app/main.py` enables Swagger/ReDoc by default at `/docs` and
+`/redoc`. Set `DOCS_URL=none` and/or `REDOC_URL=none` to disable them. Some
+older docs mention defaults of `none`; check `app/main.py` before changing this
+behavior.
 
-### Production / Watchdog
+Watchdog:
 
 ```bash
-# Run the optional watchdog, which restarts uvicorn if it becomes unhealthy
 python service_watchdog.py
-
-# Stop the watchdog
 python service_watchdog.py stop
 ```
 
-The watchdog:
-
-- Manages a uvicorn process on port `9061`.
-- Health-checks `http://localhost:9061/health` every 30 seconds.
-- Uses exponential backoff restarts: `[5, 10, 30, 60, 120]` seconds.
-- Stores its PID in `service_watchdog.pid`.
-
-### Docker
+Docker:
 
 ```bash
 docker-compose up -d
 ```
 
-- Internal port: `8000`
-- Mapped host port: `8000`
-- Uses `config.docker.yaml` mounted as `/app/config.yaml`.
-- Data/model directories are expected to be mounted as read-only volumes (see `docker-compose.yml`).
+Useful environment variables:
 
-### Environment Variables
+| Variable | Purpose |
+| --- | --- |
+| `CONFIG_PATH` | YAML config path, defaults to `./config.yaml` |
+| `CORS_ORIGINS` | Comma-separated allowed browser origins; empty rejects CORS |
+| `DOCS_URL` | Swagger path, `/docs` by default in code, `none` disables |
+| `REDOC_URL` | ReDoc path, `/redoc` by default in code, `none` disables |
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `CONFIG_PATH` | `./config.yaml` | Path to the YAML configuration file |
-| `CORS_ORIGINS` | *(empty)* | Comma-separated allowed origins; empty means cross-origin requests are rejected |
-| `DOCS_URL` | `none` | Swagger UI path; set `/docs` to enable; default disabled |
-| `REDOC_URL` | `none` | ReDoc path; set `/redoc` to enable; default disabled |
+## Data and Asset Notes
 
-Note: the code reads `CONFIG_PATH`, not `CONFIG_FILE` (despite what `docs/API.md` says).
+`config.yaml` is the source of truth for regions, embedding versions, task
+directories, SAM3 paths, and system model checkpoints. Changes are hot-reloaded.
 
-## Code Organization and Module Divisions
+Asset download scripts live under `pipelines/`:
 
-### `app/main.py`
+- `pipelines/haidian/download_modelscope_assets.py` downloads full Haidian V1
+  assets from ModelScope dataset `WeijieWu/xuannv_haidian_embdding`.
+- `pipelines/haidian/download_embeddings.py` downloads only Haidian embeddings.
+- `pipelines/harbin/download_modelscope_assets.py` downloads Harbin archives and
+  can verify checksums.
 
-- Creates the FastAPI app with lifespan startup/shutdown hooks.
-- Configures CORS from `CORS_ORIGINS`.
-- Disables docs by default; enable via `DOCS_URL` / `REDOC_URL`.
-- Includes all routers.
+The latest Haidian source is `artifacts/haidian-embedding-v1` in
+`WeijieWu/xuannv_haidian_embdding`. It installs:
 
-### `app/config.py`
+- embeddings to `data/haidian/embeddings/v1/{YYYYMM}/{patch_id}.npy|png|json`
+- the embedding checkpoint to
+  `models/haidian/v1/embedding/haidian_embedding_v1_p10c_epoch800.pt`
+- MLP task heads to `models/haidian/v1/task_heads/*.pt`
 
-- Thread-safe singleton `ConfigManager`.
-- Loads `config.yaml` and exposes `get_config()`.
-- Watches the config file with `watchdog`; reloads on change with a 0.5s debounce.
-- Loads `patches_meta` JSON files lazily and caches patch lists.
-- Provides `register_reload_callback()` for other modules to clear caches on config reload.
+Do not restore older Haidian checkpoints or old `api_ready` layouts unless the
+user explicitly asks. Do not commit tokens. ModelScope access should use
+`MODELSCOPE_TOKEN` from the environment when needed.
 
-### `app/routers/`
+## API-Specific Behavior
 
-Route modules follow standard FastAPI patterns:
+### Regions and Tasks
 
-- Validate region existence.
-- Validate query parameters.
-- Delegate to services.
-- Translate service exceptions to HTTP exceptions (400, 404, 413, 422, 500, 501, 503).
+The docs refer to a unified task vocabulary, but the current config also exposes
+region-specific P2A tasks. Always inspect `config.yaml` and task router tests
+when changing task behavior.
 
-### `app/services/data_service.py`
+Common task IDs include:
 
-- Central path-resolution service for embeddings, task results, predictions, labels, and summaries.
-- Validates `patch_id` (`patch_\d{6}`), `month`, and `period` against path-traversal patterns.
-- Uses `_resolve_path()` to ensure targets are inside configured base directories and are not symlinks.
-- Enforces a 100MB file-size limit (`MAX_FILE_SIZE`).
-- Implements an LRU+TTL cache for `available_tasks` and registers a callback to clear it on config reload.
+- `change_detection`
+- `building_extraction`
+- `road_extraction`
+- `construction`
+- `construction_joint`
+- `land_use_classification`
+- `land_cover_classification`
+- `water_extraction`
 
-### `app/services/tile_service.py`
+Important current caveats:
 
-- Lists available patch-based tile PNG files.
-- XYZ tile serving is intentionally not implemented (returns HTTP 501).
+- Haidian V1 uses xuannv P2A embeddings.
+- Haidian V1 has pre-generated results for P2A-style tasks such as
+  `building_extraction`, `road_extraction`, `construction`, and water-related
+  outputs depending on config/data availability.
+- Some tasks may be listed but require system-model inference rather than
+  pre-generated result files.
 
-### `app/services/sam3_service.py`
+### Embeddings
 
-- Singleton service for SAM3 model loading and inference.
-- Lazy-loads the model on first use.
-- Loads Sentinel-2 RGB imagery via `rasterio` from the region's `s2_dir`.
-- Caches embeddings in an LRU cache (`max_cache_size` from config, default 20).
-- Uses `asyncio.Lock` to serialize GPU inference.
-- Converts model weights to `bfloat16` for autocast compatibility.
+Embedding paths are config-driven. Harbin and Haidian use different layouts and
+month formats, so avoid hardcoding paths or date assumptions.
 
-## Configuration
+- Harbin examples usually use months like `2025-04`.
+- Haidian examples may use compact P2A months/dates such as `202512` or
+  `20260115`; `app/services/time_utils.py` and related tests cover accepted
+  normalization.
+- `format=cache` should prefer a displayable PNG when available, then fall back
+  to binary array data.
 
-All data paths and task definitions are driven by `config.yaml`. Key sections:
+### Mosaics
 
-- `sam3`: model path, BPE tokenizer path, device, max cache size, image size.
-- `models`: downstream-task model checkpoints by region and version.
-- `regions`: per-region patch metadata, embedding directories, Sentinel-2 directories, and tasks.
+`GET /regions/{region_id}/mosaic` is implemented in `app/routers/regions.py`
+and `app/services/mosaic_service.py`.
 
-Adding a new region or task only requires editing `config.yaml`; the service picks up changes without restart.
+- Supports sensor types such as `s2`, `s1`, and `landsat`.
+- Supports output formats such as `png` and `tif`.
+- Can restrict generation with repeated `patch_ids` query parameters.
+- Caches generated files under `users/default/mosaic` by default.
 
-### Embedding Path Templates
+### Custom Models
 
-Embeddings support config-driven templates such as:
+Custom model APIs consume a frontend-submitted GeoJSON annotation package in
+`POST /models`.
 
-```yaml
-embeddings:
-  v1:
-    path: "data/harbin/embeddings/v1"
-    template: "{month}/{patch_id}.{fmt}"
-    formats: ["npy", "png", "json"]
-    alt_templates: ["{month}/{patch_id}.png"]
-```
+- Supported model types include `classification` and `change_detection`.
+- GeoJSON geometries are WGS84 `Polygon` or `MultiPolygon`.
+- Features carry `patch_id`, `region_id`, `class_id`, `task_type`, and either
+  `month` or `before_month`/`after_month`.
+- The backend rasterizes polygons into 128x128 masks and trains a lightweight
+  downstream head. Empty bodies and demo fallbacks are not valid behavior.
+- `class_ids` may select a subset of classes; annotation packages may still
+  include unselected classes, which are ignored during training.
+- When auth is configured, `/models/*` is per-user and requires API key headers.
 
-For Haidian, the structure uses patch subdirectories and NPZ archives:
+### System Models
 
-```yaml
-embeddings:
-  v1:
-    path: "data/haidian/embeddings/v1"
-    template: "{patch_id}/patch_{patch_id}_{month}.npz"
-    formats: ["npz", "png", "json"]
-```
+System models live under `/system-models`.
 
-## Code Style Guidelines
+- `GET /system-models?region_id=...`
+- `GET /system-models/{task_id}/classes?region_id=...&version=...`
+- `POST /system-models/{task_id}/infer?...`
+- `GET /system-models/results/{filename}`
 
-- **Python version**: 3.9+. Avoid syntax newer than 3.9 unless absolutely necessary.
-- **Line length**: Follow the existing 88-character convention (the bundled `sam3_pkg` uses Black with `line-length = 88`).
-- **Imports**: standard library, third-party, first-party, grouped with blank lines.
-- **Type hints**: use `typing` generics (e.g., `Dict[str, Any]`, `Optional[str]`) for 3.9 compatibility.
-- **Async**: routers are async; blocking I/O and filesystem scans are offloaded with `asyncio.to_thread`.
-- **Logging**: use `logging.getLogger(__name__)`; format is `"%(asctime)s - %(name)s - %(levelname)s - %(message)s"`.
-- **Docstrings**: module-level and class-level docstrings are expected.
-- **Security-sensitive code**: path validation, symlink checks, and size limits must be preserved or updated together.
+Generated system model result URLs should use `/system-models/results/...`.
 
-## Testing Instructions
+### SAM3
 
-### Run Tests
+SAM3 is lazy-loaded in `app/services/sam3_service.py`.
+
+- Model path and tokenizer path come from `config.yaml` under `sam3`.
+- `/sam3/segment` accepts WGS84 point coordinates, required `date`, and
+  `sensor_type` (`s2`, `s1`, `landsat`). It auto-selects the patch, computes or
+  reuses a cached embedding, and returns WGS84 GeoJSON polygon boxes.
+  `point_labels` is optional; when omitted, every prompt point is treated as a
+  positive foreground point (`1`). Do not reintroduce a `month` field for this
+  endpoint.
+- `/sam3/embed` remains available for preloading by explicit `patch_id`, `month`,
+  and optional `sensor_type`; cached IDs include sensor type.
+- Raw imagery is resolved through the same path helpers as mosaics, including
+  each region's `s2_dir` and `/workspace/raw`.
+- Embeddings are cached with an LRU cache controlled by `max_cache_size`.
+- GPU/model inference is serialized with an `asyncio.Lock`.
+- Integration tests are marked slow and should tolerate missing GPU/data/model
+  by returning availability-style responses rather than hard failing.
+
+### Tiles
+
+Patch-based tile listing is implemented. Standard XYZ tile image serving
+`/tiles/{z}/{x}/{y}.png` is intentionally not implemented and should return
+`501` unless the project explicitly adds real XYZ tile support.
+
+## Security Rules
+
+This service serves local files based on user-controlled path fragments. Preserve
+the existing defenses when changing file-serving code.
+
+- Validate patch IDs strictly as `patch_\d{6}`.
+- Validate `month`, `period`, dates, and task/version fragments before using
+  them in paths.
+- Use secure path resolution with `Path.resolve()` and containment checks.
+- Keep symlink blocking based on `os.lstat()` and parent-chain checks.
+- Keep file size limits and image/array safety caps aligned with tests.
+- Do not replace path safety with string concatenation or naive `exists()`.
+- Keep CORS restrictive by default; require explicit `CORS_ORIGINS`.
+- Do not hardcode the documented production URL in application code.
+- Do not commit API keys, ModelScope tokens, generated PID/log files, or local
+  server artifacts.
+
+## Code Style
+
+- Keep Python 3.9 compatibility; use `typing.Dict`, `List`, `Optional`, etc.
+- Follow the existing 88-character line-length style.
+- Group imports as standard library, third-party, first-party.
+- Routers should remain thin: validate request shape, check region/task
+  existence, call services, translate service errors to HTTP exceptions.
+- Put filesystem, ML, rasterization, and inference logic in services.
+- Offload blocking I/O or scans from async routes with `asyncio.to_thread` where
+  appropriate.
+- Use `logging.getLogger(__name__)`.
+- Add concise comments only for non-obvious logic.
+
+## Testing
+
+Preferred full project test command:
 
 ```bash
-# Run only the project test suite
 python -m pytest tests/ -v
+```
 
-# Run all tests including the slow SAM3 integration tests (require GPU + model)
+Slow SAM3 integration tests:
+
+```bash
 python -m pytest tests/ -v -m slow
 ```
 
-### Test Organization
+Common focused test files:
 
-- `tests/test_api.py` — Endpoint tests for regions, patches, embeddings, tasks, path traversal.
-- `tests/test_auth.py` — Authentication and user isolation tests.
-- `tests/test_models.py` — Custom model CRUD, GeoJSON-driven training, and inference tests.
-- `tests/test_geojson_adapter.py` — GeoJSON to pixel-mask conversion tests.
-- `tests/test_system_models.py` — System pre-trained model tests.
-- `tests/test_sam3_service.py` — Unit tests for `SAM3Service` with mocked model/image loading.
-- `tests/test_sam3_router.py` — Router-level validation tests for SAM3 endpoints.
-- `tests/test_sam3_schemas.py` — Pydantic schema validation tests.
-- `tests/test_sam3_config.py` — Config integration tests.
-- `tests/test_sam3_integration.py` — Real model loading tests; marked with `@pytest.mark.slow`.
+- `tests/test_api.py` - regions, patches, embeddings, task APIs, path traversal.
+- `tests/test_api_time_formats.py` - month/date normalization and task dates.
+- `tests/test_mosaic.py` - mosaic builder behavior and cache.
+- `tests/test_auth.py` - API key auth and user isolation.
+- `tests/test_models.py` - custom/system model endpoints and result URLs.
+- `tests/test_geojson_adapter.py` - GeoJSON rasterization.
+- `tests/test_system_models.py` - system model endpoints.
+- `tests/test_sam3_*.py` - SAM3 schemas/router/service/config/integration.
 
-The integration tests may return 200, 404, or 503 depending on GPU/data availability; they are designed not to fail hard when the model or data is missing.
+Always run tests as `python -m pytest tests/ ...`. Do not run bare `pytest`
+over the entire repository unless you intend to collect `sam3_pkg/`; vendored
+SAM3 scripts are not part of this service's normal test suite.
 
-### Test Environment Notes
+## Common Changes
 
-- `sam3_pkg/scripts/qualitative_test.py` is **not** part of the project test suite and may error during collection if pytest discovers it. Always run `python -m pytest tests/` explicitly.
-- Tests use `fastapi.testclient.TestClient` and do not require a running server.
+- Add a region: edit `config.yaml` and matching Docker config if needed; add
+  patch metadata, embedding versions, raw imagery dirs, and task dirs.
+- Add a task: edit the region's `tasks` config and update docs/tests. If it has
+  pre-generated outputs, wire `results`, `predictions`, `labels`, and summary
+  paths as needed.
+- Add an endpoint: add a router or extend an existing router, add schemas if
+  needed, keep business logic in `app/services/`, include the router in
+  `app/main.py`, and update docs/tests.
+- Change file serving: update service validation, size limits, symlink/path
+  containment tests, and API docs together.
+- Change auth/user storage: check `auth_service.py`, `user_paths.py`, model
+  registry behavior, and tests for user isolation.
+- Update API docs: keep `README.md`, `docs/API.md`, and this file consistent
+  with implementation.
 
-## Security Considerations
-
-This service serves files from the local filesystem based on user-supplied path fragments. Security is enforced at multiple layers:
-
-1. **Patch ID validation**: strict regex `patch_\d{6}`. Malformed IDs are rejected before any filesystem access.
-2. **Month / period validation**: only alphanumeric, hyphen, and underscore allowed; max length enforced.
-3. **Path containment**: `_resolve_path()` resolves paths with `Path.resolve()` and verifies `target.relative_to(base)`. It also checks the parent chain.
-4. **Symlink blocking**: `os.lstat()` is used to detect symlinks without following them, mitigating symlink-based escapes and TOCTOU races.
-5. **File size limits**: 100MB max for served files; embedding images are capped at 50M pixels; numpy arrays are capped at 500M elements to prevent memory-bomb attacks via malicious `.npy` headers.
-6. **CORS**: default `allow_origins=[]`; explicit origins are required via `CORS_ORIGINS`.
-7. **Authentication**: API-Key authentication is built-in and optional. When `config.yaml` contains `auth.users`, protected endpoints (`/models/*`, `/system-models/*`) require a valid `X-API-Key` or `Authorization: Bearer <key>` header. Public deployments should still place the service behind a reverse proxy for TLS and additional access control.
-8. **Docs**: Swagger/ReDoc are disabled by default in production. Enable only via environment variables.
-9. **Docker**: runs as a non-root user (`appuser`, uid 1000); data and models are mounted read-only.
-
-When modifying file-serving code, always preserve or extend these defenses. Do not switch to naive string concatenation or `os.path.exists()` checks without symlink protection.
-
-## Deployment Notes
-
-- The production base URL referenced in documentation is `http://60.31.21.42:22065`. This is documented for frontend teams; do not hardcode it in code.
-- The Dockerfile exposes port `8000` and runs uvicorn with `--workers 2`.
-- `docker-compose.yml` mounts external data directories. Ensure these paths exist on the host or update the compose file.
-- The watchdog is optional and intended for bare-metal deployments where no external process manager is available.
-
-## Common Tasks for Agents
-
-- **Add a new region**: edit `config.yaml` (or `config.docker.yaml` for Docker), add `patches_meta`, embedding paths, and optional tasks. No code change needed.
-- **Add a new task**: edit the region's `tasks` section in `config.yaml`; specify `results`, `predictions`, and `labels` directories per version.
-- **Change CORS or docs**: set `CORS_ORIGINS`, `DOCS_URL`, or `REDOC_URL` environment variables.
-- **Modify file size / cache limits**: update constants in `app/services/data_service.py` or `app/routers/embeddings.py`, and keep tests aligned.
-- **Add new endpoints**: create a router under `app/routers/`, add schemas under `app/schemas/`, implement logic under `app/services/`, and include the router in `app/main.py`.
-- **Run after changes**: `python -m pytest tests/` must pass before considering a change complete.
+Before considering a code change complete, run the relevant focused tests and,
+when practical, `python -m pytest tests/ -v`.

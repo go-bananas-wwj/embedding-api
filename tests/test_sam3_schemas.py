@@ -17,18 +17,30 @@ def test_embed_request_invalid_patch_id():
 
 def test_segment_request_valid():
     req = SegmentRequest(
-        embedding_id="harbin_patch_000000_2025-10",
-        point_coords=[[0.5, 0.5]],
-        point_labels=[1],
+        date="2025-10",
+        sensor_type="s2",
+        point_coords=[[126.52, 45.75]],
     )
-    assert req.multimask_output is True
+    assert req.point_labels is None
+    assert req.multimask_output is False
+
+
+def test_segment_request_rejects_legacy_month():
+    with pytest.raises(ValidationError):
+        SegmentRequest(
+            date="2025-10",
+            month="2025-10",
+            sensor_type="s2",
+            point_coords=[[126.52, 45.75]],
+        )
 
 
 def test_segment_request_coords_out_of_range():
     with pytest.raises(ValidationError):
         SegmentRequest(
-            embedding_id="test",
-            point_coords=[[1.5, 0.5]],
+            date="2025-10",
+            sensor_type="s2",
+            point_coords=[[181.0, 45.75]],
             point_labels=[1],
         )
 
@@ -36,7 +48,8 @@ def test_segment_request_coords_out_of_range():
 def test_segment_request_mismatched_lengths():
     with pytest.raises(ValidationError):
         SegmentRequest(
-            embedding_id="test",
-            point_coords=[[0.5, 0.5], [0.3, 0.3]],
+            date="2025-10",
+            sensor_type="s2",
+            point_coords=[[126.52, 45.75], [126.521, 45.751]],
             point_labels=[1],
         )

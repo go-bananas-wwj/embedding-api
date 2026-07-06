@@ -2,7 +2,7 @@
 
 > **文档版本**: 2.0  
 > **服务版本**: 0.1.0  
-> **最后更新**: 2026-06-26  
+> **最后更新**: 2026-07-06  
 > **GitHub**: [go-bananas-wwj/embedding-api](https://github.com/go-bananas-wwj/embedding-api)
 
 ---
@@ -123,14 +123,16 @@ curl -s "http://60.31.21.42:22065/system-models/results/land_cover_classificatio
 curl -s "http://60.31.21.42:22065/regions/harbin/sam3/status"
 curl -s -X POST "http://60.31.21.42:22065/regions/harbin/sam3/embed" \
   -H 'Content-Type: application/json' \
-  -d '{"patch_id": "patch_000000", "month": "2025-10"}'
+  -d '{"patch_id": "patch_000000", "month": "2025-10", "sensor_type": "s2"}'
 curl -s -X POST "http://60.31.21.42:22065/regions/harbin/sam3/segment" \
   -H 'Content-Type: application/json' \
   -d '{
-    "embedding_id": "harbin_patch_000000_2025-10",
-    "point_coords": [[0.52, 0.48]],
+    "date": "2025-10",
+    "sensor_type": "s2",
+    "point_coords": [[126.524, 45.750]],
     "point_labels": [1],
-    "multimask_output": true
+    "multimask_output": true,
+    "include_masks": false
   }'
 ```
 
@@ -836,6 +838,31 @@ GET /regions/{region_id}/patches/{patch_id}/tasks/{task_type}/result?format=png&
 | `before_month` | string | 否 | - | 变化检测任务的起始月份 |
 | `after_month` | string | 否 | - | 变化检测任务的结束月份 |
 
+#### 各区域任务可用时间范围
+
+时间格式统一为 `YYYY-MM`（如 `2025-04`、`2025-12`、`2026-05`），接口同时兼容 `YYYYMM` 写法。
+
+| 区域 | 任务 | 版本 | 时间参数 | 可用时间范围 |
+|------|------|------|----------|--------------|
+| 哈尔滨 | `change_detection` | `v1` / `v2` | `period` 或 `before_month`+`after_month` | 2025-04_vs_2025-06、2025-04_vs_2025-10、2025-06_vs_2025-08、2025-06_vs_2025-10、2025-08_vs_2025-09、2025-08_vs_2025-10、2025-09_vs_2025-10 |
+| 哈尔滨 | `building_extraction` | `v1` | `month` | 2025-04 ~ 2025-10（仅 2025-10 预生成，其余实时推理） |
+| 哈尔滨 | `building_extraction` | `v2` | `period` 或 `before_month`+`after_month` | 2025-04_vs_2025-06、2025-08_vs_2025-09、2025-09_vs_2025-10 |
+| 哈尔滨 | `road_extraction` | `v1` | `month` | 2025-04 ~ 2025-10 |
+| 哈尔滨 | `land_use_classification` | `v1` | `month` | 2025-04 ~ 2025-10（仅 2025-10 预生成，其余实时推理） |
+| 哈尔滨 | `land_use_classification` | `v2` | `period` 或 `before_month`+`after_month` | 2025-04_vs_2025-06、2025-08_vs_2025-09、2025-09_vs_2025-10 |
+| 哈尔滨 | `land_cover_classification` | `v1` / `v2` | `month` | 2025-04 ~ 2025-10（实时推理） |
+| 哈尔滨 | `water_extraction` | `v1` / `v2` | `month` | 2025-04 ~ 2025-10（实时推理） |
+| 海淀 | `building_extraction` | `v1` | `month` | 2025-12 ~ 2026-05 |
+| 海淀 | `road_extraction` | `v1` | `month` | 2025-12 ~ 2026-05 |
+| 海淀 | `construction` | `v1` | `month` | 2025-12 ~ 2026-05 |
+| 海淀 | `land_use_classification` | `v1` | `month` | 2025-12 ~ 2026-05 |
+| 海淀 | `land_cover_classification` | `v1` | `month` | 2025-12 ~ 2026-05 |
+| 海淀 | `water_extraction` | `v1` | `month` | 2025-12 ~ 2026-05 |
+
+> **说明**:
+> - 哈尔滨 `land_cover_classification`、`water_extraction` 没有预生成结果图，接口会根据 `month` 调用系统预训练模型实时推理；`building_extraction`、`land_use_classification` 的 `v1` 优先使用预生成结果，缺失月份同样会回退到系统模型推理。
+> - 海淀区 `road_extraction`、`construction` 与 `building_extraction` 等任务使用相同的时间范围。
+
 **curl 示例**:
 ```bash
 # 单期结果（传 month）
@@ -862,27 +889,15 @@ curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/tasks/chan
 - `404`: 该 Patch 在该任务下没有结果
 
 > **海淀区 V1 示例**（mask-only 结果，已按月份归档）：
-> 单期任务使用 `month` 参数指定 6 位月份（如 `202605`），`change_detection` 才使用 `before_month`/`after_month`。
+> 单期任务使用 `month` 参数指定月份（如 `2026-05`）。
 > ```bash
-> curl -s "http://60.31.21.42:22065/regions/haidian/patches/patch_000000/tasks/building_extraction/result?format=png&month=202605" -o /tmp/hd_be.png
-> curl -s "http://60.31.21.42:22065/regions/haidian/patches/patch_000000/tasks/road_extraction/result?format=png&month=202605" -o /tmp/hd_re.png
-> curl -s "http://60.31.21.42:22065/regions/haidian/patches/patch_000000/tasks/construction/result?format=png&month=202605" -o /tmp/hd_con.png
-> curl -s "http://60.31.21.42:22065/regions/haidian/patches/patch_000000/tasks/water_extraction/result?format=png&month=202605" -o /tmp/hd_water.png
+> curl -s "http://60.31.21.42:22065/regions/haidian/patches/patch_000000/tasks/building_extraction/result?format=png&month=2026-05" -o /tmp/hd_be.png
+> curl -s "http://60.31.21.42:22065/regions/haidian/patches/patch_000000/tasks/road_extraction/result?format=png&month=2026-05" -o /tmp/hd_re.png
+> curl -s "http://60.31.21.42:22065/regions/haidian/patches/patch_000000/tasks/construction/result?format=png&month=2026-05" -o /tmp/hd_con.png
+> curl -s "http://60.31.21.42:22065/regions/haidian/patches/patch_000000/tasks/water_extraction/result?format=png&month=2026-05" -o /tmp/hd_water.png
 > ```
-> 返回结果为 128×128 PNG，无卫星底图，仅保留红色前景掩膜。
-> `building_extraction`、`road_extraction`、`water_extraction` 来自 `monthly_mask_only_patch_tiles`；
-> `construction` 来自 `construction_model_only_oracle_threshold`。
->
-> **注意**: 该接口现在对分类任务优先返回 **xuannv_show 预生成的语义掩膜 tile**，顺序如下：
-> - `building_extraction` → `/workspace/xuannv_show/static_assets/data/seg_tiles/building_extraction/{month}/{patch_id}.png`
-> - `land_use_classification` → `/workspace/xuannv_show/static_assets/data/seg_tiles/dynamic_world/{month}/{patch_id}.png`
-> - `land_cover_classification` → `/workspace/xuannv_show/static_assets/data/seg_tiles/worldcover/{month}/{patch_id}.png`
-> - `water_extraction` → `/workspace/xuannv_show/static_assets/data/seg_tiles/jrc_water/{month}/{patch_id}.png`
->
-> 若静态 tile 不存在，则自动调用对应的系统预训练模型实时推理生成。
-> 因此 `building_extraction`、`land_use_classification` 的结果现在是正确的语义掩膜，不再是 `construction` / `farmland` 的概率热力图。
->
-> `change_detection`、`construction`（v2 building_extraction）、`land_conversion`（v2 land_use）仍走原来的预计算变化概率图。
+> 返回结果为 128×128 PNG，无卫星底图，仅保留前景掩膜。
+> 所有任务结果均来自预生成结果或系统预训练模型实时推理。
 
 ---
 
@@ -933,7 +948,7 @@ curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/tasks/land
 
 ### 11. 标签数据
 
-获取某个 Patch 的真实标签（Ground Truth）。标签来源可能是人工标注或自动生成。
+获取某个 Patch 的真实标签（Ground Truth）。标签来源可能是离线标注或自动生成。
 
 ```
 GET /regions/{region_id}/patches/{patch_id}/tasks/{task_type}/label?version=v1&period=...
@@ -1231,7 +1246,7 @@ POST /models
 - `classification` 模型还需要 `month`；`change_detection` 模型还需要 `before_month` 和 `after_month`。
 - `geometry` 坐标使用 WGS84 `[lon, lat]`。
 - 所有 `Feature` 的 `region_id` 必须与请求体顶层 `region_id` 一致。
-- 所有 `Feature` 的 `class_id` 必须在 `classes` 中定义，且当传入 `class_ids` 时必须在 `class_ids` 内。
+- 所有 `Feature` 的 `class_id` 必须在 `classes` 中定义。若传入 `class_ids`，只有这些类别会参与训练；未选中的标注会被忽略。
 - 限制：最多 `10000` 个 Feature，总顶点数不超过 `100000`。
 
 **curl 示例 — 分类模型**:
@@ -1583,30 +1598,38 @@ curl -s -X POST "http://60.31.21.42:22065/models/building_extraction/infer_batch
 
 **成功响应** (200):
 ```json
-[
-  {
-    "patch_id": "patch_000000",
-    "status": "success",
-    "result_url": "/models/results/infer_model_ghi789_harbin_patch_000000_2025-04.png",
-    "error": null
-  },
-  {
-    "patch_id": "patch_000001",
-    "status": "success",
-    "result_url": "/models/results/infer_model_ghi789_harbin_patch_000001_2025-04.png",
-    "error": null
-  }
-]
+{
+  "total": 2,
+  "success_count": 2,
+  "error_count": 0,
+  "results": [
+    {
+      "patch_id": "patch_000000",
+      "status": "success",
+      "result_url": "/models/results/infer_model_ghi789_harbin_patch_000000_2025-04.png",
+      "error": null
+    },
+    {
+      "patch_id": "patch_000001",
+      "status": "success",
+      "result_url": "/models/results/infer_model_ghi789_harbin_patch_000001_2025-04.png",
+      "error": null
+    }
+  ]
+}
 ```
 
 > 系统模型的 `result_url` 路径为 `/system-models/results/{filename}`。
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `patch_id` | string | Patch ID |
-| `status` | string | `success` 或 `error` |
-| `result_url` | string | 结果图路径 |
-| `error` | string | 错误信息 |
+| `total` | int | 请求的 Patch 数量 |
+| `success_count` | int | 成功数量 |
+| `error_count` | int | 失败数量 |
+| `results[].patch_id` | string | Patch ID |
+| `results[].status` | string | `success` 或 `error` |
+| `results[].result_url` | string | 结果图路径 |
+| `results[].error` | string | 错误信息 |
 
 ---
 
@@ -1947,7 +1970,7 @@ curl -s "http://60.31.21.42:22065/regions/harbin/sam3/status"
 
 ### 28. SAM3 Embed — 预加载影像
 
-预加载 patch 的 S2 RGB 影像，计算 SAM3 embedding，返回影像和 embedding_id。
+预加载 patch 的遥感影像，计算 SAM3 embedding，返回影像和 embedding_id。
 
 ```
 POST /regions/{region_id}/sam3/embed
@@ -1964,7 +1987,8 @@ POST /regions/{region_id}/sam3/embed
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `patch_id` | string | 是 | Patch ID |
-| `month` | string | 是 | 月份，如 `2025-10` |
+| `month` | string | 是 | 日期/月，如 `2025-10`、`202510` |
+| `sensor_type` | string | 否 | 传感器类型：`s2`、`s1`、`landsat`，默认 `s2` |
 
 **curl 示例**:
 ```bash
@@ -1972,14 +1996,15 @@ curl -s -X POST "http://60.31.21.42:22065/regions/harbin/sam3/embed" \
   -H 'Content-Type: application/json' \
   -d '{
     "patch_id": "patch_000000",
-    "month": "2025-10"
+    "month": "2025-10",
+    "sensor_type": "s2"
   }'
 ```
 
 **成功响应** (200):
 ```json
 {
-  "embedding_id": "harbin_patch_000000_2025-10",
+  "embedding_id": "harbin_patch_000000_s2_202510",
   "status": "ready",
   "image": {
     "width": 256,
@@ -1992,12 +2017,12 @@ curl -s -X POST "http://60.31.21.42:22065/regions/harbin/sam3/embed" \
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `embedding_id` | string | 后续 segment 请求的标识符 |
+| `embedding_id` | string | 缓存标识符，格式包含 region、patch、sensor 和日期 |
 | `status` | string | 状态，通常为 `ready` |
 | `image.width` | int | 影像宽度 |
 | `image.height` | int | 影像高度 |
 | `image.format` | string | 图片格式 |
-| `image.data` | string | S2 RGB 自然色影像的 base64 PNG |
+| `image.data` | string | 遥感影像可视化后的 base64 PNG |
 
 **错误码**:
 - `400`: 请求参数错误（如非法 patch_id、路径穿越尝试）
@@ -2010,7 +2035,8 @@ curl -s -X POST "http://60.31.21.42:22065/regions/harbin/sam3/embed" \
 
 ### 29. SAM3 Segment — 点选分割
 
-基于已缓存的 embedding 和用户点击的点坐标，生成分割掩码。
+前端传入 WGS84 标注点坐标和传感器类型。服务端自动定位 patch、加载影像、
+计算或复用 SAM3 embedding，并返回 WGS84 GeoJSON 标注框。
 
 ```
 POST /regions/{region_id}/sam3/segment
@@ -2026,31 +2052,46 @@ POST /regions/{region_id}/sam3/segment
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `embedding_id` | string | 是 | embed 接口返回的 ID |
-| `point_coords` | float[][] | 是 | 归一化坐标 `[[x, y], ...]`，范围 `[0, 1]` |
-| `point_labels` | int[] | 是 | `1`=正样本（前景），`0`=负样本（背景） |
-| `multimask_output` | bool | 否 | `true` 返回 3 个候选掩码，`false` 返回 1 个，默认 `true` |
+| `date` | string | 是 | 影像日期/月，用于选择要分割的遥感影像。支持 `2025-10`、`202510`、`20251001` |
+| `sensor_type` | string | 否 | 传感器类型：`s2`=Sentinel-2 光学影像，`s1`=Sentinel-1 SAR，`landsat`=Landsat 光学影像；默认 `s2` |
+| `point_coords` | float[][] | 是 | 用户点击的 WGS84 经纬度点列表，每个点为 `[longitude, latitude]`，即 `[经度, 纬度]` |
+| `point_labels` | int[] | 否 | 可选点标签。`1`=前景目标点，`0`=背景排除点。当前前端不用传；不传时后端默认所有点都是 `1` |
+| `multimask_output` | bool | 否 | 是否返回多个候选结果。`false`=只返回一个最优候选，适合常规交互；`true`=返回多个候选供用户二次选择。默认 `false` |
+| `include_masks` | bool | 否 | 是否在 GeoJSON 标注框之外额外返回 base64 PNG mask。默认 `false`，响应更小 |
 
 **curl 示例**:
 ```bash
 curl -s -X POST "http://60.31.21.42:22065/regions/harbin/sam3/segment" \
   -H 'Content-Type: application/json' \
   -d '{
-    "embedding_id": "harbin_patch_000000_2025-10",
-    "point_coords": [[0.52, 0.48]],
-    "point_labels": [1],
-    "multimask_output": true
+    "date": "2025-10",
+    "sensor_type": "s2",
+    "point_coords": [[126.524, 45.750]],
+    "multimask_output": false,
+    "include_masks": false
   }'
 ```
 
 **成功响应** (200):
 ```json
 {
-  "masks": [
+  "type": "FeatureCollection",
+  "features": [
     {
-      "data": "iVBORw0KGgoAAAANSUhEUgAAAQAAAAEAC...",
-      "score": 0.95,
-      "bbox": [120, 110, 35, 42]
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[126.5231, 45.7501], [126.5244, 45.7501], [126.5244, 45.7510], [126.5231, 45.7510], [126.5231, 45.7501]]]
+      },
+      "properties": {
+        "score": 0.95,
+        "bbox": [120, 110, 35, 42],
+        "bbox_wgs84": [126.5231, 45.7501, 126.5244, 45.7510],
+        "patch_id": "patch_000000",
+        "sensor_type": "s2",
+        "date": "2025-10",
+        "candidate_index": 0
+      }
     }
   ]
 }
@@ -2058,16 +2099,22 @@ curl -s -X POST "http://60.31.21.42:22065/regions/harbin/sam3/segment" \
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `data` | string | 二值掩码的 base64 PNG（白色=选中区域，黑色=背景） |
-| `score` | float | 模型置信度 `[0, 1]` |
-| `bbox` | int[] | 边界框 `[x, y, width, height]`（像素坐标） |
+| `type` | string | 固定为 `FeatureCollection` |
+| `features[].geometry` | object | WGS84 GeoJSON Polygon，可直接作为标注框 |
+| `features[].properties.score` | float | 模型置信度 `[0, 1]` |
+| `features[].properties.bbox` | int[] | SAM 输入图像上的像素框 `[x, y, width, height]` |
+| `features[].properties.bbox_wgs84` | float[] | WGS84 bbox `[min_lon, min_lat, max_lon, max_lat]` |
+| `masks` | array | 仅当 `include_masks=true` 时返回 base64 PNG 掩码 |
 
 **错误码**:
-- `404`: embedding_id 不存在（未调用 embed）
-- `422`: 坐标格式错误或越界
+- `400`: 点不在同一个 patch、日期格式非法或源影像无 CRS
+- `404`: 点不在区域覆盖范围内，或指定日期/传感器影像不存在
+- `422`: 坐标格式错误或经纬度越界
 - `503`: GPU 推理失败
 
 **前端提示**:
+- `/sam3/segment` 已取消 `month` 字段，只使用 `date`。
+- 前端一般不需要传 `point_labels`；后端会把所有 `point_coords` 默认当成前景目标点 `1`。
 - 掩码 PNG 可叠加在原始影像上显示（白色区域半透明覆盖）
 - `multimask_output=true` 时，前端可让用户从 3 个候选掩码中选择最佳结果
 

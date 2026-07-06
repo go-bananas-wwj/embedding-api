@@ -43,6 +43,9 @@
 - **训练包**：前端在调用 `POST /models` 时，把完整的标注包（GeoJSON FeatureCollection + classes 数组）一次性传给后端。
 - **后端训练**：后端解析 GeoJSON，把 WGS84 多边形栅格化为 128×128 mask，提取 embedding，训练一个轻量级的下游任务头（LogisticRegression）。
 - **模型名称用户定义**：`name` 字段由用户输入，后端只负责生成 `model_id`。
+- **无演示兜底**：`POST /models` 必须提交完整 `annotations` 和
+  `classes`。空请求、缺字段或格式错误会返回 `422`，不会自动创建 demo
+  模型。
 
 ---
 
@@ -151,6 +154,7 @@ curl -H "Authorization: Bearer your_api_key" http://60.31.21.42:22065/health
 - 一个 `FeatureCollection` 可以包含**多个 Feature**，同一 `class_id` 在同一 Patch/时间下的多个 Polygon 会自动合并成一个 mask。
 - 一个训练请求可以包含**多个类别**；后端会为每个类别分配独立的数字标签（从 1 开始，0 为背景）。
 - 同一 Patch 内不同类别的像素不会被误标为背景：后端会先计算所有活跃类别的并集 mask，负样本仅从“任何类别都没有覆盖”的区域抽取。
+- `class_ids` 可选。传入时表示“本次只训练这些类别”；完整标注包里可以包含未选中的类别，后端会忽略它们。`class_ids` 中的每个 ID 必须在 `classes` 中定义。
 
 ---
 
@@ -294,7 +298,7 @@ Content-Type: application/json
   - `classification` 仅支持 `building_extraction`、`land_use_classification`、`land_cover_classification`、`water_extraction`。
   - `change_detection` 必须搭配 `task_type: "change_detection"`。
 - 所有 Feature 的 `region_id` 必须与顶层 `region_id` 一致。
-- 所有 Feature 的 `class_id` 必须在 `classes` 中定义；如果传入 `class_ids`，还必须在 `class_ids` 子集内。
+- 所有 Feature 的 `class_id` 必须在 `classes` 中定义；如果传入 `class_ids`，未选中的类别会在训练时被忽略。
 - 标注包限制：最多 `10000` 个 Feature，总顶点数不超过 `100000`。
 - `epochs` 会映射为 `LogisticRegression` 的 `max_iter`，默认 `100`。
 
@@ -437,20 +441,25 @@ Content-Type: application/json
 ### 响应
 
 ```json
-[
-  {
-    "patch_id": "patch_000000",
-    "status": "success",
-    "result_url": "/models/results/infer_model_xyz789_harbin_patch_000000_2025-04.png",
-    "error": null
-  },
-  {
-    "patch_id": "patch_000001",
-    "status": "success",
-    "result_url": "/models/results/infer_model_xyz789_harbin_patch_000001_2025-04.png",
-    "error": null
-  }
-]
+{
+  "total": 2,
+  "success_count": 2,
+  "error_count": 0,
+  "results": [
+    {
+      "patch_id": "patch_000000",
+      "status": "success",
+      "result_url": "/models/results/infer_model_xyz789_harbin_patch_000000_2025-04.png",
+      "error": null
+    },
+    {
+      "patch_id": "patch_000001",
+      "status": "success",
+      "result_url": "/models/results/infer_model_xyz789_harbin_patch_000001_2025-04.png",
+      "error": null
+    }
+  ]
+}
 ```
 
 ---

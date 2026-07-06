@@ -23,8 +23,11 @@ HAIDIAN_V1_MODELS_DIR: Path = HAIDIAN_MODELS_DIR / "v1"
 HAIDIAN_V1_EMBEDDINGS_DIR: Path = HAIDIAN_V1_DATA_DIR / "embeddings" / "v1"
 HAIDIAN_V1_TASKS_DIR: Path = HAIDIAN_V1_DATA_DIR / "tasks"
 
-DEFAULT_MODELSCOPE_REPO = "WeijieWu/xuannv_embdding_api"
-DEFAULT_MODELSCOPE_PREFIX = "haidian/v1/api_ready"
+DEFAULT_MODELSCOPE_REPO = "WeijieWu/xuannv_haidian_embdding"
+DEFAULT_MODELSCOPE_PREFIX = "artifacts/haidian-embedding-v1"
+DEFAULT_EMBEDDING_ARTIFACT = (
+    "embeddings/haidian_202512_202605_p10c_epoch800/haidian"
+)
 
 # Source locations used when preparing a local upload package from the training
 # machine.  These can be overridden without editing the script.
@@ -76,4 +79,3 @@ def task_results_dir(task: str, version: str = "v1") -> Path:
 
 def task_labels_dir(task: str, version: str = "v1") -> Path:
     return task_dir(task, version) / "labels"
-

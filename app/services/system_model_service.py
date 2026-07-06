@@ -65,6 +65,7 @@ def list_system_models(region_id: Optional[str] = None) -> List[Dict[str, Any]]:
         "land_use_classification": ["dynamic_world"],
         "water_extraction": ["jrc_water"],
         "building_extraction": ["osm_buildings"],
+        "road_extraction": ["road_extraction"],
     }
 
     for task_id, aliases in task_aliases.items():
@@ -74,17 +75,25 @@ def list_system_models(region_id: Optional[str] = None) -> List[Dict[str, Any]]:
             classification = version_cfg.get("classification", {})
             tasks = classification.get("tasks", {})
             convhead = version_cfg.get("classification_convhead", {}).get("tasks", {})
+            task_heads = version_cfg.get("task_heads", {}).get("tasks", {})
+            if task_id in task_heads:
+                available_versions.append(version)
+                continue
             for alias in aliases:
                 if alias in tasks or alias in convhead:
                     available_versions.append(version)
                     break
+
+        versions = sorted(set(available_versions))
+        if region_id and not versions:
+            continue
 
         result.append(
             {
                 "id": task_id,
                 "name": _task_display_name(task_id),
                 "description": _task_description(task_id),
-                "versions": list(set(available_versions)),
+                "versions": versions,
             }
         )
 
@@ -97,6 +106,7 @@ def _task_display_name(task_id: str) -> str:
         "land_use_classification": "土地利用分类",
         "water_extraction": "水体提取",
         "building_extraction": "建筑物提取",
+        "road_extraction": "道路提取",
     }.get(task_id, task_id)
 
 
@@ -106,10 +116,17 @@ def _task_description(task_id: str) -> str:
         "land_use_classification": "Dynamic World 土地利用分类",
         "water_extraction": "JRC Global Surface Water 水体提取",
         "building_extraction": "OSM 建筑物提取",
+        "road_extraction": "OSM 路网提取",
     }.get(task_id, "")
 
 
-SYSTEM_TASK_IDS = {"land_cover_classification", "land_use_classification", "water_extraction", "building_extraction"}
+SYSTEM_TASK_IDS = {
+    "land_cover_classification",
+    "land_use_classification",
+    "water_extraction",
+    "building_extraction",
+    "road_extraction",
+}
 
 
 def is_system_task(task_id: str) -> bool:
@@ -175,7 +192,15 @@ def _resolve_model_path(
         "land_use_classification": ["dynamic_world"],
         "water_extraction": ["jrc_water"],
         "building_extraction": ["osm_buildings"],
+        "road_extraction": ["road_extraction"],
     }
+
+    task_heads = version_cfg.get("task_heads", {})
+    if task_heads:
+        tasks = task_heads.get("tasks", {})
+        if task_id in tasks:
+            base = Path(task_heads["path"])
+            return base / tasks[task_id]["file"]
 
     for alias in alias_map.get(task_id, []):
         # Prefer linear_probe
@@ -205,6 +230,9 @@ def get_system_model_classes(
     if not model_path or not model_path.exists():
         raise FileNotFoundError(f"System model not found: {task_id} ({version})")
 
+    if model_path.suffix == ".pt":
+        return _binary_task_classes(task_id)
+
     model_data = joblib.load(model_path)
     class_names = model_data.get("class_names", [])
     colors = model_data.get("colors", [])
@@ -218,6 +246,59 @@ def get_system_model_classes(
             hex_color = str(color)
         classes.append({"id": f"sys_{task_id}_{idx}", "name": name, "color": hex_color})
     return classes
+
+
+def _binary_task_classes(task_id: str) -> List[Dict[str, Any]]:
+    """Return display classes for binary PyTorch segmentation heads."""
+    names = {
+        "building_extraction": "建筑物",
+        "road_extraction": "道路",
+        "water_extraction": "水体",
+    }
+    colors = {
+        "building_extraction": "#ef4444",
+        "road_extraction": "#f59e0b",
+        "water_extraction": "#2563eb",
+    }
+    return [
+        {"id": f"sys_{task_id}_0", "name": "背景", "color": "#000000"},
+        {
+            "id": f"sys_{task_id}_1",
+            "name": names.get(task_id, _task_display_name(task_id)),
+            "color": colors.get(task_id, "#22c55e"),
+        },
+    ]
+
+
+def _infer_torch_mlp(model_path: Path, emb: np.ndarray) -> np.ndarray:
+    """Run a small binary MLP state_dict over a [D,H,W] embedding map."""
+    import torch
+
+    state = torch.load(model_path, map_location="cpu")
+    in_dim = int(state["net.0.weight"].shape[1])
+    hidden_dim = int(state["net.0.weight"].shape[0])
+    model = torch.nn.Sequential(
+        torch.nn.Linear(in_dim, hidden_dim),
+        torch.nn.ReLU(),
+        torch.nn.Linear(hidden_dim, 1),
+    )
+    normalized_state = {
+        key.replace("net.", "", 1): value
+        for key, value in state.items()
+    }
+    model.load_state_dict(normalized_state)
+    model.eval()
+
+    D, H, W = emb.shape
+    if D != in_dim:
+        raise ValueError(
+            f"Embedding channel mismatch: model expects {in_dim}, got {D}"
+        )
+    flat = torch.from_numpy(emb.reshape(D, -1).T.astype(np.float32, copy=False))
+    with torch.no_grad():
+        logits = model(flat).squeeze(1)
+        pred = (torch.sigmoid(logits) >= 0.5).cpu().numpy().astype(np.uint8)
+    return pred.reshape(H, W)
 
 
 def infer_system_model(
@@ -242,24 +323,30 @@ def infer_system_model(
             f"Embedding not found for {patch_id} {month}"
         )
 
-    model_data = joblib.load(model_path)
-    scaler = model_data["scaler"]
-    clf = model_data["model"]
-    class_names = model_data.get("class_names", [])
-    colors = model_data.get("colors", [])
+    if model_path.suffix == ".pt":
+        pred = _infer_torch_mlp(model_path, emb)
+        _, H, W = emb.shape
+        color = _hex_to_rgb(_binary_task_classes(task_id)[1]["color"])
+        rgb = np.full((H, W, 3), 0, dtype=np.uint8)
+        rgb[pred == 1] = color
+    else:
+        model_data = joblib.load(model_path)
+        scaler = model_data["scaler"]
+        clf = model_data["model"]
+        colors = model_data.get("colors", [])
 
-    D, H, W = emb.shape
-    flat = emb.reshape(D, -1).T
-    flat_s = scaler.transform(flat)
-    pred = clf.predict(flat_s).reshape(H, W)
+        D, H, W = emb.shape
+        flat = emb.reshape(D, -1).T
+        flat_s = scaler.transform(flat)
+        pred = clf.predict(flat_s).reshape(H, W)
 
-    rgb = np.full((H, W, 3), 200, dtype=np.uint8)
-    for idx, color in enumerate(colors):
-        if isinstance(color, tuple):
-            rgb[pred == idx] = color
-        else:
-            rgb[pred == idx] = _hex_to_rgb(str(color))
-    rgb[pred == -1] = (200, 200, 200)
+        rgb = np.full((H, W, 3), 200, dtype=np.uint8)
+        for idx, color in enumerate(colors):
+            if isinstance(color, tuple):
+                rgb[pred == idx] = color
+            else:
+                rgb[pred == idx] = _hex_to_rgb(str(color))
+        rgb[pred == -1] = (200, 200, 200)
 
     img = Image.fromarray(rgb).resize((128, 128), Image.Resampling.NEAREST)
 

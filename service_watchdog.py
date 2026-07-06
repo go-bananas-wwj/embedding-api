@@ -10,23 +10,22 @@ Usage:
     python service_watchdog.py stop         # Stop the watchdog
 """
 
+import logging
 import os
 import signal
 import subprocess
 import sys
 import time
-import logging
 from typing import Optional
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
-logger = logging.getLogger("embedding-watchdog")
 
 PROJECT_DIR = "/workspace/embedding-api"
 PID_FILE = os.path.join(PROJECT_DIR, "service_watchdog.pid")
-CHECK_INTERVAL = 30  # seconds
+LOG_DIR = os.path.join(PROJECT_DIR, "logs")
+WATCHDOG_LOG_FILE = os.path.join(LOG_DIR, "watchdog.log")
+SERVICE_LOG_FILE = os.path.join(LOG_DIR, "uvicorn.log")
+CHECK_INTERVAL = int(os.environ.get("WATCHDOG_CHECK_INTERVAL", "60"))
+HEALTH_CONNECT_TIMEOUT = int(os.environ.get("WATCHDOG_CONNECT_TIMEOUT", "5"))
+HEALTH_TOTAL_TIMEOUT = int(os.environ.get("WATCHDOG_HEALTH_TIMEOUT", "20"))
 HEALTH_URL = "http://localhost:9061/health"
 UVICORN_CMD = [
     sys.executable, "-m", "uvicorn",
@@ -45,6 +44,28 @@ UVICORN_ENV = {
 RESTART_BACKOFFS = [5, 10, 30, 60, 120]  # seconds
 
 
+def configure_logging() -> logging.Logger:
+    """Configure console + file logging for watchdog diagnostics."""
+    os.makedirs(LOG_DIR, exist_ok=True)
+    logger = logging.getLogger("embedding-watchdog")
+    logger.setLevel(logging.INFO)
+    logger.handlers.clear()
+
+    formatter = logging.Formatter(
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    )
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(formatter)
+    file_handler = logging.FileHandler(WATCHDOG_LOG_FILE, encoding="utf-8")
+    file_handler.setFormatter(formatter)
+    logger.addHandler(stream_handler)
+    logger.addHandler(file_handler)
+    return logger
+
+
+logger = configure_logging()
+
+
 class ServiceWatchdog:
     """Manages the embedding-api process with health checks and graceful restarts."""
 
@@ -56,10 +77,18 @@ class ServiceWatchdog:
         """Check if embedding-api is responding on port 9061."""
         try:
             result = subprocess.run(
-                ["curl", "-s", "--connect-timeout", "3", HEALTH_URL],
+                [
+                    "curl",
+                    "-s",
+                    "--connect-timeout",
+                    str(HEALTH_CONNECT_TIMEOUT),
+                    "--max-time",
+                    str(HEALTH_TOTAL_TIMEOUT),
+                    HEALTH_URL,
+                ],
                 capture_output=True,
                 text=True,
-                timeout=5,
+                timeout=HEALTH_TOTAL_TIMEOUT + 2,
             )
             return result.returncode == 0 and '"status":"ok"' in result.stdout
         except Exception:
@@ -69,14 +98,18 @@ class ServiceWatchdog:
         """Start the embedding-api process."""
         logger.info("Starting embedding-api service...")
         self._stop_service(wait=True)
+        os.makedirs(LOG_DIR, exist_ok=True)
+        service_log = open(SERVICE_LOG_FILE, "ab", buffering=0)
         self._process = subprocess.Popen(
             UVICORN_CMD,
             cwd=PROJECT_DIR,
             env=UVICORN_ENV,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=service_log,
+            stderr=subprocess.STDOUT,
             start_new_session=True,
         )
+        service_log.close()
+        logger.info("Service log: %s", SERVICE_LOG_FILE)
         # Wait for service to become healthy
         for _ in range(20):
             time.sleep(0.5)
@@ -134,6 +167,8 @@ class ServiceWatchdog:
         logger.info("Embedding API Watchdog started")
         logger.info(f"Health check URL: {HEALTH_URL}")
         logger.info(f"Check interval: {CHECK_INTERVAL}s")
+        logger.info(f"Watchdog log: {WATCHDOG_LOG_FILE}")
+        logger.info(f"Service log: {SERVICE_LOG_FILE}")
         logger.info("=" * 50)
 
         if not self._is_healthy():

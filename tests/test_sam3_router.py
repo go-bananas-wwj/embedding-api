@@ -34,24 +34,34 @@ class TestSAM3Embed:
 class TestSAM3Segment:
     def test_segment_invalid_region(self):
         response = client.post("/regions/beijing/sam3/segment", json={
-            "embedding_id": "test",
-            "point_coords": [[0.5, 0.5]],
-            "point_labels": [1],
+            "date": "2025-10",
+            "sensor_type": "s2",
+            "point_coords": [[126.52, 45.75]],
         })
         assert response.status_code == 404
 
-    def test_segment_coords_out_of_range(self):
+    def test_segment_rejects_legacy_month(self):
         response = client.post("/regions/harbin/sam3/segment", json={
-            "embedding_id": "test",
-            "point_coords": [[1.5, 0.5]],
-            "point_labels": [1],
+            "date": "2025-10",
+            "month": "2025-10",
+            "sensor_type": "s2",
+            "point_coords": [[126.52, 45.75]],
+        })
+        assert response.status_code == 422
+
+    def test_segment_coords_invalid_wgs84(self):
+        response = client.post("/regions/harbin/sam3/segment", json={
+            "date": "2025-10",
+            "sensor_type": "s2",
+            "point_coords": [[181.0, 45.75]],
         })
         assert response.status_code == 422
 
     def test_segment_mismatched_labels(self):
         response = client.post("/regions/harbin/sam3/segment", json={
-            "embedding_id": "test",
-            "point_coords": [[0.5, 0.5], [0.3, 0.3]],
+            "date": "2025-10",
+            "sensor_type": "s2",
+            "point_coords": [[126.52, 45.75], [126.521, 45.751]],
             "point_labels": [1],
         })
         assert response.status_code == 422

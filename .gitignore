@@ -39,6 +39,9 @@ service_watchdog.log
 service_watchdog.pid
 watchdog.log
 watchdog.pid
+server_*.log
+server_*.pid
+logs/
 nohup.out
 
 # Data and models (large files, not committed)
@@ -52,6 +55,11 @@ system_models/
 # Test outputs
 test_output/
 test_output_agent/
+Tmp/
+audit_results/
+temp/
+.msc
+.mv
 
 # ModelScope download cache
 .modelscope_cache/

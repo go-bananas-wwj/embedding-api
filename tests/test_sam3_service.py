@@ -25,12 +25,15 @@ class TestSAM3ServiceStatus:
 
 class TestSAM3ServiceCache:
     @patch.object(SAM3Service, "_ensure_model")
-    @patch.object(SAM3Service, "_load_s2_image")
+    @patch.object(SAM3Service, "_load_geo_image")
     @patch("app.services.sam3_service.get_config")
     def test_embed_caches_result(self, mock_get_config, mock_load_img, mock_ensure):
         mock_get_config.return_value.get_sam3_config.return_value = {"max_cache_size": 2}
         mock_img = MagicMock()
-        mock_load_img.return_value = mock_img
+        mock_load_img.return_value = (
+            mock_img,
+            {"sam_width": 256, "sam_height": 256},
+        )
 
         svc = SAM3Service()
         svc._processor = MagicMock()
@@ -40,7 +43,7 @@ class TestSAM3ServiceCache:
         import asyncio
         result = asyncio.run(svc.embed("harbin", "patch_000", "2025-10"))
 
-        assert result["embedding_id"] == "harbin_patch_000_2025-10"
+        assert result["embedding_id"] == "harbin_patch_000_s2_202510"
         assert "image" in result
         assert "data" in result["image"]
         assert len(svc._cache) == 1
@@ -53,15 +56,18 @@ class TestSAM3ServiceCache:
 
         import asyncio
         with pytest.raises(ValueError, match="Embedding"):
-            asyncio.run(svc.segment("missing_id", [[0.5, 0.5]], [1]))
+            asyncio.run(svc._predict_from_cache("missing_id", [[0.5, 0.5]], [1]))
 
     @patch.object(SAM3Service, "_ensure_model")
-    @patch.object(SAM3Service, "_load_s2_image")
+    @patch.object(SAM3Service, "_load_geo_image")
     @patch("app.services.sam3_service.get_config")
     def test_lru_eviction(self, mock_get_config, mock_load_img, mock_ensure):
         mock_get_config.return_value.get_sam3_config.return_value = {"max_cache_size": 2}
         mock_img = MagicMock()
-        mock_load_img.return_value = mock_img
+        mock_load_img.return_value = (
+            mock_img,
+            {"sam_width": 256, "sam_height": 256},
+        )
 
         svc = SAM3Service()
         svc._processor = MagicMock()
@@ -74,4 +80,4 @@ class TestSAM3ServiceCache:
         asyncio.run(svc.embed("harbin", "patch_002", "2025-10"))
 
         assert len(svc._cache) == 2
-        assert "harbin_patch_000_2025-10" not in svc._cache
+        assert "harbin_patch_000_s2_202510" not in svc._cache

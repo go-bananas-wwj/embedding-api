@@ -3,15 +3,23 @@
 import asyncio
 import base64
 import io
+import logging
+import re
+import sys
 import threading
 from collections import OrderedDict
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 from PIL import Image
 
 from app.config import get_config
+from app.services.data_service import DataNotFoundError, DataValidationError
+from app.services.mosaic_service import RAW_ROOT, _SENSOR_RGB, _get_raw_tiff_path, _to_rgb
+from app.services.time_utils import normalize_quarter_date
+
+logger = logging.getLogger(__name__)
 
 
 class SAM3Service:
@@ -51,6 +59,48 @@ class SAM3Service:
             self._inference_lock = asyncio.Lock()
         return self._inference_lock
 
+    @staticmethod
+    def _cache_date_key(date: str) -> str:
+        """Canonicalize equivalent month strings for stable cache keys."""
+        if re.fullmatch(r"\d{8}", date):
+            return date
+        if re.fullmatch(r"\d{6}", date):
+            return date
+        match = re.fullmatch(r"(\d{4})-(\d{2})", date)
+        if match:
+            return f"{match.group(1)}{match.group(2)}"
+        return date
+
+    @staticmethod
+    def _transform_coords(
+        src_crs: Any,
+        dst_crs: Any,
+        xs: List[float],
+        ys: List[float],
+    ) -> Tuple[List[float], List[float]]:
+        """Transform coordinates, falling back to pyproj if rasterio's PROJ DB is stale."""
+        from rasterio.warp import transform as warp_transform
+
+        try:
+            return warp_transform(src_crs, dst_crs, xs, ys)
+        except Exception as exc:
+            logger.warning(
+                "rasterio coordinate transform failed; falling back to pyproj: %s",
+                exc,
+            )
+            try:
+                from pyproj import Transformer
+
+                src = src_crs.to_wkt() if hasattr(src_crs, "to_wkt") else src_crs
+                dst = dst_crs.to_wkt() if hasattr(dst_crs, "to_wkt") else dst_crs
+                transformer = Transformer.from_crs(src, dst, always_xy=True)
+                out_xs, out_ys = transformer.transform(xs, ys)
+                return list(out_xs), list(out_ys)
+            except Exception as fallback_exc:
+                raise DataValidationError(
+                    "Unable to transform between image CRS and WGS84"
+                ) from fallback_exc
+
     def _ensure_model(self):
         """Lazy-load SAM3 model. Thread-safe double-checked locking."""
         if self._model is not None and self._processor is not None:
@@ -59,6 +109,10 @@ class SAM3Service:
             if self._model is not None and self._processor is not None:
                 return
             import torch
+            project_root = Path(__file__).resolve().parents[2]
+            sam3_pkg = project_root / "sam3_pkg"
+            if sam3_pkg.exists() and str(sam3_pkg) not in sys.path:
+                sys.path.insert(0, str(sam3_pkg))
             from sam3.model_builder import build_sam3_image_model
             from sam3.model.sam3_image_processor import Sam3Processor
 
@@ -102,65 +156,118 @@ class SAM3Service:
                 self._processor = None
                 raise
 
-    def _load_s2_image(self, region_id: str, patch_id: str, month: str) -> Image.Image:
-        """Load S2 RGB image for a patch from configured s2_dir.
+    def _find_patch_for_points(
+        self,
+        region_id: str,
+        point_coords: List[List[float]],
+    ) -> Dict[str, Any]:
+        """Find the patch containing all WGS84 point prompts."""
+        config = get_config()
+        patches = config.get_patches(region_id)
+        if not patches:
+            raise DataNotFoundError(f"No patches found for region '{region_id}'")
 
-        Directory structure: {s2_dir}/{patch_id}/{YYYYMMDD}.tif
-        Uses rasterio to read multi-band GeoTIFF and normalizes reflectance.
-        """
-        import rasterio
+        matching_patch: Optional[Dict[str, Any]] = None
+        for lon, lat in point_coords:
+            current = None
+            for patch in patches:
+                bounds = patch.get("bounds_wgs84")
+                if not bounds or len(bounds) != 4:
+                    continue
+                minx, miny, maxx, maxy = bounds
+                if minx <= lon <= maxx and miny <= lat <= maxy:
+                    current = patch
+                    break
+            if current is None:
+                raise DataNotFoundError(
+                    f"Point [{lon}, {lat}] is outside {region_id} patch coverage"
+                )
+            if matching_patch is None:
+                matching_patch = current
+            elif current.get("patch_id") != matching_patch.get("patch_id"):
+                raise DataValidationError(
+                    "All SAM3 prompt points must fall inside the same patch"
+                )
 
+        if matching_patch is None:
+            raise DataValidationError("At least one prompt point is required")
+        return matching_patch
+
+    def _resolve_image_path(
+        self,
+        region_id: str,
+        patch_id: str,
+        date: str,
+        sensor_type: str,
+    ) -> str:
+        """Resolve raw satellite TIFF path for a patch/date/sensor."""
         config = get_config()
         region = config.get_region(region_id)
         if not region:
-            raise ValueError(f"Region '{region_id}' not found")
+            raise DataValidationError(f"Region '{region_id}' not found")
 
+        sensor_type = sensor_type.lower()
+        if sensor_type not in _SENSOR_RGB:
+            raise DataValidationError(
+                f"sensor_type '{sensor_type}' is not supported; "
+                f"use one of {list(_SENSOR_RGB.keys())}"
+            )
+
+        periods = normalize_quarter_date(date)
+        if not periods:
+            raise DataValidationError(f"Invalid date format: '{date}'")
+
+        roots = [RAW_ROOT]
         s2_dir = region.get("s2_dir")
-        if not s2_dir:
-            raise ValueError(f"s2_dir not configured for region '{region_id}'")
+        if s2_dir:
+            roots.append(s2_dir)
 
-        s2_dir_path = Path(s2_dir).resolve()
-        patch_dir = (s2_dir_path / patch_id).resolve()
-        if not str(patch_dir).startswith(str(s2_dir_path)):
-            raise ValueError(f"Invalid patch_id: '{patch_id}'")
-        if not patch_dir.exists():
-            raise FileNotFoundError(f"No S2 image directory found for {patch_id}")
+        path = _get_raw_tiff_path(region_id, patch_id, sensor_type, periods, roots=roots)
+        if not path:
+            raise DataNotFoundError(
+                f"No raw {sensor_type} image found for {region_id}/{patch_id}/{date}"
+            )
+        return path
 
-        # Convert month "2025-10" to prefix "202510"
-        month_prefix = month.replace("-", "")
-        candidates = sorted(patch_dir.glob(f"{month_prefix}*.tif"))
-        if not candidates:
-            candidates = sorted(patch_dir.glob(f"{month_prefix}*.png"))
-        if not candidates:
-            raise FileNotFoundError(f"No S2 image found for {patch_id} {month}")
+    def _load_geo_image(
+        self,
+        region_id: str,
+        patch_id: str,
+        date: str,
+        sensor_type: str = "s2",
+    ) -> Tuple[Image.Image, Dict[str, Any]]:
+        """Load a georeferenced image as RGB for SAM3 and retain transform metadata."""
+        import rasterio
+        from rasterio.enums import Resampling
 
-        s2_path = candidates[0]
+        image_path = self._resolve_image_path(region_id, patch_id, date, sensor_type)
+        image_size = int(get_config().get_sam3_config().get("image_size", 256))
 
-        with rasterio.open(str(s2_path)) as ds:
-            # Windowed read for large images
-            if ds.height > 1024 or ds.width > 1024:
-                data = ds.read(
-                    out_shape=(ds.count, 256, 256),
-                    resampling=rasterio.enums.Resampling.lanczos,
-                )
-            else:
-                data = ds.read()  # [C, H, W]
+        with rasterio.open(str(image_path)) as ds:
+            data = ds.read(
+                out_shape=(ds.count, image_size, image_size),
+                resampling=Resampling.lanczos,
+            )
+            rgba = _to_rgb(data.astype(np.float32), sensor_type)
+            img = Image.fromarray(rgba[:, :, :3])
+            meta = {
+                "image_path": image_path,
+                "source_width": ds.width,
+                "source_height": ds.height,
+                "sam_width": image_size,
+                "sam_height": image_size,
+                "transform": ds.transform,
+                "crs": ds.crs,
+                "patch_id": patch_id,
+                "date": date,
+                "sensor_type": sensor_type,
+            }
+        return img, meta
 
-        if data.shape[0] >= 3:
-            # Sentinel-2 bands: B02(0), B03(1), B04(2), B08(3), ...
-            # Always select B04(R), B03(G), B02(B) = indices [2, 1, 0]
-            rgb = data[[2, 1, 0]].astype(np.float32)
-        else:
-            raise ValueError(f"Not enough bands in {s2_path}")
-
-        rgb = np.clip(rgb / 3500.0, 0, 1)
-        rgb = rgb.transpose(1, 2, 0)
-        rgb = (rgb * 255).astype(np.uint8)
-
-        img = Image.fromarray(rgb)
-        if img.size != (256, 256):
-            img = img.resize((256, 256), Image.Resampling.LANCZOS)
-        return img
+    def _load_s2_image(self, region_id: str, patch_id: str, month: str) -> Image.Image:
+        """Compatibility wrapper for legacy embed tests and clients."""
+        image, _ = self._load_geo_image(region_id, patch_id, month, sensor_type="s2")
+        return image
 
     def _evict_cache_entry(self, embedding_id: str):
         """Remove a cache entry and explicitly free GPU tensors."""
@@ -182,13 +289,21 @@ class SAM3Service:
         if self._device and self._device != "cpu":
             torch.cuda.empty_cache()
 
-    async def embed(self, region_id: str, patch_id: str, month: str) -> dict:
+    async def embed(
+        self,
+        region_id: str,
+        patch_id: str,
+        month: str,
+        sensor_type: str = "s2",
+    ) -> dict:
         """Load image, compute SAM3 embedding, cache it, return image + embedding_id."""
         import torch
 
         async with self._get_inference_lock():
             self._ensure_model()
-            image = self._load_s2_image(region_id, patch_id, month)
+            image, meta = self._load_geo_image(region_id, patch_id, month, sensor_type)
+            cache_date = self._cache_date_key(month)
+            meta["date"] = cache_date
 
             device = self._device or "cpu"
             try:
@@ -203,11 +318,12 @@ class SAM3Service:
                 with torch.autocast(device, dtype=torch.bfloat16):
                     state = self._processor.set_image(image)
 
-            embedding_id = f"{region_id}_{patch_id}_{month}"
+            embedding_id = f"{region_id}_{patch_id}_{sensor_type}_{cache_date}"
             with self._cache_lock:
                 self._cache[embedding_id] = {
                     "state": state,
                     "shape": (state["original_height"], state["original_width"]),
+                    "meta": meta,
                 }
 
                 # LRU eviction
@@ -226,21 +342,21 @@ class SAM3Service:
                 "embedding_id": embedding_id,
                 "status": "ready",
                 "image": {
-                    "width": 256,
-                    "height": 256,
+                    "width": meta["sam_width"],
+                    "height": meta["sam_height"],
                     "format": "png",
                     "data": img_b64,
                 },
             }
 
-    async def segment(
+    async def _predict_from_cache(
         self,
         embedding_id: str,
         point_coords: List[List[float]],
         point_labels: List[int],
         multimask_output: bool = True,
-    ) -> List[dict]:
-        """Run instance segmentation on cached embedding."""
+    ) -> Tuple[List[Tuple[np.ndarray, float, List[int]]], Dict[str, Any]]:
+        """Run model prediction against a cached SAM3 state."""
         import torch
 
         with self._cache_lock:
@@ -271,11 +387,6 @@ class SAM3Service:
 
             results = []
             for mask, score in zip(masks, scores.tolist()):
-                mask_img = Image.fromarray((mask * 255).astype(np.uint8))
-                buf = io.BytesIO()
-                mask_img.save(buf, format="PNG")
-                mask_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
-
                 ys, xs = np.where(mask)
                 if len(xs) == 0:
                     bbox = [0, 0, 0, 0]
@@ -284,13 +395,229 @@ class SAM3Service:
                     y_min, y_max = ys.min(), ys.max()
                     bbox = [int(x_min), int(y_min), int(x_max - x_min + 1), int(y_max - y_min + 1)]
 
-                results.append({
-                    "data": mask_b64,
-                    "score": score,
-                    "bbox": bbox,
-                })
+                results.append((mask, float(score), bbox))
 
-            return results
+            return results, self._cache[embedding_id].get("meta", {})
+
+    def _wgs84_to_sam_pixels(
+        self,
+        meta: Dict[str, Any],
+        point_coords: List[List[float]],
+    ) -> List[List[float]]:
+        """Convert WGS84 point prompts to SAM image pixel coordinates."""
+        from rasterio.transform import rowcol
+
+        crs = meta.get("crs")
+        if crs is None:
+            raise DataValidationError("Source image has no CRS; cannot use WGS84 prompts")
+
+        lons = [p[0] for p in point_coords]
+        lats = [p[1] for p in point_coords]
+        xs, ys = self._transform_coords("EPSG:4326", crs, lons, lats)
+        rows, cols = rowcol(meta["transform"], xs, ys)
+
+        coords = []
+        for row, col in zip(rows, cols):
+            if row < 0 or col < 0 or row >= meta["source_height"] or col >= meta["source_width"]:
+                raise DataValidationError("Prompt point is outside the source image")
+            x = float(col) * float(meta["sam_width"]) / float(meta["source_width"])
+            y = float(row) * float(meta["sam_height"]) / float(meta["source_height"])
+            coords.append([x / float(meta["sam_width"]), y / float(meta["sam_height"])])
+        return coords
+
+    def _bbox_to_feature(
+        self,
+        bbox: List[int],
+        score: float,
+        meta: Dict[str, Any],
+        index: int,
+    ) -> Tuple[Dict[str, Any], List[float]]:
+        """Convert SAM pixel bbox to a WGS84 GeoJSON polygon feature."""
+        from rasterio.transform import xy
+
+        x, y, w, h = bbox
+        scale_x = float(meta["source_width"]) / float(meta["sam_width"])
+        scale_y = float(meta["source_height"]) / float(meta["sam_height"])
+        col0 = x * scale_x
+        row0 = y * scale_y
+        col1 = (x + w) * scale_x
+        row1 = (y + h) * scale_y
+
+        corners_rc = [
+            (row0, col0),
+            (row0, col1),
+            (row1, col1),
+            (row1, col0),
+            (row0, col0),
+        ]
+        native_xs = []
+        native_ys = []
+        for row, col in corners_rc:
+            px, py = xy(meta["transform"], row, col, offset="center")
+            native_xs.append(px)
+            native_ys.append(py)
+
+        crs = meta.get("crs")
+        if crs is None:
+            raise DataValidationError("Source image has no CRS; cannot return WGS84 boxes")
+        lons, lats = self._transform_coords(crs, "EPSG:4326", native_xs, native_ys)
+        ring = [[float(lon), float(lat)] for lon, lat in zip(lons, lats)]
+        bbox_wgs84 = [
+            min(p[0] for p in ring),
+            min(p[1] for p in ring),
+            max(p[0] for p in ring),
+            max(p[1] for p in ring),
+        ]
+        feature = {
+            "type": "Feature",
+            "geometry": {"type": "Polygon", "coordinates": [ring]},
+            "properties": {
+                "score": score,
+                "bbox": bbox,
+                "bbox_wgs84": bbox_wgs84,
+                "patch_id": meta.get("patch_id"),
+                "sensor_type": meta.get("sensor_type"),
+                "date": meta.get("date"),
+                "candidate_index": index,
+                "geometry_kind": "bbox",
+            },
+        }
+        return feature, bbox_wgs84
+
+    def _mask_to_feature(
+        self,
+        mask: np.ndarray,
+        bbox: List[int],
+        score: float,
+        meta: Dict[str, Any],
+        index: int,
+    ) -> Tuple[Dict[str, Any], List[float]]:
+        """Convert a SAM mask to WGS84 GeoJSON polygon geometry.
+
+        The previous implementation returned the mask's bounding box as a
+        rectangular Polygon. Frontend tools need the actual segmentation
+        outline, so this vectorizes mask pixels and transforms every ring to
+        WGS84.
+        """
+        from affine import Affine
+        from rasterio.features import shapes
+
+        crs = meta.get("crs")
+        if crs is None:
+            raise DataValidationError("Source image has no CRS; cannot return WGS84 polygon")
+
+        mask_u8 = mask.astype(np.uint8)
+        scale_x = float(meta["source_width"]) / float(meta["sam_width"])
+        scale_y = float(meta["source_height"]) / float(meta["sam_height"])
+        sam_to_native = meta["transform"] * Affine.scale(scale_x, scale_y)
+
+        polygons = []
+        native_bounds = []
+        for geom, value in shapes(mask_u8, mask=mask_u8.astype(bool), transform=sam_to_native):
+            if int(value) != 1:
+                continue
+            coords = geom.get("coordinates") or []
+            if geom.get("type") != "Polygon" or not coords:
+                continue
+            wgs84_rings = []
+            for ring in coords:
+                if len(ring) < 4:
+                    continue
+                xs = [float(pt[0]) for pt in ring]
+                ys = [float(pt[1]) for pt in ring]
+                lons, lats = self._transform_coords(crs, "EPSG:4326", xs, ys)
+                wgs84_ring = [[float(lon), float(lat)] for lon, lat in zip(lons, lats)]
+                if len(wgs84_ring) >= 4:
+                    wgs84_rings.append(wgs84_ring)
+                    native_bounds.extend(wgs84_ring)
+            if wgs84_rings:
+                polygons.append(wgs84_rings)
+
+        if not polygons:
+            # Defensive fallback for an empty or unvectorizable mask.
+            return self._bbox_to_feature(bbox, score, meta, index)
+
+        bbox_wgs84 = [
+            min(p[0] for p in native_bounds),
+            min(p[1] for p in native_bounds),
+            max(p[0] for p in native_bounds),
+            max(p[1] for p in native_bounds),
+        ]
+        if len(polygons) == 1:
+            geometry = {"type": "Polygon", "coordinates": polygons[0]}
+        else:
+            geometry = {"type": "MultiPolygon", "coordinates": polygons}
+
+        feature = {
+            "type": "Feature",
+            "geometry": geometry,
+            "properties": {
+                "score": score,
+                "bbox": bbox,
+                "bbox_wgs84": bbox_wgs84,
+                "patch_id": meta.get("patch_id"),
+                "sensor_type": meta.get("sensor_type"),
+                "date": meta.get("date"),
+                "candidate_index": index,
+                "geometry_kind": "mask_polygon",
+            },
+        }
+        return feature, bbox_wgs84
+
+    async def segment_geojson(
+        self,
+        region_id: str,
+        date: str,
+        sensor_type: str,
+        point_coords: List[List[float]],
+        point_labels: List[int],
+        multimask_output: bool = True,
+        include_masks: bool = False,
+    ) -> dict:
+        """Segment from WGS84 point prompts and return WGS84 GeoJSON polygons."""
+        patch = self._find_patch_for_points(region_id, point_coords)
+        patch_id = patch["patch_id"]
+        cache_date = self._cache_date_key(date)
+        embedding_id = f"{region_id}_{patch_id}_{sensor_type}_{cache_date}"
+
+        with self._cache_lock:
+            cached = embedding_id in self._cache
+        if not cached:
+            await self.embed(region_id, patch_id, cache_date, sensor_type=sensor_type)
+
+        with self._cache_lock:
+            meta = self._cache[embedding_id]["meta"]
+
+        sam_coords = self._wgs84_to_sam_pixels(meta, point_coords)
+        predictions, meta = await self._predict_from_cache(
+            embedding_id,
+            sam_coords,
+            point_labels,
+            multimask_output,
+        )
+
+        features = []
+        masks_payload = []
+        for idx, (mask, score, bbox) in enumerate(predictions):
+            feature, bbox_wgs84 = self._mask_to_feature(mask, bbox, score, meta, idx)
+            features.append(feature)
+            if include_masks:
+                mask_img = Image.fromarray((mask * 255).astype(np.uint8))
+                buf = io.BytesIO()
+                mask_img.save(buf, format="PNG")
+                masks_payload.append(
+                    {
+                        "data": base64.b64encode(buf.getvalue()).decode("utf-8"),
+                        "score": score,
+                        "bbox": bbox,
+                        "bbox_wgs84": bbox_wgs84,
+                    }
+                )
+
+        response = {"type": "FeatureCollection", "features": features}
+        if include_masks:
+            response["masks"] = masks_payload
+        return response
 
     def get_status(self) -> dict:
         """Return model loading status, GPU memory, and cache info."""
