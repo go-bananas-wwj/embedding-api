@@ -244,6 +244,8 @@ class SAM3Service:
         image_size = int(get_config().get_sam3_config().get("image_size", 256))
 
         with rasterio.open(str(image_path)) as ds:
+            source_scene = Path(image_path).stem
+            source_image_date = source_scene[:8] if source_scene[:8].isdigit() else source_scene
             data = ds.read(
                 out_shape=(ds.count, image_size, image_size),
                 resampling=Resampling.lanczos,
@@ -254,6 +256,8 @@ class SAM3Service:
                 "image_path": image_path,
                 "source_width": ds.width,
                 "source_height": ds.height,
+                "source_scene": source_scene,
+                "source_image_date": source_image_date,
                 "sam_width": image_size,
                 "sam_height": image_size,
                 "transform": ds.transform,
@@ -341,6 +345,8 @@ class SAM3Service:
             return {
                 "embedding_id": embedding_id,
                 "status": "ready",
+                "source_scene": meta.get("source_scene"),
+                "selected_image_date": meta.get("source_image_date"),
                 "image": {
                     "width": meta["sam_width"],
                     "height": meta["sam_height"],
@@ -478,6 +484,8 @@ class SAM3Service:
                 "patch_id": meta.get("patch_id"),
                 "sensor_type": meta.get("sensor_type"),
                 "date": meta.get("date"),
+                "source_scene": meta.get("source_scene"),
+                "selected_image_date": meta.get("source_image_date"),
                 "candidate_index": index,
                 "geometry_kind": "bbox",
             },
@@ -558,6 +566,8 @@ class SAM3Service:
                 "patch_id": meta.get("patch_id"),
                 "sensor_type": meta.get("sensor_type"),
                 "date": meta.get("date"),
+                "source_scene": meta.get("source_scene"),
+                "selected_image_date": meta.get("source_image_date"),
                 "candidate_index": index,
                 "geometry_kind": "mask_polygon",
             },

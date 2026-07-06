@@ -3,6 +3,8 @@
 import io
 import logging
 import os
+import re
+from datetime import date as date_cls
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -18,6 +20,10 @@ from app.services.time_utils import normalize_quarter_date
 logger = logging.getLogger(__name__)
 
 RAW_ROOT = "/workspace/raw"
+_YYYYMMDD_RE = re.compile(r"^(\d{4})(\d{2})(\d{2})$")
+_YYYYMM_RE = re.compile(r"^(\d{4})(\d{2})$")
+_YYYY_HYPHEN_MM_RE = re.compile(r"^(\d{4})-(\d{2})$")
+_YYYY_QUARTER_RE = re.compile(r"^(\d{4})Q([1-4])$")
 
 # Visualization defaults per sensor.
 # Each entry maps sensor_type -> (red_band, green_band, blue_band).
@@ -37,30 +43,96 @@ def _candidate_period_prefixes(periods: List[str]) -> List[str]:
 
     Some raw scene archives store daily files (YYYYMMDD). When an exact
     quarterly/monthly filename is missing, we fall back to files inside the
-    requested month or quarter. We intentionally do not fall back to a bare
-    year prefix; that could select an unrelated month when several scenes
-    exist in the same year.
+    requested month or quarter. Exact day requests are intentionally strict.
+    We also intentionally do not fall back to a bare year prefix; that could
+    select an unrelated month when several scenes exist in the same year.
     """
+    if not periods:
+        return []
+
+    first = periods[0]
     prefixes = []
+
+    def add(value: str) -> None:
+        if value not in prefixes:
+            prefixes.append(value)
+
+    if _YYYYMMDD_RE.match(first):
+        add(first)
+        return prefixes
+
+    m_hyphen = _YYYY_HYPHEN_MM_RE.match(first)
+    if m_hyphen:
+        year, month = m_hyphen.groups()
+        add(first)
+        add(f"{year}{month}")
+        return prefixes
+
+    m_month = _YYYYMM_RE.match(first)
+    if m_month:
+        add(first)
+        return prefixes
+
+    m_quarter = _YYYY_QUARTER_RE.match(first)
+    if m_quarter:
+        year, q_str = m_quarter.groups()
+        q = int(q_str)
+        add(first)
+        for month in range((q - 1) * 3 + 1, q * 3 + 1):
+            add(f"{year}{month:02d}")
+        return prefixes
+
     for p in periods:
-        if p not in prefixes:
-            prefixes.append(p)
-        if len(p) >= 6 and p[:6].isdigit():
-            ym = p[:6]
-            if ym not in prefixes:
-                prefixes.append(ym)
-        if "Q" in p and len(p) >= 6:
-            # e.g. 2025Q2 -> 202504, 202505, 202506
-            year, q_str = p.split("Q", 1)
-            try:
-                q = int(q_str[0])
-                for m in range((q - 1) * 3 + 1, q * 3 + 1):
-                    ym = f"{year}{m:02d}"
-                    if ym not in prefixes:
-                        prefixes.append(ym)
-            except ValueError:
-                pass
+        add(p)
     return prefixes
+
+
+def _target_scene_date(prefixes: List[str]) -> Optional[date_cls]:
+    """Return the representative target date for choosing among daily scenes."""
+    if not prefixes:
+        return None
+    first = prefixes[0]
+    m_exact = _YYYYMMDD_RE.match(first)
+    if m_exact:
+        year, month, day = m_exact.groups()
+        return date_cls(int(year), int(month), int(day))
+    m_month = _YYYYMM_RE.match(first)
+    if m_month:
+        year, month = m_month.groups()
+        return date_cls(int(year), int(month), 15)
+    m_hyphen = _YYYY_HYPHEN_MM_RE.match(first)
+    if m_hyphen:
+        year, month = m_hyphen.groups()
+        return date_cls(int(year), int(month), 15)
+    m_quarter = _YYYY_QUARTER_RE.match(first)
+    if m_quarter:
+        year, q_str = m_quarter.groups()
+        middle_month = (int(q_str) - 1) * 3 + 2
+        return date_cls(int(year), middle_month, 15)
+    return None
+
+
+def _daily_scene_sort_key(path: Path, target: Optional[date_cls]) -> Tuple[int, str]:
+    """Prefer the daily scene closest to the requested month/quarter midpoint."""
+    match = _YYYYMMDD_RE.match(path.stem)
+    if not match or target is None:
+        return (10**9, path.name)
+    year, month, day = match.groups()
+    scene_date = date_cls(int(year), int(month), int(day))
+    return (abs((scene_date - target).days), path.name)
+
+
+def _select_daily_candidate(candidates: List[Path], prefixes: List[str]) -> Optional[Path]:
+    """Select a deterministic daily scene inside the requested month/quarter."""
+    matching = []
+    for path in candidates:
+        stem = path.stem
+        if any(stem.startswith(prefix) for prefix in prefixes):
+            matching.append(path)
+    if not matching:
+        return None
+    target = _target_scene_date(prefixes)
+    return sorted(matching, key=lambda p: _daily_scene_sort_key(p, target))[0]
 
 
 def _get_raw_tiff_path(
@@ -77,12 +149,15 @@ def _get_raw_tiff_path(
       2. {root}/{patch_id}/{sensor_type}/{period}.tif              (Haidian/OLMO daily)
 
     ``periods`` already contains YYYY-MM, YYYYMM, YYYYQn forms from
-    ``normalize_quarter_date``. If none of those match exactly, any daily
-    file whose stem starts with the requested month or quarter is accepted.
+    ``normalize_quarter_date``. Exact day/month files are preferred first. If
+    the request is monthly or quarterly and no exact file exists, daily files
+    inside that period are accepted and selected deterministically. Quarterly
+    compatibility filenames are used only after the monthly/day candidates.
     """
     roots = roots or [RAW_ROOT]
-    # Derive fuzzy prefixes once for daily-scene fallback.
+    # Derive request-scoped prefixes once for exact and daily-scene matching.
     fuzzy_prefixes = _candidate_period_prefixes(periods)
+    fallback_exact_periods = [p for p in periods if p not in fuzzy_prefixes]
 
     for root in roots:
         if not root:
@@ -92,22 +167,34 @@ def _get_raw_tiff_path(
             Path(root) / patch_id / sensor_type,
         ]
         for layout_dir in layouts:
-            # 1) Exact match
-            for period in periods:
+            # 1) Exact day/month/quarter match for the user-requested period.
+            for period in fuzzy_prefixes:
                 path = layout_dir / f"{period}.tif"
                 if path.exists() and path.is_file():
                     return str(path)
-            # 2) Fuzzy prefix match against daily files
+            # 2) Daily scene fallback inside the requested month/quarter.
             if layout_dir.exists():
                 try:
                     candidates = sorted(layout_dir.glob("*.tif"))
                 except OSError:
                     candidates = []
-                for path in candidates:
-                    stem = path.stem
-                    for prefix in fuzzy_prefixes:
-                        if stem.startswith(prefix):
-                            return str(path)
+                selected = _select_daily_candidate(candidates, fuzzy_prefixes)
+                if selected:
+                    logger.info(
+                        "Selected raw scene %s for %s/%s/%s from candidates=%s",
+                        selected.name,
+                        region_id,
+                        patch_id,
+                        periods[0] if periods else "",
+                        [p.name for p in candidates if p.stem[:8].isdigit()],
+                    )
+                    return str(selected)
+            # 3) Backward-compatible fallback for legacy quarterly archives
+            # when the caller supplied a month but only a quarter file exists.
+            for period in fallback_exact_periods:
+                path = layout_dir / f"{period}.tif"
+                if path.exists() and path.is_file():
+                    return str(path)
     return None
 
 

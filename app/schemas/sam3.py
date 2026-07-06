@@ -38,7 +38,9 @@ class EmbedRequest(BaseModel):
         max_length=32,
         description=(
             "影像日期或月份。必填。支持 YYYY-MM、YYYYMM 或 YYYYMMDD，"
-            "例如 2025-10、202510、20251214。用于选择该 patch 下哪一期影像。"
+            "例如 2025-10、202510、20251214。YYYYMMDD 表示精确日期；"
+            "YYYY-MM/YYYYMM 表示月度请求，若同月有多景日级影像，会选择距离"
+            "当月 15 日最近的一景作为稳定代表。"
         ),
         examples=["202512"],
     )
@@ -71,6 +73,14 @@ class EmbedRequest(BaseModel):
 class EmbedResponse(BaseModel):
     embedding_id: str = Field(..., description="Identifier for the cached embedding.")
     status: str = Field("ready", description="Embedding status.")
+    source_scene: Optional[str] = Field(
+        None,
+        description="实际加载的原始影像文件 stem，例如 20251214。",
+    )
+    selected_image_date: Optional[str] = Field(
+        None,
+        description="实际选中的影像日期。日级影像通常为 YYYYMMDD。",
+    )
     image: ImageData
 
 
@@ -95,6 +105,9 @@ class SegmentRequest(BaseModel):
         description=(
             "影像日期或月份。用于选择要分割的遥感影像。"
             "支持 YYYY-MM、YYYYMM 或 YYYYMMDD，例如 2025-10、202510、20251001。"
+            "YYYYMMDD 表示精确日期，不会自动改用其它日期；YYYY-MM/YYYYMM "
+            "表示月度请求，若同月有多景日级影像，会选择距离当月 15 日最近的"
+            "一景作为稳定代表，并在返回 properties.selected_image_date 中说明。"
         ),
         examples=["2025-10"],
     )
@@ -193,6 +206,14 @@ class SAM3BBoxProperties(BaseModel):
         description="Remote-sensing source used for segmentation.",
     )
     date: str = Field(..., description="Image date/month used for segmentation.")
+    source_scene: Optional[str] = Field(
+        None,
+        description="实际参与 SAM3 推理的原始影像文件 stem，例如 20251214。",
+    )
+    selected_image_date: Optional[str] = Field(
+        None,
+        description="实际选中的影像日期。用于解释月度请求最终使用了哪一景。",
+    )
     candidate_index: int = Field(..., description="Candidate mask index.")
     geometry_kind: Literal["mask_polygon", "bbox"] = Field(
         "mask_polygon",
