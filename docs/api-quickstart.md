@@ -1,20 +1,18 @@
-# API Quickstart
+# API 快速联调
 
-This guide gives frontend developers short, copyable requests for the most
-common integration flows. Use the full reference in [`API.md`](API.md) when you
-need every parameter and response field.
+本文档给前端同事提供最常用的接口示例。完整参数和返回结构请看 [`API.md`](API.md) 或 Swagger。
 
 ```bash
 export BASE="http://60.31.21.42:22065"
 ```
 
-For local development:
+本地开发时：
 
 ```bash
 export BASE="http://localhost:9061"
 ```
 
-## Health and Metadata
+## 健康检查和基础元数据
 
 ```bash
 curl -s "$BASE/health"
@@ -24,7 +22,7 @@ curl -s "$BASE/regions/haidian/patches?page=1&page_size=10"
 curl -s "$BASE/regions/haidian/patches/patch_000000"
 ```
 
-## Haidian Embedding
+## 海淀 Embedding
 
 ```bash
 curl -s "$BASE/regions/haidian/patches/patch_000000/embedding?format=json&version=v1&month=202512"
@@ -33,7 +31,7 @@ curl -s "$BASE/regions/haidian/patches/patch_000000/embedding?format=png&version
   -o /tmp/haidian_embedding.png
 ```
 
-## Task Results
+## 下游任务结果
 
 ```bash
 curl -s "$BASE/regions/haidian/tasks"
@@ -48,7 +46,7 @@ curl -s "$BASE/regions/haidian/patches/patch_000000/tasks/water_extraction/resul
   -o /tmp/haidian_water.png
 ```
 
-## System Model Inference
+## 系统模型推理
 
 ```bash
 curl -s "$BASE/system-models?region_id=haidian"
@@ -56,9 +54,9 @@ curl -s "$BASE/system-models?region_id=haidian"
 curl -s -X POST "$BASE/system-models/road_extraction/infer?region_id=haidian&patch_id=patch_000000&month=202512&version=v1"
 ```
 
-## SAM3 Segmentation
+## SAM3 分割
 
-SAM3 point coordinates use WGS84 `[longitude, latitude]`.
+SAM3 点坐标使用 WGS84，经纬度顺序为 `[longitude, latitude]`。
 
 ```bash
 curl -s -X POST "$BASE/regions/haidian/sam3/segment" \
@@ -73,12 +71,11 @@ curl -s -X POST "$BASE/regions/haidian/sam3/segment" \
   }'
 ```
 
-Response geometry is WGS84 GeoJSON. Each feature is usually a SAM3 mask
-`Polygon` or `MultiPolygon`, not a rectangular bbox.
+返回结果是 WGS84 GeoJSON。每个 feature 通常是 SAM3 mask 的 `Polygon` 或 `MultiPolygon`，不是矩形框。
 
-## Custom Model Batch Inference
+## 自定义模型批量推理
 
-After creating a model and waiting for training to finish:
+创建模型并等待训练完成后：
 
 ```bash
 curl -s -X POST "$BASE/models/{model_id}/infer_batch" \
@@ -90,20 +87,19 @@ curl -s -X POST "$BASE/models/{model_id}/infer_batch" \
   }'
 ```
 
-The response includes:
+返回包含：
 
 - `total`
 - `success_count`
 - `error_count`
 - `results`
 
-## Debug Frontend Requests
+## 查看前端请求
 
-Open:
+打开：
 
 ```text
 http://60.31.21.42:22065/logs/request-audit
 ```
 
-The page shows business API requests only. It filters out `/logs`, `/docs`,
-`/openapi.json`, `/favicon.ico`, and `/health`.
+页面只展示真实业务 API 请求，会过滤 `/logs`、`/docs`、`/openapi.json`、`/favicon.ico`、`/health`。
