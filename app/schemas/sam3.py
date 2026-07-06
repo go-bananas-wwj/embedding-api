@@ -39,8 +39,8 @@ class EmbedRequest(BaseModel):
         description=(
             "影像日期或月份。必填。支持 YYYY-MM、YYYYMM 或 YYYYMMDD，"
             "例如 2025-10、202510、20251214。YYYYMMDD 表示精确日期；"
-            "YYYY-MM/YYYYMM 表示月度请求，若同月有多景日级影像，会选择距离"
-            "当月 15 日最近的一景作为稳定代表。"
+            "YYYY-MM/YYYYMM 表示月度请求，若同月有多景日级影像，会按日期"
+            "倒序选择当月最新的一景。"
         ),
         examples=["202512"],
     )
@@ -106,8 +106,8 @@ class SegmentRequest(BaseModel):
             "影像日期或月份。用于选择要分割的遥感影像。"
             "支持 YYYY-MM、YYYYMM 或 YYYYMMDD，例如 2025-10、202510、20251001。"
             "YYYYMMDD 表示精确日期，不会自动改用其它日期；YYYY-MM/YYYYMM "
-            "表示月度请求，若同月有多景日级影像，会选择距离当月 15 日最近的"
-            "一景作为稳定代表，并在返回 properties.selected_image_date 中说明。"
+            "表示月度请求，若同月有多景日级影像，会按日期倒序选择当月最新的"
+            "一景，并在返回 properties.selected_image_date 中说明。"
         ),
         examples=["2025-10"],
     )

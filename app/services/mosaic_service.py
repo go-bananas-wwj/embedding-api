@@ -4,7 +4,6 @@ import io
 import logging
 import os
 import re
-from datetime import date as date_cls
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -87,52 +86,16 @@ def _candidate_period_prefixes(periods: List[str]) -> List[str]:
     return prefixes
 
 
-def _target_scene_date(prefixes: List[str]) -> Optional[date_cls]:
-    """Return the representative target date for choosing among daily scenes."""
-    if not prefixes:
-        return None
-    first = prefixes[0]
-    m_exact = _YYYYMMDD_RE.match(first)
-    if m_exact:
-        year, month, day = m_exact.groups()
-        return date_cls(int(year), int(month), int(day))
-    m_month = _YYYYMM_RE.match(first)
-    if m_month:
-        year, month = m_month.groups()
-        return date_cls(int(year), int(month), 15)
-    m_hyphen = _YYYY_HYPHEN_MM_RE.match(first)
-    if m_hyphen:
-        year, month = m_hyphen.groups()
-        return date_cls(int(year), int(month), 15)
-    m_quarter = _YYYY_QUARTER_RE.match(first)
-    if m_quarter:
-        year, q_str = m_quarter.groups()
-        middle_month = (int(q_str) - 1) * 3 + 2
-        return date_cls(int(year), middle_month, 15)
-    return None
-
-
-def _daily_scene_sort_key(path: Path, target: Optional[date_cls]) -> Tuple[int, str]:
-    """Prefer the daily scene closest to the requested month/quarter midpoint."""
-    match = _YYYYMMDD_RE.match(path.stem)
-    if not match or target is None:
-        return (10**9, path.name)
-    year, month, day = match.groups()
-    scene_date = date_cls(int(year), int(month), int(day))
-    return (abs((scene_date - target).days), path.name)
-
-
 def _select_daily_candidate(candidates: List[Path], prefixes: List[str]) -> Optional[Path]:
-    """Select a deterministic daily scene inside the requested month/quarter."""
+    """Select the latest daily scene inside the requested month/quarter."""
     matching = []
     for path in candidates:
         stem = path.stem
-        if any(stem.startswith(prefix) for prefix in prefixes):
+        if _YYYYMMDD_RE.match(stem) and any(stem.startswith(prefix) for prefix in prefixes):
             matching.append(path)
     if not matching:
         return None
-    target = _target_scene_date(prefixes)
-    return sorted(matching, key=lambda p: _daily_scene_sort_key(p, target))[0]
+    return sorted(matching, key=lambda p: p.stem, reverse=True)[0]
 
 
 def _get_raw_tiff_path(

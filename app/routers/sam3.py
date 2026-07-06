@@ -42,7 +42,7 @@ async def sam3_embed(
     | --- | --- | --- |
     | `region_id` | `harbin` / `haidian` | 路径参数，选择区域 |
     | `patch_id` | 格式 `patch_000000` | 要预加载的 patch 编号 |
-    | `month` | `YYYY-MM` / `YYYYMM` / `YYYYMMDD` | `YYYYMMDD` 精确到某一天；`YYYYMM`/`YYYY-MM` 为月度请求，同月多景时选距离当月 15 日最近的一景 |
+    | `month` | `YYYY-MM` / `YYYYMM` / `YYYYMMDD` | `YYYYMMDD` 精确到某一天；`YYYYMM`/`YYYY-MM` 为月度请求，同月多景时按日期倒序取最新一景 |
     | `sensor_type` | 默认 `s2`；可选 `s2`、`s1`、`landsat` | 前端普通光学预览建议填 `s2` |
 
     返回值包含 `embedding_id`、base64 PNG 影像，以及实际使用的
@@ -131,7 +131,7 @@ async def sam3_segment(
     | 参数 | 必填 | 默认值/范围 | 怎么填 |
     | --- | --- | --- | --- |
     | `region_id` | 是 | `harbin` / `haidian` | 路径参数，选择在哪个区域内分割 |
-    | `date` | 是 | `YYYY-MM` / `YYYYMM` / `YYYYMMDD` | `YYYYMMDD` 精确到某一天；`YYYYMM`/`YYYY-MM` 为月度请求，同月多景时选距离当月 15 日最近的一景 |
+    | `date` | 是 | `YYYY-MM` / `YYYYMM` / `YYYYMMDD` | `YYYYMMDD` 精确到某一天；`YYYYMM`/`YYYY-MM` 为月度请求，同月多景时按日期倒序取最新一景 |
     | `sensor_type` | 否 | 默认 `s2`；可选 `s2`、`s1`、`landsat` | 普通光学影像点选建议填 `s2` |
     | `point_coords` | 是 | 至少 1 个点；经度 `[-180,180]`，纬度 `[-90,90]` | WGS84 经纬度，格式 `[[经度, 纬度]]` |
     | `point_labels` | 否 | 默认全部为 `1`；可选 `0` 或 `1` | 前端当前不用传；`1`=目标点，`0`=背景排除点 |

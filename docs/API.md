@@ -1720,7 +1720,7 @@ GET /regions/{region_id}/mosaic?date=YYYY-MM&sensor_type=s2&format=png
 
 | 参数 | 类型 | 必填 | 可取值 | 默认值 | 说明 |
 |------|------|------|--------|--------|------|
-| `date` | string | 是 | `YYYY-MM` / `YYYYMM` / `YYYYMMDD` | - | 日期/月。`YYYYMMDD` 精确读取当天影像；`YYYY-MM`/`YYYYMM` 为月度请求，同月多景时选距离当月 15 日最近的一景。若没有日级/月级文件，才回退兼容哈尔滨旧季度文件 |
+| `date` | string | 是 | `YYYY-MM` / `YYYYMM` / `YYYYMMDD` | - | 日期/月。`YYYYMMDD` 精确读取当天影像；`YYYY-MM`/`YYYYMM` 为月度请求，同月多景时按日期倒序取最新一景。若没有日级/月级文件，才回退兼容哈尔滨旧季度文件 |
 | `sensor_type` | string | 否 | `s2` / `s1` / `landsat` | `s2` | 传感器类型 |
 | `version` | string | 否 | 任意 / 可省略 | `None` | 保留字段，对原始传感器数据无效 |
 | `format` | string | 否 | `png` / `tif` | `png` | 输出格式：`png` 可视化；`tif` GeoTIFF 原始数据 |
@@ -1736,7 +1736,7 @@ GET /regions/{region_id}/mosaic?date=YYYY-MM&sensor_type=s2&format=png
 | `2025-10` / `2025-11` / `2025-12` | `2025Q4` | 第四季度 |
 
 > **多景影像选择规则**：如果同一个 patch、同一个传感器、同一个月下有多张日级 TIFF，
-> 后端固定选择距离当月 15 日最近的一景；距离相同则按文件名排序。
+> 后端按文件名日期倒序排列，固定选择最新的一景。
 > 如果前端要指定某一天，请传 `YYYYMMDD`，例如 `20251214`，此时必须精确命中该日期，
 > 不会自动改用其它日期。
 
@@ -1992,7 +1992,7 @@ POST /regions/{region_id}/sam3/embed
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `patch_id` | string | 是 | Patch ID |
-| `month` | string | 是 | 日期/月，如 `2025-10`、`202510`、`20251214`。`YYYYMMDD` 精确到某一天；月级请求会在同月多景中选择距离当月 15 日最近的一景 |
+| `month` | string | 是 | 日期/月，如 `2025-10`、`202510`、`20251214`。`YYYYMMDD` 精确到某一天；月级请求会在同月多景中按日期倒序取最新一景 |
 | `sensor_type` | string | 否 | 传感器类型：`s2`、`s1`、`landsat`，默认 `s2` |
 
 **curl 示例**:
@@ -2061,7 +2061,7 @@ POST /regions/{region_id}/sam3/segment
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `date` | string | 是 | 影像日期/月，用于选择要分割的遥感影像。支持 `2025-10`、`202510`、`20251001`。`YYYYMMDD` 精确到某一天；月级请求会在同月多景中选择距离当月 15 日最近的一景 |
+| `date` | string | 是 | 影像日期/月，用于选择要分割的遥感影像。支持 `2025-10`、`202510`、`20251001`。`YYYYMMDD` 精确到某一天；月级请求会在同月多景中按日期倒序取最新一景 |
 | `sensor_type` | string | 否 | 传感器类型：`s2`=Sentinel-2 光学影像，`s1`=Sentinel-1 SAR，`landsat`=Landsat 光学影像；默认 `s2` |
 | `point_coords` | float[][] | 是 | 用户点击的 WGS84 经纬度点列表，每个点为 `[longitude, latitude]`，即 `[经度, 纬度]` |
 | `point_labels` | int[] | 否 | 可选点标签。`1`=前景目标点，`0`=背景排除点。当前前端不用传；不传时后端默认所有点都是 `1` |
@@ -2127,7 +2127,7 @@ curl -s -X POST "http://60.31.21.42:22065/regions/harbin/sam3/segment" \
 
 **前端提示**:
 - `/sam3/segment` 已取消 `month` 字段，只使用 `date`。
-- 如果一个月内存在多景影像，后端固定选择距离当月 15 日最近的一景；需要指定某一天时传 `YYYYMMDD`。
+- 如果一个月内存在多景影像，后端按日期倒序固定选择当月最新一景；需要指定某一天时传 `YYYYMMDD`。
 - 返回的 `selected_image_date` / `source_scene` 是本次实际使用的影像，前端可以直接展示给用户或写入调试日志。
 - 前端一般不需要传 `point_labels`；后端会把所有 `point_coords` 默认当成前景目标点 `1`。
 - 掩码 PNG 可叠加在原始影像上显示（白色区域半透明覆盖）

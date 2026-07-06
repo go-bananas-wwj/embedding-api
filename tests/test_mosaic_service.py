@@ -39,13 +39,15 @@ def test_get_raw_tiff_path_prefers_requested_month_over_same_year(tmp_path: Path
     assert path == str(october)
 
 
-def test_get_raw_tiff_path_uses_scene_closest_to_month_midpoint(tmp_path: Path):
+def test_get_raw_tiff_path_uses_latest_scene_inside_month(tmp_path: Path):
     layout = tmp_path / "harbin" / "s2" / "patch_000000"
     layout.mkdir(parents=True)
     later = layout / "20251020.tif"
     earlier = layout / "20251003.tif"
+    latest = layout / "20251027.tif"
     later.write_text("later")
     earlier.write_text("earlier")
+    latest.write_text("latest")
 
     path = _get_raw_tiff_path(
         "harbin",
@@ -55,7 +57,7 @@ def test_get_raw_tiff_path_uses_scene_closest_to_month_midpoint(tmp_path: Path):
         roots=[str(tmp_path)],
     )
 
-    assert path == str(later)
+    assert path == str(latest)
 
 
 def test_get_raw_tiff_path_exact_day_does_not_fall_back_to_month(tmp_path: Path):
