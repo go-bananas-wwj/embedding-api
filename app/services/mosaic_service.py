@@ -36,18 +36,15 @@ def _candidate_period_prefixes(periods: List[str]) -> List[str]:
     """Return month/quarter prefixes to use for fuzzy filename matching.
 
     Some raw scene archives store daily files (YYYYMMDD). When an exact
-    quarterly/monthly filename is missing, we fall back to any file whose
-    stem starts with the requested month or quarter prefix.
+    quarterly/monthly filename is missing, we fall back to files inside the
+    requested month or quarter. We intentionally do not fall back to a bare
+    year prefix; that could select an unrelated month when several scenes
+    exist in the same year.
     """
     prefixes = []
     for p in periods:
         if p not in prefixes:
             prefixes.append(p)
-        # YYYY-MM -> YYYYMM, YYYYQn -> YYYY
-        if len(p) >= 4 and p[:4].isdigit():
-            year = p[:4]
-            if year not in prefixes:
-                prefixes.append(year)
         if len(p) >= 6 and p[:6].isdigit():
             ym = p[:6]
             if ym not in prefixes:
