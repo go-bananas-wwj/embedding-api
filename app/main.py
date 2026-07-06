@@ -103,7 +103,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
                 content={
                     "detail": (
                         "请求体不能为空。请确认 POST 请求携带了 JSON body，"
-                        "并包含 name、model_type、task_type、region_id、annotations、classes 等必填字段。"
+                        "并且代理/网关转发时没有丢失 body。"
                     )
                 },
             )
