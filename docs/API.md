@@ -62,7 +62,6 @@ curl -s -X POST "http://60.31.21.42:22065/models" \
   -d '{
     "name": "我的建筑提取模型",
     "model_type": "classification",
-    "task_type": "building_extraction",
     "region_id": "harbin",
     "embedding_version": "v2",
     "epochs": 20,
@@ -1231,7 +1230,6 @@ POST /models
 |------|------|------|------|
 | `name` | string | 是 | 用户自定义模型名称 |
 | `model_type` | string | 是 | 模型大类：`classification`（分类头）或 `change_detection`（变化检测头） |
-| `task_type` | string | 是 | 具体任务类型，与 `model_type` 配合。`classification` 对应 `building_extraction` / `land_use_classification` / `land_cover_classification` / `water_extraction`；`change_detection` 对应 `change_detection` |
 | `region_id` | string | 是 | 区域 ID，如 `harbin` 或 `haidian` |
 | `embedding_version` | string | 否 | 嵌入版本，默认 `v2` |
 | `epochs` | int | 否 | 训练迭代次数（映射为 `LogisticRegression.max_iter`），默认 `100`，范围 `1~1000` |
@@ -1243,6 +1241,7 @@ POST /models
 **`annotations` 说明**：
 - `type` 固定为 `FeatureCollection`。
 - 每个 `Feature` 的 `properties` 必须包含 `patch_id`、`region_id`、`class_id`、`task_type`。
+- 顶层请求体不再需要 `task_type`；后端会从所有 Feature 的 `properties.task_type` 自动推导，且要求同一个训练包内任务类型一致。
 - `classification` 模型还需要 `month`；`change_detection` 模型还需要 `before_month` 和 `after_month`。
 - `geometry` 坐标使用 WGS84 `[lon, lat]`。
 - 所有 `Feature` 的 `region_id` 必须与请求体顶层 `region_id` 一致。
@@ -1256,7 +1255,6 @@ curl -s -X POST "http://60.31.21.42:22065/models" \
   -d '{
     "name": "我的建筑提取模型",
     "model_type": "classification",
-    "task_type": "building_extraction",
     "region_id": "harbin",
     "embedding_version": "v2",
     "epochs": 20,
@@ -1298,7 +1296,6 @@ curl -s -X POST "http://60.31.21.42:22065/models" \
   -d '{
     "name": "我的变化检测模型",
     "model_type": "change_detection",
-    "task_type": "change_detection",
     "region_id": "harbin",
     "embedding_version": "v2",
     "epochs": 30,

@@ -52,7 +52,6 @@ def _model_payload(name="test-model", model_type="classification", task_type="bu
     return {
         "name": name,
         "model_type": model_type,
-        "task_type": task_type,
         "region_id": "harbin",
         "annotations": _geojson_annotation(task_type=task_type),
         "classes": [{"id": "cls_001", "name": "建筑", "color": "#FF0000"}],
@@ -74,7 +73,6 @@ class TestModels:
             json={
                 "name": "test",
                 "model_type": "classification",
-                "task_type": "building_extraction",
                 "region_id": "harbin",
             },
         )
@@ -142,7 +140,6 @@ class TestModels:
         payload = {
             "name": "test-cd",
             "model_type": "change_detection",
-            "task_type": "change_detection",
             "region_id": "harbin",
             "annotations": {
                 "type": "FeatureCollection",

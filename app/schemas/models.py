@@ -180,11 +180,6 @@ class ModelCreate(BaseModel):
         description="模型大类，决定训练哪种下游任务头。可选 'classification'（分类头）或 'change_detection'（变化检测头）。",
         examples=["classification"],
     )
-    task_type: str = Field(
-        ...,
-        description="具体任务类型，与 model_type 配合使用。classification 对应 building_extraction / land_use_classification / land_cover_classification / water_extraction；change_detection 对应 change_detection。",
-        examples=["building_extraction"],
-    )
     region_id: str = Field(
         ...,
         description="Region identifier. Use 'harbin' or 'haidian'.",
@@ -232,11 +227,12 @@ class ModelCreate(BaseModel):
             "land_cover_classification",
             "water_extraction",
         }
-        if self.model_type == "classification" and self.task_type not in valid_classification_tasks:
+        task_type = self.resolved_task_type()
+        if self.model_type == "classification" and task_type not in valid_classification_tasks:
             raise ValueError(
-                f"classification model does not support task_type '{self.task_type}'"
+                f"classification model does not support task_type '{task_type}'"
             )
-        if self.model_type == "change_detection" and self.task_type != "change_detection":
+        if self.model_type == "change_detection" and task_type != "change_detection":
             raise ValueError(
                 "change_detection model requires task_type 'change_detection'"
             )
@@ -263,9 +259,9 @@ class ModelCreate(BaseModel):
                 raise ValueError(
                     f"feature class_id '{props.class_id}' is not defined in classes"
                 )
-            if props.task_type != self.task_type:
+            if props.task_type != task_type:
                 raise ValueError(
-                    f"feature task_type '{props.task_type}' does not match model task_type '{self.task_type}'"
+                    f"feature task_type '{props.task_type}' does not match inferred model task_type '{task_type}'"
                 )
 
             if self.model_type == "classification":
@@ -286,6 +282,20 @@ class ModelCreate(BaseModel):
             raise ValueError(f"annotations exceed maximum of {max_vertices} total vertices")
 
         return self
+
+    def resolved_task_type(self) -> str:
+        """Infer the training task type without requiring a top-level field."""
+        if self.model_type == "change_detection":
+            return "change_detection"
+
+        task_types = {
+            feature.properties.task_type for feature in self.annotations.features
+        }
+        if len(task_types) != 1:
+            raise ValueError(
+                "classification annotations must use exactly one feature task_type"
+            )
+        return next(iter(task_types))
 
     @staticmethod
     def _count_vertices(coords):

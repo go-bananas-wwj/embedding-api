@@ -100,11 +100,10 @@ async def list_models(
 
 _CLASSIFICATION_EXAMPLE = {
     "summary": "分类模型（以建筑物提取为例）",
-    "description": "model_type='classification' 时必须搭配 task_type='building_extraction' / 'land_use_classification' / 'land_cover_classification' / 'water_extraction' 之一，并传入 month。",
+    "description": "model_type='classification' 时传入 month；训练任务类型由 GeoJSON features[].properties.task_type 自动推导，顶层请求体不再需要 task_type。",
     "value": {
         "name": "我的建筑提取模型",
         "model_type": "classification",
-        "task_type": "building_extraction",
         "region_id": "harbin",
         "embedding_version": "v2",
         "epochs": 100,
@@ -145,11 +144,10 @@ _CLASSIFICATION_EXAMPLE = {
 
 _CHANGE_DETECTION_EXAMPLE = {
     "summary": "变化检测模型",
-    "description": "model_type='change_detection' 时 task_type 也必须为 'change_detection'，并传入 before_month 和 after_month。",
+    "description": "model_type='change_detection' 时后端自动使用 change_detection 任务类型，并传入 before_month 和 after_month。",
     "value": {
         "name": "我的变化检测模型",
         "model_type": "change_detection",
-        "task_type": "change_detection",
         "region_id": "harbin",
         "embedding_version": "v2",
         "epochs": 100,
@@ -216,6 +214,7 @@ async def create_model(
             status_code=422,
             detail="model_type must be 'classification' or 'change_detection'",
         )
+    task_type = req.resolved_task_type()
 
     active_class_ids = req.class_ids or list(
         {f.properties.class_id for f in req.annotations.features}
@@ -225,7 +224,7 @@ async def create_model(
         name=req.name,
         model_type=req.model_type,
         classes=[c.model_dump() for c in req.classes],
-        task_type=req.task_type,
+        task_type=task_type,
         region_id=req.region_id,
         description=req.description,
     )
@@ -246,7 +245,7 @@ async def create_model(
         model_id=model_id,
         user_id=user["user_id"],
         region_id=req.region_id,
-        task_type=req.task_type,
+        task_type=task_type,
         model_type=req.model_type,
         embedding_version=req.embedding_version,
         epochs=req.epochs,
