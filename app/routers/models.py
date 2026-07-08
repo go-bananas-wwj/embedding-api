@@ -116,11 +116,11 @@ async def list_models(
 
 
 _CLASSIFICATION_EXAMPLE = {
-    "summary": "分类模型（以建筑物提取为例）",
-    "description": "model_type='classification' 时传入 month；训练任务类型由 GeoJSON features[].properties.task_type 自动推导，顶层请求体不再需要 task_type。",
+    "summary": "单时间检测模型（以建筑物提取为例）",
+    "description": "model_type='single_time_detection' 时传入 month；训练任务类型由 GeoJSON features[].properties.task_type 自动推导，顶层请求体不再需要 task_type。",
     "value": {
         "name": "我的建筑提取模型",
-        "model_type": "classification",
+        "model_type": "single_time_detection",
         "region_id": "harbin",
         "embedding_version": "v2",
         "epochs": 100,
@@ -226,10 +226,10 @@ async def create_model(
     """
     registry = get_model_registry(user["user_id"])
 
-    if req.model_type not in ("classification", "change_detection"):
+    if req.model_type not in ("single_time_detection", "change_detection"):
         raise HTTPException(
             status_code=422,
-            detail="model_type must be 'classification' or 'change_detection'",
+            detail="model_type must be 'single_time_detection' or 'change_detection'",
         )
     task_type = req.resolved_task_type()
     embedding_version = _resolve_embedding_version(
@@ -370,9 +370,9 @@ async def delete_model(
 
 
 _INFER_EXAMPLES: Dict[str, Any] = {
-    "classification": {
-        "summary": "自定义分类模型推理",
-        "description": "分类模型只需传入 month。",
+    "single_time_detection": {
+        "summary": "自定义单时间检测模型推理",
+        "description": "单时间检测模型只需传入 month。",
         "value": {
             "region_id": "harbin",
             "patch_id": "patch_000000",
@@ -482,9 +482,9 @@ async def infer(
 
 
 _INFER_BATCH_EXAMPLES: Dict[str, Any] = {
-    "classification": {
-        "summary": "自定义分类模型批量推理",
-        "description": "分类模型批量推理只需传入 month。",
+    "single_time_detection": {
+        "summary": "自定义单时间检测模型批量推理",
+        "description": "单时间检测模型批量推理只需传入 month。",
         "value": {
             "region_id": "harbin",
             "patch_ids": ["patch_000000", "patch_000001"],

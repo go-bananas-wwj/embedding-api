@@ -477,7 +477,7 @@ FIELD_DOCS = {
     "x": "XYZ 瓦片 X 坐标。当前 XYZ 瓦片接口为预留接口。",
     "y": "XYZ 瓦片 Y 坐标。当前 XYZ 瓦片接口为预留接口。",
     "name": "名称。用于模型、类别或展示项的人类可读名称。",
-    "model_type": "模型大类。可选 `classification` 或 `change_detection`。",
+    "model_type": "训练类型。可选 `single_time_detection`（单时间检测）或 `change_detection`（双时相变化检测）；旧值 `classification` 仍兼容。",
     "embedding_version": "训练/推理使用的 embedding 版本。按区域可选 `v1` 或 `v2`。",
     "epochs": "训练迭代次数。数值越大训练越充分，但耗时也更长。",
     "class_ids": "参与训练的类别 ID 子集。不传时使用标注中出现的全部类别。",

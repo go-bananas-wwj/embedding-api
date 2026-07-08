@@ -61,7 +61,7 @@ curl -s -X POST "http://60.31.21.42:22065/models" \
   -H 'Content-Type: application/json' \
   -d '{
     "name": "我的建筑提取模型",
-    "model_type": "classification",
+    "model_type": "single_time_detection",
     "region_id": "harbin",
     "embedding_version": "v2",
     "epochs": 20,
@@ -1158,7 +1158,7 @@ curl -s "http://60.31.21.42:22065/models?region_id=harbin"
   {
     "id": "model_ghi789",
     "name": "my-building-head",
-    "type": "classification",
+    "type": "single_time_detection",
     "task_type": "building_extraction",
     "status": "completed",
     "created_at": "2026-06-26T10:00:00",
@@ -1177,7 +1177,7 @@ curl -s "http://60.31.21.42:22065/models?region_id=harbin"
   {
     "id": "building_extraction",
     "name": "建筑物提取",
-    "type": "classification",
+    "type": "single_time_detection",
     "task_type": "building_extraction",
     "status": "ready",
     "created_at": "1970-01-01T00:00:00",
@@ -1199,7 +1199,7 @@ curl -s "http://60.31.21.42:22065/models?region_id=harbin"
 |------|------|------|
 | `id` | string | 模型唯一 ID |
 | `name` | string | 模型名称 |
-| `type` | string | 模型类型：`classification` 或 `change_detection` |
+| `type` | string | 模型类型：`single_time_detection` 或 `change_detection` |
 | `task_type` | string | 任务类型 |
 | `status` | string | 状态：`training` / `completed` / `failed` / `ready`（系统模型） |
 | `created_at` | string | 创建时间 |
@@ -1229,7 +1229,7 @@ POST /models
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `name` | string | 是 | 用户自定义模型名称 |
-| `model_type` | string | 是 | 模型大类：`classification`（分类头）或 `change_detection`（变化检测头） |
+| `model_type` | string | 是 | 训练类型：`single_time_detection`（单时间检测）或 `change_detection`（双时相变化检测）。旧值 `classification` 仍兼容，会按 `single_time_detection` 处理 |
 | `region_id` | string | 是 | 区域 ID，如 `harbin` 或 `haidian` |
 | `embedding_version` | string | 否 | 嵌入版本，默认 `v2`。如果该区域没有请求的版本，后端会自动使用该区域可用版本；海淀当前使用 `v1` |
 | `epochs` | int | 否 | 训练迭代次数（映射为 `LogisticRegression.max_iter`），默认 `100`，范围 `1~1000` |
@@ -1243,20 +1243,20 @@ POST /models
 - 每个 `Feature` 的 `properties` 必须包含 `patch_id`、`region_id`、`class_id`。
 - 顶层请求体不再需要 `task_type`；`Feature.properties.task_type` 也可不传。
 - 如果标注里传了 `properties.task_type`，后端会从所有 Feature 自动推导，且要求同一个训练包内任务类型一致。
-- 如果标注里不传 `properties.task_type`，`classification` 默认按 `building_extraction` 训练，`change_detection` 默认按 `change_detection` 训练。
-- `classification` 模型还需要 `month`；`change_detection` 模型还需要 `before_month` 和 `after_month`。
+- 如果标注里不传 `properties.task_type`，`single_time_detection` 默认按 `building_extraction` 训练，`change_detection` 默认按 `change_detection` 训练。
+- `single_time_detection` 单时间检测需要 `month`；`change_detection` 双时相变化检测需要 `before_month` 和 `after_month`。
 - `geometry` 坐标使用 WGS84 `[lon, lat]`。
 - 所有 `Feature` 的 `region_id` 必须与请求体顶层 `region_id` 一致。
 - 所有 `Feature` 的 `class_id` 必须在 `classes` 中定义。若传入 `class_ids`，只有这些类别会参与训练；未选中的标注会被忽略。
 - 限制：最多 `10000` 个 Feature，总顶点数不超过 `100000`。
 
-**curl 示例 — 分类模型**:
+**curl 示例 — 单时间检测模型**:
 ```bash
 curl -s -X POST "http://60.31.21.42:22065/models" \
   -H 'Content-Type: application/json' \
   -d '{
     "name": "我的建筑提取模型",
-    "model_type": "classification",
+    "model_type": "single_time_detection",
     "region_id": "harbin",
     "embedding_version": "v2",
     "epochs": 20,
@@ -1338,7 +1338,7 @@ curl -s -X POST "http://60.31.21.42:22065/models" \
 {
   "id": "model_ghi789",
   "name": "我的建筑提取模型",
-  "type": "classification",
+  "type": "single_time_detection",
   "task_type": "building_extraction",
   "status": "training",
   "created_at": "2026-06-26T10:00:00",
@@ -1485,7 +1485,7 @@ POST /models/{model_id}/infer
 | `after_month` | string | 条件 | 变化检测必填，如 `2025-06` |
 | `version` | string | 否 | 系统模型 checkpoint 版本，默认 `v2`；自定义模型忽略 |
 
-**curl 示例 — 自定义分类模型**:
+**curl 示例 — 自定义单时间检测模型**:
 ```bash
 curl -s -X POST "http://60.31.21.42:22065/models/model_ghi789/infer" \
   -H 'Content-Type: application/json' \
@@ -1560,7 +1560,7 @@ POST /models/{model_id}/infer_batch
 | `after_month` | string | 条件 | 变化检测必填，如 `2025-06` |
 | `version` | string | 否 | 系统模型 checkpoint 版本，默认 `v2`；自定义模型忽略 |
 
-**curl 示例 — 自定义分类模型**:
+**curl 示例 — 自定义单时间检测模型**:
 ```bash
 curl -s -X POST "http://60.31.21.42:22065/models/model_ghi789/infer_batch" \
   -H 'Content-Type: application/json' \

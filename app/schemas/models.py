@@ -124,7 +124,7 @@ class GeoJSONProperties(BaseModel):
         None,
         description=(
             "Downstream task type. Optional for custom training; when omitted, "
-            "classification defaults to building_extraction and change_detection "
+            "single_time_detection defaults to building_extraction and change_detection "
             "defaults to change_detection."
         ),
         examples=["building_extraction"],
@@ -185,8 +185,12 @@ class ModelCreate(BaseModel):
     )
     model_type: str = Field(
         ...,
-        description="模型大类，决定训练哪种下游任务头。可选 'classification'（分类头）或 'change_detection'（变化检测头）。",
-        examples=["classification"],
+        description=(
+            "训练类型。可选 'single_time_detection'（单时间检测）或 "
+            "'change_detection'（双时相变化检测）。兼容旧值 'classification'，"
+            "会自动按 single_time_detection 处理。"
+        ),
+        examples=["single_time_detection"],
     )
     region_id: str = Field(
         ...,
@@ -240,9 +244,9 @@ class ModelCreate(BaseModel):
             if feature.properties.task_type is None:
                 feature.properties.task_type = task_type
 
-        if self.model_type == "classification" and task_type not in valid_classification_tasks:
+        if self.model_type == "single_time_detection" and task_type not in valid_classification_tasks:
             raise ValueError(
-                f"classification model does not support task_type '{task_type}'"
+                f"single_time_detection model does not support task_type '{task_type}'"
             )
         if self.model_type == "change_detection" and task_type != "change_detection":
             raise ValueError(
@@ -276,9 +280,9 @@ class ModelCreate(BaseModel):
                     f"feature task_type '{props.task_type}' does not match inferred model task_type '{task_type}'"
                 )
 
-            if self.model_type == "classification":
+            if self.model_type == "single_time_detection":
                 if not props.month:
-                    raise ValueError(f"classification model requires 'month' for patch {props.patch_id}")
+                    raise ValueError(f"single_time_detection model requires 'month' for patch {props.patch_id}")
             elif self.model_type == "change_detection":
                 if not props.before_month or not props.after_month:
                     raise ValueError(
@@ -295,6 +299,17 @@ class ModelCreate(BaseModel):
 
         return self
 
+    @field_validator("model_type")
+    @classmethod
+    def normalize_model_type(cls, value: str) -> str:
+        if value == "classification":
+            return "single_time_detection"
+        if value not in ("single_time_detection", "change_detection"):
+            raise ValueError(
+                "model_type must be 'single_time_detection' or 'change_detection'"
+            )
+        return value
+
     def resolved_task_type(self) -> str:
         """Infer the training task type without requiring a top-level field."""
         if self.model_type == "change_detection":
@@ -309,7 +324,7 @@ class ModelCreate(BaseModel):
             return "building_extraction"
         if len(task_types) != 1:
             raise ValueError(
-                "classification annotations must use exactly one feature task_type"
+                "single_time_detection annotations must use exactly one feature task_type"
             )
         return next(iter(task_types))
 
@@ -330,7 +345,7 @@ class ModelOut(BaseModel):
 
     id: str = Field(..., description="Model identifier.")
     name: str = Field(..., description="Model name.")
-    type: str = Field(..., description="Model type ('classification' or 'change_detection').")
+    type: str = Field(..., description="Model type ('single_time_detection' or 'change_detection').")
     task_type: Optional[str] = Field(None, description="Downstream task type.")
     status: str = Field(..., description="Training status: running, completed, failed, or ready (system models).")
     created_at: str = Field(..., description="ISO timestamp when the model was created.")
@@ -375,7 +390,7 @@ class InferRequest(BaseModel):
     )
     month: Optional[str] = Field(
         None,
-        description="Month for the source embedding, e.g. 2025-04. Required for classification models.",
+        description="Month for the source embedding, e.g. 2025-04. Required for single_time_detection models.",
         examples=["2025-04"],
     )
     before_month: Optional[str] = Field(
@@ -399,9 +414,9 @@ class InferRequest(BaseModel):
         has_single = bool(self.month)
         has_pair = bool(self.before_month) and bool(self.after_month)
         if has_single and has_pair:
-            raise ValueError("请勿同时传入 'month' 和 'before_month'/'after_month'；分类模型传 month，变化检测模型传 before_month+after_month")
+            raise ValueError("请勿同时传入 'month' 和 'before_month'/'after_month'；单时间检测传 month，变化检测传 before_month+after_month")
         if not has_single and not has_pair:
-            raise ValueError("分类模型请传入 'month'，变化检测模型请同时传入 'before_month' 和 'after_month'")
+            raise ValueError("单时间检测请传入 'month'，变化检测请同时传入 'before_month' 和 'after_month'")
         return self
 
 
@@ -422,7 +437,7 @@ class BatchInferRequest(BaseModel):
     )
     month: Optional[str] = Field(
         None,
-        description="Month for the source embedding, e.g. 2025-04. Required for classification models.",
+        description="Month for the source embedding, e.g. 2025-04. Required for single_time_detection models.",
         examples=["2025-04"],
     )
     before_month: Optional[str] = Field(
@@ -456,9 +471,9 @@ class BatchInferRequest(BaseModel):
         has_single = bool(self.month)
         has_pair = bool(self.before_month) and bool(self.after_month)
         if has_single and has_pair:
-            raise ValueError("请勿同时传入 'month' 和 'before_month'/'after_month'；分类模型传 month，变化检测模型传 before_month+after_month")
+            raise ValueError("请勿同时传入 'month' 和 'before_month'/'after_month'；单时间检测传 month，变化检测传 before_month+after_month")
         if not has_single and not has_pair:
-            raise ValueError("分类模型请传入 'month'，变化检测模型请同时传入 'before_month' 和 'after_month'")
+            raise ValueError("单时间检测请传入 'month'，变化检测请同时传入 'before_month' 和 'after_month'")
         return self
 
 

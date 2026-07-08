@@ -161,7 +161,7 @@ def get_system_model_info(region_id: str, task_id: str, version: str = "v2") -> 
     return {
         "id": task_id,
         "name": _task_display_name(task_id),
-        "type": "classification",
+        "type": "single_time_detection",
         "task_type": task_id,
         "status": "ready",
         "created_at": "1970-01-01T00:00:00",

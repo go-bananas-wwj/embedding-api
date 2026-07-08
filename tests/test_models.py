@@ -49,7 +49,7 @@ def _geojson_annotation(
     }
 
 
-def _model_payload(name="test-model", model_type="classification", task_type="building_extraction"):
+def _model_payload(name="test-model", model_type="single_time_detection", task_type="building_extraction"):
     return {
         "name": name,
         "model_type": model_type,
@@ -73,7 +73,7 @@ class TestModels:
             "/models",
             json={
                 "name": "test",
-                "model_type": "classification",
+                "model_type": "single_time_detection",
                 "region_id": "harbin",
             },
         )
@@ -98,6 +98,14 @@ class TestModels:
         data = response.json()
         assert data["task_type"] == "building_extraction"
         assert data["job_id"].startswith("job_")
+
+    def test_create_model_accepts_legacy_classification_model_type(self):
+        payload = _model_payload("test-legacy-model-type", model_type="classification")
+
+        response = client.post("/models", json=payload)
+
+        assert response.status_code == 200
+        assert response.json()["type"] == "single_time_detection"
 
     def test_haidian_embedding_version_falls_back_to_available_v1(self):
         assert _resolve_embedding_version("haidian", "v2") == "v1"
