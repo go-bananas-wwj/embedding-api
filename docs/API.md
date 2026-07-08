@@ -1231,7 +1231,7 @@ POST /models
 | `name` | string | 是 | 用户自定义模型名称 |
 | `model_type` | string | 是 | 模型大类：`classification`（分类头）或 `change_detection`（变化检测头） |
 | `region_id` | string | 是 | 区域 ID，如 `harbin` 或 `haidian` |
-| `embedding_version` | string | 否 | 嵌入版本，默认 `v2` |
+| `embedding_version` | string | 否 | 嵌入版本，默认 `v2`。如果该区域没有请求的版本，后端会自动使用该区域可用版本；海淀当前使用 `v1` |
 | `epochs` | int | 否 | 训练迭代次数（映射为 `LogisticRegression.max_iter`），默认 `100`，范围 `1~1000` |
 | `description` | string | 否 | 模型描述 |
 | `annotations` | object | 是 | GeoJSON FeatureCollection，坐标为 WGS84，几何类型支持 `Polygon`、`MultiPolygon` |
@@ -1240,8 +1240,10 @@ POST /models
 
 **`annotations` 说明**：
 - `type` 固定为 `FeatureCollection`。
-- 每个 `Feature` 的 `properties` 必须包含 `patch_id`、`region_id`、`class_id`、`task_type`。
-- 顶层请求体不再需要 `task_type`；后端会从所有 Feature 的 `properties.task_type` 自动推导，且要求同一个训练包内任务类型一致。
+- 每个 `Feature` 的 `properties` 必须包含 `patch_id`、`region_id`、`class_id`。
+- 顶层请求体不再需要 `task_type`；`Feature.properties.task_type` 也可不传。
+- 如果标注里传了 `properties.task_type`，后端会从所有 Feature 自动推导，且要求同一个训练包内任务类型一致。
+- 如果标注里不传 `properties.task_type`，`classification` 默认按 `building_extraction` 训练，`change_detection` 默认按 `change_detection` 训练。
 - `classification` 模型还需要 `month`；`change_detection` 模型还需要 `before_month` 和 `after_month`。
 - `geometry` 坐标使用 WGS84 `[lon, lat]`。
 - 所有 `Feature` 的 `region_id` 必须与请求体顶层 `region_id` 一致。

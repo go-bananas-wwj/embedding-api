@@ -465,7 +465,7 @@ FIELD_DOCS = {
     "date": "影像日期或月份。支持 `YYYY-MM`、`YYYYMM` 或 `YYYYMMDD`；`YYYYMMDD` 精确命中，月级请求会按日期倒序选择同月最新的一景。",
     "sensor_type": "传感器类型。可选 `s2`、`s1`、`landsat`；普通光学影像建议用 `s2`。",
     "patch_ids": "Patch 编号数组。每项格式为 `patch_000000`；批量推理最多 100 个。",
-    "task_type": "任务类型，例如 `building_extraction`、`water_extraction`、`change_detection`。",
+    "task_type": "任务类型，例如 `building_extraction`、`water_extraction`、`change_detection`。自定义训练的 GeoJSON Feature 中可不传；不传时后端按模型类型推导默认任务。",
     "task_id": "系统模型任务 ID，例如 `building_extraction`、`water_extraction`。",
     "model_id": "模型 ID。自定义模型形如 `model_xxxxxxxx`；系统模型可直接使用任务 ID。",
     "job_id": "训练任务 ID。创建模型后返回，用于轮询训练状态。",

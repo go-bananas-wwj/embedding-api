@@ -120,7 +120,15 @@ class GeoJSONProperties(BaseModel):
     class_id: str = Field(..., description="Class identifier.", examples=["cls_001"])
     class_name: Optional[str] = Field(None, description="Human-readable class name.", examples=["建筑用地"])
     color: Optional[str] = Field(None, description="Class color.", examples=["#FF0000"])
-    task_type: str = Field(..., description="Downstream task type.", examples=["building_extraction"])
+    task_type: Optional[str] = Field(
+        None,
+        description=(
+            "Downstream task type. Optional for custom training; when omitted, "
+            "classification defaults to building_extraction and change_detection "
+            "defaults to change_detection."
+        ),
+        examples=["building_extraction"],
+    )
     month: Optional[str] = Field(None, description="Month for single-time tasks.", examples=["2025-04"])
     before_month: Optional[str] = Field(None, description="Before month for change detection.", examples=["2025-04"])
     after_month: Optional[str] = Field(None, description="After month for change detection.", examples=["2025-06"])
@@ -228,6 +236,10 @@ class ModelCreate(BaseModel):
             "water_extraction",
         }
         task_type = self.resolved_task_type()
+        for feature in self.annotations.features:
+            if feature.properties.task_type is None:
+                feature.properties.task_type = task_type
+
         if self.model_type == "classification" and task_type not in valid_classification_tasks:
             raise ValueError(
                 f"classification model does not support task_type '{task_type}'"
@@ -289,8 +301,12 @@ class ModelCreate(BaseModel):
             return "change_detection"
 
         task_types = {
-            feature.properties.task_type for feature in self.annotations.features
+            feature.properties.task_type
+            for feature in self.annotations.features
+            if feature.properties.task_type is not None
         }
+        if not task_types:
+            return "building_extraction"
         if len(task_types) != 1:
             raise ValueError(
                 "classification annotations must use exactly one feature task_type"

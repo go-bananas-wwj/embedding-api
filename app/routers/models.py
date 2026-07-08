@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Path as PathParam, Query, Request
 from fastapi.responses import FileResponse
 
+from app.config import get_config
 from app.schemas.models import (
     BatchInferRequest,
     BatchInferResponse,
@@ -62,6 +63,22 @@ def _batch_response(results: List[dict]) -> dict:
         "error_count": len(results) - success_count,
         "results": results,
     }
+
+
+def _resolve_embedding_version(region_id: str, requested: str) -> str:
+    """Use the requested embedding version when available, otherwise region default."""
+    region_cfg = get_config().get_region(region_id) or {}
+    embeddings = region_cfg.get("embeddings") or {}
+    if requested in embeddings:
+        return requested
+    if "v1" in embeddings:
+        return "v1"
+    if embeddings:
+        return sorted(embeddings.keys())[0]
+    raise HTTPException(
+        status_code=404,
+        detail=f"No embeddings configured for region '{region_id}'",
+    )
 
 
 @router.get("", response_model=List[ModelOut])
@@ -215,6 +232,9 @@ async def create_model(
             detail="model_type must be 'classification' or 'change_detection'",
         )
     task_type = req.resolved_task_type()
+    embedding_version = _resolve_embedding_version(
+        req.region_id, req.embedding_version
+    )
 
     active_class_ids = req.class_ids or list(
         {f.properties.class_id for f in req.annotations.features}
@@ -247,7 +267,7 @@ async def create_model(
         region_id=req.region_id,
         task_type=task_type,
         model_type=req.model_type,
-        embedding_version=req.embedding_version,
+        embedding_version=embedding_version,
         epochs=req.epochs,
         annotations=req.annotations,
         classes=req.classes,

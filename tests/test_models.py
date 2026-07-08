@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.routers.models import _resolve_embedding_version
 
 
 client = TestClient(app)
@@ -86,6 +87,20 @@ class TestModels:
         assert data["status"] in {"training", "completed"}
         assert data["job_id"].startswith("job_")
         assert data["description"] == "test description"
+
+    def test_create_model_infers_missing_feature_task_type(self):
+        payload = _model_payload("test-infer-task")
+        payload["annotations"]["features"][0]["properties"].pop("task_type")
+
+        response = client.post("/models", json=payload)
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["task_type"] == "building_extraction"
+        assert data["job_id"].startswith("job_")
+
+    def test_haidian_embedding_version_falls_back_to_available_v1(self):
+        assert _resolve_embedding_version("haidian", "v2") == "v1"
 
     def test_create_model_invalid_type(self):
         payload = _model_payload("test-invalid")
