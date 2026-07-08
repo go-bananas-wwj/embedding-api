@@ -330,8 +330,14 @@ async def get_model(
     raise HTTPException(status_code=404, detail="Model not found")
 
 
-@router.patch("/{model_id}", response_model=Dict[str, str])
-async def rename_model(
+def _rename_model_for_user(user_id: str, model_id: str, name: str) -> dict:
+    if not get_model_registry(user_id).rename_model(model_id, name):
+        raise HTTPException(status_code=404, detail="Model not found")
+    return {"status": "ok"}
+
+
+@router.put("/{model_id}", response_model=Dict[str, str])
+async def rename_model_put(
     model_id: str = PathParam(
         ...,
         description="Model ID returned by POST /models. Replace with the real ID from the create response.",
@@ -340,14 +346,29 @@ async def rename_model(
     req: ModelRenameRequest = Body(...),
     user: dict = Depends(get_current_user),
 ) -> dict:
-    """重命名指定模型。
+    """重命名指定模型（推荐使用 PUT）。
 
     用于模型管理页修改显示名称。
     返回操作是否成功的状态 JSON。
     """
-    if not get_model_registry(user["user_id"]).rename_model(model_id, req.name):
-        raise HTTPException(status_code=404, detail="Model not found")
-    return {"status": "ok"}
+    return _rename_model_for_user(user["user_id"], model_id, req.name)
+
+
+@router.patch("/{model_id}", response_model=Dict[str, str])
+async def rename_model_patch(
+    model_id: str = PathParam(
+        ...,
+        description="Model ID returned by POST /models. Replace with the real ID from the create response.",
+        examples=["model_ghi789"],
+    ),
+    req: ModelRenameRequest = Body(...),
+    user: dict = Depends(get_current_user),
+) -> dict:
+    """重命名指定模型（兼容旧 PATCH 调用）。
+
+    前端新接入建议使用 `PUT /models/{model_id}`。
+    """
+    return _rename_model_for_user(user["user_id"], model_id, req.name)
 
 
 @router.delete("/{model_id}", response_model=Dict[str, str])

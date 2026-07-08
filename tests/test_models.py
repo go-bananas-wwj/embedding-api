@@ -123,6 +123,28 @@ class TestModels:
         assert r.status_code == 200
         assert r.json()["id"] == model_id
 
+    def test_rename_model_with_put(self):
+        r = client.post("/models", json=_model_payload("test-rename-put"))
+        model_id = r.json()["id"]
+
+        r = client.put(f"/models/{model_id}", json={"name": "renamed-by-put"})
+
+        assert r.status_code == 200
+        assert r.json()["status"] == "ok"
+        r = client.get(f"/models/{model_id}")
+        assert r.json()["name"] == "renamed-by-put"
+
+    def test_rename_model_patch_still_supported(self):
+        r = client.post("/models", json=_model_payload("test-rename-patch"))
+        model_id = r.json()["id"]
+
+        r = client.patch(f"/models/{model_id}", json={"name": "renamed-by-patch"})
+
+        assert r.status_code == 200
+        assert r.json()["status"] == "ok"
+        r = client.get(f"/models/{model_id}")
+        assert r.json()["name"] == "renamed-by-patch"
+
     def test_delete_model(self):
         r = client.post("/models", json=_model_payload("test-del"))
         model_id = r.json()["id"]

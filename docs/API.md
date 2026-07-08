@@ -95,7 +95,7 @@ curl -s -X POST "http://60.31.21.42:22065/models" \
     }
   }'
 curl -s "http://60.31.21.42:22065/models/model_ghi789"
-curl -s -X PATCH "http://60.31.21.42:22065/models/model_ghi789" \
+curl -s -X PUT "http://60.31.21.42:22065/models/model_ghi789" \
   -H 'Content-Type: application/json' \
   -d '{"name": "my-building-head-v2"}'
 curl -s -X DELETE "http://60.31.21.42:22065/models/model_ghi789"
@@ -252,7 +252,7 @@ docker-compose up -d
 | **瓦片** | `/regions/{region_id}/tasks/{task_type}/tiles/{z}/{x}/{y}.png` | GET | 标准 XYZ 瓦片（暂未实现） |
 | **马赛克** | `/regions/{region_id}/mosaic` | GET | 整区域 S2/S1/Landsat 马赛克大图 |
 | **自定义模型** | `/models` | GET/POST | 模型列表 / 创建训练 |
-| **自定义模型** | `/models/{model_id}` | GET/PATCH/DELETE | 模型详情 / 重命名 / 删除 |
+| **自定义模型** | `/models/{model_id}` | GET/PUT/PATCH/DELETE | 模型详情 / 重命名 / 删除 |
 | **自定义模型** | `/models/{model_id}/infer` | POST | 单 Patch 推理 |
 | **自定义模型** | `/models/{model_id}/infer_batch` | POST | 批量推理 |
 | **自定义模型** | `/models/jobs/{job_id}` | GET | 训练任务状态 |
@@ -1401,8 +1401,10 @@ curl -s "http://60.31.21.42:22065/models/building_extraction?region_id=harbin"
 修改模型名称。
 
 ```
-PATCH /models/{model_id}
+PUT /models/{model_id}
 ```
+
+> 前端推荐使用 `PUT`。旧版 `PATCH /models/{model_id}` 仍保留兼容。
 
 **路径参数**:
 
@@ -1418,7 +1420,7 @@ PATCH /models/{model_id}
 
 **curl 示例**:
 ```bash
-curl -s -X PATCH "http://60.31.21.42:22065/models/model_ghi789" \
+curl -s -X PUT "http://60.31.21.42:22065/models/model_ghi789" \
   -H 'Content-Type: application/json' \
   -d '{"name": "my-building-head-v2"}'
 ```
