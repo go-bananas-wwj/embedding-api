@@ -206,7 +206,10 @@ class ModelCreate(BaseModel):
         100,
         ge=1,
         le=1000,
-        description="Number of training iterations (mapped to LogisticRegression max_iter).",
+        description=(
+            "训练迭代次数。当前自定义模型使用 binary_conv3x3 few-shot 下游头，"
+            "服务端最多执行 100 轮以控制耗时。"
+        ),
         examples=[100],
     )
     class_ids: Optional[List[str]] = Field(
@@ -221,7 +224,10 @@ class ModelCreate(BaseModel):
     )
     annotations: GeoJSONFeatureCollection = Field(
         ...,
-        description="GeoJSON FeatureCollection containing user annotations. Coordinates must be WGS84.",
+        description=(
+            "GeoJSON FeatureCollection 用户标注包。坐标必须是 WGS84。"
+            "Polygon 内部作为目标正样本，Polygon 外未标注区域默认不直接当负样本。"
+        ),
     )
     classes: List[ModelClass] = Field(
         ...,

@@ -1205,9 +1205,9 @@ curl -s "http://60.31.21.42:22065/models?region_id=harbin"
 | `created_at` | string | 创建时间 |
 | `completed_at` | string | 完成时间 |
 | `classes` | object[] | 模型类别列表 |
-| `accuracy` | float | 训练准确率 |
+| `accuracy` | float | 训练集有效像素上的 F1 参考值；自定义 few-shot 模型样本少，主要用于判断训练是否收敛，不等同于大规模验证集精度 |
 | `n_samples` | int | 训练样本数 |
-| `model_path` | string | 模型文件路径（`.pkl`） |
+| `model_path` | string | 模型文件路径。自定义模型当前保存为 PyTorch few-shot checkpoint，历史模型可能仍是 `.pkl` |
 | `description` | string | 模型描述 |
 | `message` | string | 失败原因或提示信息 |
 | `job_id` | string | 关联的训练任务 ID |
@@ -1219,6 +1219,8 @@ curl -s "http://60.31.21.42:22065/models?region_id=harbin"
 ### 15. 创建并训练模型
 
 创建模型并启动异步训练任务。请求体中需要携带完整的 GeoJSON 标注包和类别定义，后端解析后提取训练样本。训练完成后才能调用推理接口。
+
+当前自定义训练使用 `binary_conv3x3` few-shot 下游头：在玄女 embedding 上训练一个轻量卷积分割头，适合少量 Polygon 标注下快速得到边界更连续、展示更自然的结果。注意：**Polygon 内部会作为目标正样本；Polygon 外部默认只是未标注区域，不会整体当作负样本**。当请求中没有显式负样本时，后端只会从低相似度区域抽取少量弱负样本用于稳定训练。
 
 ```
 POST /models
@@ -1232,7 +1234,7 @@ POST /models
 | `model_type` | string | 是 | 训练类型：`single_time_detection`（单时间检测）或 `change_detection`（双时相变化检测）。旧值 `classification` 仍兼容，会按 `single_time_detection` 处理 |
 | `region_id` | string | 是 | 区域 ID，如 `harbin` 或 `haidian` |
 | `embedding_version` | string | 否 | 嵌入版本，默认 `v2`。如果该区域没有请求的版本，后端会自动使用该区域可用版本；海淀当前使用 `v1` |
-| `epochs` | int | 否 | 训练迭代次数（映射为 `LogisticRegression.max_iter`），默认 `100`，范围 `1~1000` |
+| `epochs` | int | 否 | 训练迭代次数，默认 `100`，范围 `1~1000`。服务端最多执行 `100` 轮以控制耗时 |
 | `description` | string | 否 | 模型描述 |
 | `annotations` | object | 是 | GeoJSON FeatureCollection，坐标为 WGS84，几何类型支持 `Polygon`、`MultiPolygon` |
 | `classes` | object[] | 是 | 类别定义列表，每项包含 `id`、`name`、`color` |
@@ -1248,6 +1250,7 @@ POST /models
 - `geometry` 坐标使用 WGS84 `[lon, lat]`。
 - 所有 `Feature` 的 `region_id` 必须与请求体顶层 `region_id` 一致。
 - 所有 `Feature` 的 `class_id` 必须在 `classes` 中定义。若传入 `class_ids`，只有这些类别会参与训练；未选中的标注会被忽略。
+- 训练时只把 Polygon 覆盖区域作为该类别正样本；未覆盖区域不代表“不是这个类别”。因此前端不需要为了 few-shot 训练额外画满背景。
 - 限制：最多 `10000` 个 Feature，总顶点数不超过 `100000`。
 
 **curl 示例 — 单时间检测模型**:

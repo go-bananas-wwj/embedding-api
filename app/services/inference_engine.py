@@ -8,8 +8,10 @@ from typing import Any, Dict, List, Optional, Tuple
 import joblib
 import numpy as np
 from PIL import Image
+import torch
 
 from app.services.data_service import DataService
+from app.services.fewshot_heads import BinaryConv3x3ProbeHead
 from app.services.model_registry import get_model_registry
 from app.services.user_paths import get_user_dir
 
@@ -61,7 +63,10 @@ class InferenceEngine:
         if not model_path.exists():
             raise FileNotFoundError(f"Model file not found: {model_path}")
 
-        model_data = joblib.load(model_path)
+        try:
+            model_data = joblib.load(model_path)
+        except Exception:
+            model_data = torch.load(model_path, map_location="cpu", weights_only=False)
         self._cache[model_id] = model_data
         return model_data
 
@@ -76,6 +81,17 @@ class InferenceEngine:
     ) -> str:
         """Run single-patch inference. Returns path to result PNG."""
         model_data = self._load_model(model_id)
+        if model_data.get("__format__") == "torch_fewshot_head":
+            return self._infer_torch_fewshot(
+                model_data,
+                model_id,
+                region_id,
+                patch_id,
+                month=month,
+                before_month=before_month,
+                after_month=after_month,
+            )
+
         scaler = model_data["scaler"]
         clf = model_data["model"]
         task_type = model_data.get("task_type", "classification")
@@ -136,6 +152,86 @@ class InferenceEngine:
             classes = model_data.get("classes", [])
             class_map = model_data.get("class_map", {})
             rgb = self._color_encode_classes(pred, classes, class_map)
+
+        img = Image.fromarray(rgb).resize(
+            (128, 128), Image.Resampling.NEAREST
+        )
+        result_path = self.results_dir / result_filename
+        img.save(result_path)
+        return str(result_path)
+
+    def _infer_torch_fewshot(
+        self,
+        model_data: Dict[str, Any],
+        model_id: str,
+        region_id: str,
+        patch_id: str,
+        month: Optional[str] = None,
+        before_month: Optional[str] = None,
+        after_month: Optional[str] = None,
+    ) -> str:
+        task_type = model_data.get("task_type", "single_time_detection")
+        embedding_version = model_data.get("embedding_version", "v2")
+        feature_type = model_data.get("feature_type", "embedding")
+
+        if feature_type == "diff" or task_type == "change_detection":
+            before_month = before_month or model_data.get("before_month")
+            after_month = after_month or model_data.get("after_month")
+            if not before_month or not after_month:
+                raise ValueError(
+                    "Change-detection inference requires before_month and after_month"
+                )
+            emb_before = _load_embedding_for_inference(
+                region_id, patch_id, before_month, version=embedding_version
+            )
+            emb_after = _load_embedding_for_inference(
+                region_id, patch_id, after_month, version=embedding_version
+            )
+            if emb_before is None:
+                raise FileNotFoundError(
+                    f"Embedding not found for {patch_id} {before_month}"
+                )
+            if emb_after is None:
+                raise FileNotFoundError(
+                    f"Embedding not found for {patch_id} {after_month}"
+                )
+            emb = emb_after - emb_before
+            result_filename = (
+                f"infer_{model_id}_{region_id}_{patch_id}_"
+                f"{before_month}_vs_{after_month}.png"
+            )
+        else:
+            if not month:
+                raise ValueError("Single-time inference requires month")
+            emb = _load_embedding_for_inference(
+                region_id, patch_id, month, version=embedding_version
+            )
+            if emb is None:
+                raise FileNotFoundError(
+                    f"Embedding not found for {patch_id} {month}"
+                )
+            result_filename = (
+                f"infer_{model_id}_{region_id}_{patch_id}_{month}.png"
+            )
+
+        feature = self._normalize_feature_map(emb)
+        model = BinaryConv3x3ProbeHead(
+            embed_dim=int(model_data["embed_dim"]),
+            hidden_dim=int(model_data.get("hidden_dim", 128)),
+            dropout=0.0,
+        )
+        model.load_state_dict(model_data["state_dict"])
+        model.eval()
+
+        with torch.no_grad():
+            x = torch.from_numpy(feature).float().unsqueeze(0)
+            prob = torch.sigmoid(model(x)).squeeze().cpu().numpy()
+        pred = (prob >= float(model_data.get("threshold", 0.5))).astype(np.uint8)
+
+        if feature_type == "diff" or task_type == "change_detection":
+            rgb = self._color_encode_cd(pred)
+        else:
+            rgb = self._color_encode_binary_fewshot(pred, model_data)
 
         img = Image.fromarray(rgb).resize(
             (128, 128), Image.Resampling.NEAREST
@@ -219,6 +315,35 @@ class InferenceEngine:
         rgba[pred == 1] = [239, 68, 68, 180]
         rgba[pred == 0] = [0, 0, 0, 0]
         return rgba
+
+    @staticmethod
+    def _color_encode_binary_fewshot(
+        pred: np.ndarray, model_data: Dict[str, Any]
+    ) -> np.ndarray:
+        """Color-encode the binary few-shot head output."""
+        H, W = pred.shape
+        rgb = np.full((H, W, 3), 200, dtype=np.uint8)
+        classes = model_data.get("classes", [])
+        positive_class_id = model_data.get("positive_class_id")
+        positive_class = None
+        for cls in classes:
+            if cls.get("id") == positive_class_id:
+                positive_class = cls
+                break
+        if positive_class is None and classes:
+            positive_class = classes[0]
+        color = (255, 0, 0)
+        if positive_class:
+            color = InferenceEngine._hex_to_rgb(positive_class.get("color", "#ff0000"))
+        rgb[pred == 1] = color
+        return rgb
+
+    @staticmethod
+    def _normalize_feature_map(feature: np.ndarray) -> np.ndarray:
+        feature = feature.astype(np.float32, copy=False)
+        mean = feature.mean(axis=(1, 2), keepdims=True)
+        std = feature.std(axis=(1, 2), keepdims=True)
+        return (feature - mean) / np.maximum(std, 1e-6)
 
     @staticmethod
     def _hex_to_rgb(hex_color: str) -> Tuple[int, int, int]:

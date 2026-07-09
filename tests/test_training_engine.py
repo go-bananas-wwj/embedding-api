@@ -1,8 +1,8 @@
 """Tests for training engines."""
 
-import joblib
 import numpy as np
 import pytest
+import torch
 from PIL import Image
 
 from app.schemas.models import GeoJSONFeature, GeoJSONFeatureCollection, ModelClass
@@ -83,13 +83,13 @@ def test_classification_training_saves_class_map(
         class_ids=["cls_001"],
     )
 
-    model_data = joblib.load(result["model_path"])
+    model_data = torch.load(result["model_path"], map_location="cpu", weights_only=False)
+    assert model_data["__format__"] == "torch_fewshot_head"
+    assert model_data["head_type"] == "binary_conv3x3"
     assert "class_map" in model_data
     assert model_data["class_map"] == {"cls_001": 1}
     assert model_data["classes"] == [{"id": "cls_001", "name": "建筑", "color": "#FF0000"}]
-    assert "class_map" in model_data
-    assert model_data["class_map"] == {"cls_001": 1}
-    assert model_data["classes"] == [{"id": "cls_001", "name": "建筑", "color": "#FF0000"}]
+    assert 0.1 <= model_data["threshold"] <= 0.9
 
 
 def test_classification_inference_color_matches_class_map(
@@ -311,7 +311,7 @@ def test_multi_class_multi_feature_training(user_id):
         class_ids=["cls_001", "cls_002"],
     )
 
-    model_data = joblib.load(result["model_path"])
+    model_data = torch.load(result["model_path"], map_location="cpu", weights_only=False)
     assert model_data["class_map"] == {"cls_001": 1, "cls_002": 2}
     assert {c["id"] for c in model_data["classes"]} == {"cls_001", "cls_002"}
 
