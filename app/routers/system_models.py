@@ -2,7 +2,7 @@
 """
 
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Path as PathParam
 from fastapi.responses import FileResponse
@@ -14,6 +14,7 @@ from app.services.system_model_service import (
     get_system_model_classes,
     infer_system_model,
     list_system_models,
+    resolve_system_model_version,
 )
 from app.services.user_paths import get_user_dir
 
@@ -66,9 +67,9 @@ async def get_classes(
         description="Region identifier. Use 'harbin' or 'haidian'.",
         examples=["harbin"],
     ),
-    version: str = Query(
-        "v2",
-        description="Model checkpoint version. Allowed values: v1, v2.",
+    version: Optional[str] = Query(
+        None,
+        description="Model checkpoint version. Omit to use the best available version for the region.",
         examples=["v2"],
         openapi_examples={
             "v1": {"summary": "V4-based checkpoint", "value": "v1"},
@@ -83,7 +84,8 @@ async def get_classes(
     返回类别 ID、名称和调色板等 JSON 列表。
     """
     try:
-        return get_system_model_classes(region_id, task_id, version)
+        resolved_version = resolve_system_model_version(region_id, task_id, version)
+        return get_system_model_classes(region_id, task_id, resolved_version)
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except ValueError as e:
@@ -113,9 +115,9 @@ async def infer(
         description="Month for the source embedding, e.g. 2025-04.",
         examples=["2025-04"],
     ),
-    version: str = Query(
-        "v2",
-        description="Model checkpoint version. Allowed values: v1, v2.",
+    version: Optional[str] = Query(
+        None,
+        description="Model checkpoint version. Omit to use the best available version for the region.",
         examples=["v2"],
         openapi_examples={
             "v1": {"summary": "V4-based checkpoint", "value": "v1"},
@@ -131,8 +133,9 @@ async def infer(
     """
     results_dir = get_user_dir(user["user_id"]) / "system_model_results"
     try:
+        resolved_version = resolve_system_model_version(region_id, task_id, version)
         result_path = infer_system_model(
-            region_id, task_id, patch_id, month, version, results_dir
+            region_id, task_id, patch_id, month, resolved_version, results_dir
         )
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))

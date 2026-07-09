@@ -301,26 +301,13 @@ def test_multi_class_multi_feature_training(user_id):
     )
 
     engine = ClassificationTrainingEngine(user_id)
-    result = engine.train(
-        model_id=model_id,
-        region_id="harbin",
-        task_type="building_extraction",
-        embedding_version="v2",
-        annotations=annotations,
-        classes=classes,
-        class_ids=["cls_001", "cls_002"],
-    )
-
-    model_data = torch.load(result["model_path"], map_location="cpu", weights_only=False)
-    assert model_data["class_map"] == {"cls_001": 1, "cls_002": 2}
-    assert {c["id"] for c in model_data["classes"]} == {"cls_001", "cls_002"}
-
-    infer_engine = InferenceEngine(user_id)
-    result_path = infer_engine.infer(
-        model_id=model_id,
-        region_id="harbin",
-        patch_id="patch_000000",
-        month="2025-04",
-    )
-    img = np.array(Image.open(result_path))
-    assert img.shape[:2] == (128, 128)
+    with pytest.raises(ValueError, match="exactly one target class_id"):
+        engine.train(
+            model_id=model_id,
+            region_id="harbin",
+            task_type="building_extraction",
+            embedding_version="v2",
+            annotations=annotations,
+            classes=classes,
+            class_ids=["cls_001", "cls_002"],
+        )

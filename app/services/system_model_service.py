@@ -142,6 +142,22 @@ def get_system_model_versions(region_id: str, task_id: str) -> List[str]:
     return []
 
 
+def resolve_system_model_version(
+    region_id: str, task_id: str, requested: Optional[str] = None
+) -> str:
+    """Resolve a requested system-model version to one available in the region."""
+    versions = get_system_model_versions(region_id, task_id)
+    if requested and requested in versions:
+        return requested
+    if "v2" in versions:
+        return "v2"
+    if "v1" in versions:
+        return "v1"
+    if versions:
+        return sorted(versions)[0]
+    raise FileNotFoundError(f"System model not found: {task_id}")
+
+
 def get_system_model_info(region_id: str, task_id: str, version: str = "v2") -> Dict[str, Any]:
     """Return ModelOut-compatible metadata for a system pre-trained model.
 
@@ -151,8 +167,7 @@ def get_system_model_info(region_id: str, task_id: str, version: str = "v2") -> 
         raise ValueError(f"Not a system task: {task_id}")
 
     versions = get_system_model_versions(region_id, task_id)
-    if version not in versions:
-        version = versions[0] if versions else "v2"
+    version = resolve_system_model_version(region_id, task_id, version)
 
     # Ensure model file exists (will raise FileNotFoundError if not)
     _resolve_model_path(region_id, task_id, version)

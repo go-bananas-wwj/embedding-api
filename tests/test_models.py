@@ -107,6 +107,41 @@ class TestModels:
         assert response.status_code == 200
         assert response.json()["type"] == "single_time_detection"
 
+    def test_create_model_rejects_multiple_target_classes(self):
+        payload = _model_payload("test-multi-class-rejected")
+        payload["classes"].append({"id": "cls_002", "name": "道路", "color": "#00FF00"})
+        payload["annotations"]["features"].append(
+            {
+                "type": "Feature",
+                "properties": {
+                    "patch_id": "patch_000000",
+                    "region_id": "harbin",
+                    "class_id": "cls_002",
+                    "class_name": "道路",
+                    "color": "#00FF00",
+                    "task_type": "building_extraction",
+                    "month": "2025-04",
+                },
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [
+                        [
+                            [126.52, 45.74],
+                            [126.53, 45.74],
+                            [126.53, 45.75],
+                            [126.52, 45.75],
+                            [126.52, 45.74],
+                        ]
+                    ],
+                },
+            }
+        )
+
+        response = client.post("/models", json=payload)
+
+        assert response.status_code == 422
+        assert "二分类" in response.text
+
     def test_haidian_embedding_version_falls_back_to_available_v1(self):
         assert _resolve_embedding_version("haidian", "v2") == "v1"
 

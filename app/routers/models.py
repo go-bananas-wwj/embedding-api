@@ -33,6 +33,7 @@ from app.services.system_model_service import (
     get_system_model_info,
     infer_system_model,
     is_system_task,
+    resolve_system_model_version,
 )
 from app.services.training_engine import (
     ChangeDetectionTrainingEngine,
@@ -457,12 +458,15 @@ async def infer(
             )
         results_dir = Path(f"users/{user['user_id']}/system_model_results")
         try:
+            resolved_version = resolve_system_model_version(
+                req.region_id, model_id, req.version
+            )
             result_path = infer_system_model(
                 req.region_id,
                 model_id,
                 req.patch_id,
                 req.month,
-                version=req.version or "v2",
+                version=resolved_version,
                 results_dir=results_dir,
             )
         except FileNotFoundError as e:
@@ -567,6 +571,12 @@ async def infer_batch(
                 detail="System models require 'month' in the request body",
             )
         results_dir = Path(f"users/{user['user_id']}/system_model_results")
+        try:
+            resolved_version = resolve_system_model_version(
+                req.region_id, model_id, req.version
+            )
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=404, detail=str(e))
         results = []
         for patch_id in req.patch_ids:
             try:
@@ -575,7 +585,7 @@ async def infer_batch(
                     model_id,
                     patch_id,
                     req.month,
-                    version=req.version or "v2",
+                    version=resolved_version,
                     results_dir=results_dir,
                 )
                 results.append(

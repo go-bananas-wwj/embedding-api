@@ -1231,7 +1231,7 @@ curl -s "http://60.31.21.42:22065/models?region_id=harbin"
 
 创建模型并启动异步训练任务。请求体中需要携带完整的 GeoJSON 标注包和类别定义，后端解析后提取训练样本。训练完成后才能调用推理接口。
 
-当前自定义训练使用 `binary_conv3x3` few-shot 下游头：在玄女 embedding 上训练一个轻量卷积分割头，适合少量 Polygon 标注下快速得到边界更连续、展示更自然的结果。注意：**Polygon 内部会作为目标正样本；Polygon 外部默认只是未标注区域，不会整体当作负样本**。当请求中没有显式负样本时，后端只会从低相似度区域抽取少量弱负样本用于稳定训练。
+当前自定义训练使用 `binary_conv3x3` few-shot 二分类下游头：在玄女 embedding 上训练一个轻量卷积分割头，适合少量 Polygon 标注下快速得到边界更连续、展示更自然的结果。每次训练只能选择一个目标 `class_id`，输出为“目标 / 非目标”。注意：**Polygon 内部会作为目标正样本；Polygon 外部默认只是未标注区域，不会整体当作负样本**。当请求中没有显式负样本时，后端只会从低相似度区域抽取少量弱负样本用于稳定训练。
 
 ```
 POST /models
@@ -1249,7 +1249,7 @@ POST /models
 | `description` | string | 否 | 模型描述 |
 | `annotations` | object | 是 | GeoJSON FeatureCollection，坐标为 WGS84，几何类型支持 `Polygon`、`MultiPolygon` |
 | `classes` | object[] | 是 | 类别定义列表，每项包含 `id`、`name`、`color` |
-| `class_ids` | string[] | 否 | 可选，指定参与训练的类别 ID 子集；为空时使用标注中所有类别 |
+| `class_ids` | string[] | 否 | 可选，指定参与训练的目标类别 ID。当前自定义训练是二分类 few-shot，每次只能传 1 个目标类别；不传时要求标注包中只有 1 个类别 |
 
 **`annotations` 说明**：
 - `type` 固定为 `FeatureCollection`。
@@ -1260,7 +1260,7 @@ POST /models
 - `single_time_detection` 单时间检测需要 `month`；`change_detection` 双时相变化检测需要 `before_month` 和 `after_month`。
 - `geometry` 坐标使用 WGS84 `[lon, lat]`。
 - 所有 `Feature` 的 `region_id` 必须与请求体顶层 `region_id` 一致。
-- 所有 `Feature` 的 `class_id` 必须在 `classes` 中定义。若传入 `class_ids`，只有这些类别会参与训练；未选中的标注会被忽略。
+- 所有 `Feature` 的 `class_id` 必须在 `classes` 中定义。若传入 `class_ids`，当前只能传 1 个目标类别；未选中的标注会被忽略。
 - 训练时只把 Polygon 覆盖区域作为该类别正样本；未覆盖区域不代表“不是这个类别”。因此前端不需要为了 few-shot 训练额外画满背景。
 - 限制：最多 `10000` 个 Feature，总顶点数不超过 `100000`。
 
@@ -1391,7 +1391,7 @@ GET /models/building_extraction?region_id=harbin
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `region_id` | string | 条件 | `model_id` 为系统任务 ID 时必填 |
-| `version` | string | 否 | 系统模型 checkpoint 版本，默认 `v2` |
+| `version` | string | 否 | 系统模型 checkpoint 版本；不传时后端按区域自动选择可用版本（哈尔滨通常为 `v2`，海淀为 `v1`） |
 
 **curl 示例**:
 ```bash
@@ -1499,7 +1499,7 @@ POST /models/{model_id}/infer
 | `month` | string | 条件 | 单期任务必填，如 `2025-04` |
 | `before_month` | string | 条件 | 变化检测必填，如 `2025-04` |
 | `after_month` | string | 条件 | 变化检测必填，如 `2025-06` |
-| `version` | string | 否 | 系统模型 checkpoint 版本，默认 `v2`；自定义模型忽略 |
+| `version` | string | 否 | 系统模型 checkpoint 版本；不传时后端按区域自动选择可用版本。自定义模型忽略 |
 
 **curl 示例 — 自定义单时间检测模型**:
 ```bash
@@ -1574,7 +1574,7 @@ POST /models/{model_id}/infer_batch
 | `month` | string | 条件 | 单期任务必填，如 `2025-04` |
 | `before_month` | string | 条件 | 变化检测必填，如 `2025-04` |
 | `after_month` | string | 条件 | 变化检测必填，如 `2025-06` |
-| `version` | string | 否 | 系统模型 checkpoint 版本，默认 `v2`；自定义模型忽略 |
+| `version` | string | 否 | 系统模型 checkpoint 版本；不传时后端按区域自动选择可用版本。自定义模型忽略 |
 
 **curl 示例 — 自定义单时间检测模型**:
 ```bash
@@ -1852,7 +1852,7 @@ GET /system-models/{task_id}/classes?region_id=harbin&version=v2
 | 参数 | 类型 | 必填 | 默认值 | 说明 |
 |------|------|------|--------|------|
 | `region_id` | string | 是 | - | 区域 ID |
-| `version` | string | 否 | `v2` | 模型版本 |
+| `version` | string | 否 | 自动选择 | 模型版本。不传时按区域选择可用版本：哈尔滨优先 `v2`，海淀使用 `v1` |
 
 **curl 示例**:
 ```bash
@@ -1891,7 +1891,7 @@ POST /system-models/{task_id}/infer?region_id=harbin&patch_id=patch_000000&month
 | `region_id` | string | 是 | - | 区域 ID |
 | `patch_id` | string | 是 | - | Patch ID |
 | `month` | string | 是 | - | 月份 |
-| `version` | string | 否 | `v2` | 模型版本 |
+| `version` | string | 否 | 自动选择 | 模型版本。不传时按区域选择可用版本：哈尔滨优先 `v2`，海淀使用 `v1` |
 
 **curl 示例**:
 ```bash

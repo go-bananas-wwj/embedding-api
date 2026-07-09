@@ -221,7 +221,10 @@ class ModelCreate(BaseModel):
     )
     class_ids: Optional[List[str]] = Field(
         None,
-        description="Optional subset of class IDs to use for training. If empty, all classes in annotations are used.",
+        description=(
+            "Target class ID for binary few-shot training. Current custom "
+            "training supports exactly one selected class."
+        ),
         examples=[["cls_001"]],
     )
     description: Optional[str] = Field(
@@ -271,6 +274,17 @@ class ModelCreate(BaseModel):
             for cid in self.class_ids:
                 if cid not in class_ids:
                     raise ValueError(f"class_id '{cid}' is not defined in classes")
+        active_class_ids = self.class_ids or sorted(
+            {
+                feature.properties.class_id
+                for feature in self.annotations.features
+                if feature.properties.class_id in class_ids
+            }
+        )
+        if len(set(active_class_ids)) != 1:
+            raise ValueError(
+                "自定义训练当前为二分类 few-shot 训练；每次只能选择一个目标 class_id"
+            )
 
         total_vertices = 0
         max_features = 10000
@@ -417,8 +431,8 @@ class InferRequest(BaseModel):
         examples=["2025-06"],
     )
     version: Optional[str] = Field(
-        "v2",
-        description="Checkpoint version for system pre-trained models. Allowed values: v1, v2. Ignored for custom models.",
+        None,
+        description="Checkpoint version for system pre-trained models. Omit to use the best available version for the region. Ignored for custom models.",
         examples=["v2"],
     )
 
@@ -464,8 +478,8 @@ class BatchInferRequest(BaseModel):
         examples=["2025-06"],
     )
     version: Optional[str] = Field(
-        "v2",
-        description="Checkpoint version for system pre-trained models. Allowed values: v1, v2. Ignored for custom models.",
+        None,
+        description="Checkpoint version for system pre-trained models. Omit to use the best available version for the region. Ignored for custom models.",
         examples=["v2"],
     )
 

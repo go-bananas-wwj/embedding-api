@@ -41,7 +41,7 @@
 
 - **前端自治**：分类和标注完全由前端在浏览器 `localStorage` / `IndexedDB` 中管理，后端不再提供 `/annotations` 接口。
 - **训练包**：前端在调用 `POST /models` 时，把完整的标注包（GeoJSON FeatureCollection + classes 数组）一次性传给后端。
-- **后端训练**：后端解析 GeoJSON，把 WGS84 多边形栅格化为 128×128 mask，提取 embedding，训练一个 `binary_conv3x3` few-shot 下游分割头。
+- **后端训练**：后端解析 GeoJSON，把 WGS84 多边形栅格化为 128×128 mask，提取 embedding，训练一个 `binary_conv3x3` few-shot 二分类下游分割头。
 - **模型名称用户定义**：`name` 字段由用户输入，后端只负责生成 `model_id`。
 - **无演示兜底**：`POST /models` 必须提交完整 `annotations` 和
   `classes`。空请求、缺字段或格式错误会返回 `422`，不会自动创建 demo
@@ -152,9 +152,9 @@ curl -H "Authorization: Bearer your_api_key" http://60.31.21.42:22065/health
 ### 多分类与多标注支持
 
 - 一个 `FeatureCollection` 可以包含**多个 Feature**，同一 `class_id` 在同一 Patch/时间下的多个 Polygon 会自动合并成一个 mask。
-- 一个训练请求可以包含**多个类别**；后端会保留类别映射和颜色，用于推理结果图展示。
+- 一个训练请求当前只能选择**一个目标类别**参与训练；输出语义是“目标 / 非目标”。`classes` 可以包含完整类别列表，但 `class_ids` 只能传 1 个目标类别。
 - few-shot 训练不会把 Polygon 外部全部当成负样本。Polygon 内部是目标正样本，Polygon 外部默认是“未标注/忽略”。如果请求中没有显式负样本，后端只从与正样本 embedding 相似度较低的区域抽取少量弱负样本，避免模型把整张图外部都学成背景。
-- `class_ids` 可选。传入时表示“本次只训练这些类别”；完整标注包里可以包含未选中的类别，后端会忽略它们。`class_ids` 中的每个 ID 必须在 `classes` 中定义。
+- `class_ids` 可选。传入时表示“本次训练的目标类别”，当前只能传 1 个；完整标注包里可以包含未选中的类别，后端会忽略它们。`class_ids` 中的 ID 必须在 `classes` 中定义。
 
 ---
 
@@ -288,7 +288,7 @@ Content-Type: application/json
 5. 推理结果图统一输出为 128×128 PNG。
 6. 加载对应月份的 embedding；变化检测会加载前后两期并计算 embedding 差分。
 7. 将 Polygon 内部作为目标正样本，未标注区域默认忽略；没有显式负样本时，抽取少量低相似度弱负样本。
-8. 训练 `binary_conv3x3` few-shot 下游头，自动选择推理阈值。
+8. 训练 `binary_conv3x3` few-shot 二分类下游头，自动选择推理阈值。
 9. 保存 PyTorch checkpoint，更新模型状态。
 
 ### 校验与限制
@@ -297,7 +297,7 @@ Content-Type: application/json
   - `single_time_detection` 仅支持 `building_extraction`、`road_extraction`、`construction`、`land_use_classification`、`land_cover_classification`、`water_extraction`。
   - `change_detection` 必须搭配 `task_type: "change_detection"`。
 - 所有 Feature 的 `region_id` 必须与顶层 `region_id` 一致。
-- 所有 Feature 的 `class_id` 必须在 `classes` 中定义；如果传入 `class_ids`，未选中的类别会在训练时被忽略。
+- 所有 Feature 的 `class_id` 必须在 `classes` 中定义；如果传入 `class_ids`，只能传 1 个目标类别，未选中的类别会在训练时被忽略。
 - 标注包限制：最多 `10000` 个 Feature，总顶点数不超过 `100000`。
 - `epochs` 默认 `100`，请求范围 `1~1000`；服务端最多执行 `100` 轮以控制训练耗时。
 

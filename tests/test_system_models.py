@@ -38,6 +38,23 @@ class TestSystemModels:
         # 200 if checkpoint exists, 404 if model file missing
         assert response.status_code in (200, 404)
 
+    def test_haidian_system_model_omitted_version_uses_v1(self):
+        response = client.get(
+            "/system-models/road_extraction/classes?region_id=haidian"
+        )
+        assert response.status_code == 200
+        assert response.json()[1]["name"] == "道路"
+
+    def test_haidian_system_model_infer_omitted_version_uses_v1(self):
+        response = client.post(
+            "/system-models/road_extraction/infer"
+            "?region_id=haidian&patch_id=patch_000000&month=202512"
+        )
+        assert response.status_code == 200
+        assert response.json()["result_url"].endswith(
+            "road_extraction_haidian_patch_000000_202512.png"
+        )
+
     def test_infer_system_model_missing_embedding(self):
         response = client.post(
             "/system-models/land_cover_classification/infer?region_id=harbin&patch_id=patch_000000&month=2099-01&version=v2"

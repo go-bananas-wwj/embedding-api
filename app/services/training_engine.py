@@ -271,6 +271,10 @@ class ClassificationTrainingEngine:
         Returns:
             Dict with model_path, accuracy, n_samples.
         """
+        if len(set(class_ids)) != 1:
+            raise ValueError(
+                "Binary Conv 3x3 few-shot training requires exactly one target class_id"
+            )
         records, class_map = parse_annotations_for_training(
             annotations=annotations,
             classes=classes,
@@ -357,6 +361,10 @@ class ChangeDetectionTrainingEngine:
         Returns:
             Dict with model_path, accuracy, n_samples.
         """
+        if len(set(class_ids)) != 1:
+            raise ValueError(
+                "Binary Conv 3x3 few-shot training requires exactly one target class_id"
+            )
         records, class_map = parse_annotations_for_training(
             annotations=annotations,
             classes=classes,
