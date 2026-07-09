@@ -104,6 +104,22 @@ class TestPatches:
         data = response.json()
         assert data["patch_id"] == "patch_000000"
         assert "bounds_wgs84" in data
+        assert data["footprint_wgs84"]["type"] == "Polygon"
+        assert len(data["footprint_wgs84"]["coordinates"][0]) == 5
+
+    def test_patch_footprints_share_projected_edges(self):
+        left = client.get("/regions/harbin/patches/patch_000000").json()
+        right = client.get("/regions/harbin/patches/patch_000001").json()
+
+        # WGS84 envelopes are not exact patch footprints for a projected grid.
+        bbox_gap = right["bounds_wgs84"][0] - left["bounds_wgs84"][2]
+        assert bbox_gap > 0
+
+        left_ring = left["footprint_wgs84"]["coordinates"][0]
+        right_ring = right["footprint_wgs84"]["coordinates"][0]
+        left_right_edge = [left_ring[1], left_ring[2]]
+        right_left_edge = [right_ring[0], right_ring[3]]
+        assert left_right_edge == right_left_edge
 
     def test_get_patch_not_found(self):
         response = client.get("/regions/harbin/patches/patch_999999")

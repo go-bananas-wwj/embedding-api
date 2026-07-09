@@ -475,6 +475,16 @@ curl -s "http://60.31.21.42:22065/regions/harbin/patches?page=1&page_size=20&bbo
     {
       "patch_id": "patch_000000",
       "bounds_wgs84": [126.51631, 45.743707, 126.532242, 45.755574],
+      "footprint_wgs84": {
+        "type": "Polygon",
+        "coordinates": [[
+          [126.51631, 45.743707],
+          [126.53275, 45.744064],
+          [126.532242, 45.755574],
+          [126.5158, 45.755216],
+          [126.51631, 45.743707]
+        ]]
+      },
       "sources": {
         "dem": 1,
         "dynamic_world": 13,
@@ -504,14 +514,15 @@ curl -s "http://60.31.21.42:22065/regions/harbin/patches?page=1&page_size=20&bbo
 | `page_size` | int | 每页数量 |
 | `has_next` | bool | 是否有下一页 |
 | `patch_id` | string | Patch 唯一标识 |
-| `bounds_wgs84` | float[4] | 经纬度范围 `[min_lng, min_lat, max_lng, max_lat]` |
+| `bounds_wgs84` | float[4] | Patch 的 WGS84 外接矩形 `[min_lng, min_lat, max_lng, max_lat]`，适合 bbox 查询和快速定位 |
+| `footprint_wgs84` | GeoJSON Polygon | Patch 的真实 WGS84 四边形边界。前端绘制 Patch 边框时请优先使用它，避免相邻 patch 因投影转换出现缝隙或重叠 |
 | `sources` | object | 各数据源包含的影像/样本数量 |
 | `time_range` | string[2] | 数据时间范围 `[开始年月, 结束年月]`，格式为 `YYYY-MM` |
 | `has_embedding` | bool | 是否有嵌入数据 |
 | `available_months` | string[] | 该 Patch 有 Embedding 的月份列表 |
 | `available_tasks` | string[] | 该 Patch 有结果的下游任务（前端可用此字段动态渲染「查看任务」按钮） |
 
-**前端提示**: `bounds_wgs84` 可以直接用于在地图上绘制矩形框，表示 Patch 的位置。前端可通过 `has_next` 判断是否需要显示「加载更多」按钮。
+**前端提示**: `bounds_wgs84` 是外接矩形，不是精确边界。哈尔滨、海淀的 patch 网格是在 UTM 投影坐标系中切出来的正方形，转换到 WGS84 后会变成轻微倾斜的四边形；如果用 `bounds_wgs84` 画经纬度矩形，相邻 patch 之间可能出现几十米级的视觉缝隙或重叠。地图上展示 patch 边界请使用 `footprint_wgs84`。前端可通过 `has_next` 判断是否需要显示「加载更多」按钮。
 
 ---
 

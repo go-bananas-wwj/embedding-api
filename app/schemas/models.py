@@ -39,6 +39,13 @@ class RegionsResponse(BaseModel):
 class PatchBase(BaseModel):
     patch_id: str = Field(..., description="Patch identifier.")
     bounds_wgs84: List[float] = Field(..., description="Bounding box in WGS84 [minx, miny, maxx, maxy].")
+    footprint_wgs84: Optional[Dict[str, Any]] = Field(
+        None,
+        description=(
+            "Exact patch footprint polygon in WGS84 GeoJSON. Prefer this over "
+            "bounds_wgs84 when drawing patch borders on a map."
+        ),
+    )
     sources: Dict[str, int] = Field(..., description="Source data counts for the patch.")
     time_range: List[str] = Field(..., description="Available time range [start, end].")
 

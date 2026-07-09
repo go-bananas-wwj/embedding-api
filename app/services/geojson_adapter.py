@@ -11,6 +11,8 @@ import numpy as np
 from rasterio import features as rasterio_features
 from rasterio import Affine
 from shapely.geometry import shape
+from shapely.ops import transform as shapely_transform
+from pyproj import Transformer
 
 from app.schemas.models import GeoJSONFeature, GeoJSONFeatureCollection, ModelClass
 from app.services.data_service import DataService
@@ -29,6 +31,18 @@ def _get_patch_bbox(region_id: str, patch_id: str) -> Tuple[float, float, float,
     if not bbox or len(bbox) != 4:
         raise ValueError(f"Patch {patch_id} has no valid bounds_wgs84")
     return tuple(bbox)
+
+
+def _get_patch_spatial_ref(region_id: str, patch_id: str) -> Dict[str, Any]:
+    """Fetch patch spatial metadata for CRS-aware rasterization."""
+    patch = DataService.get_patch(region_id, patch_id)
+    if patch is None:
+        raise ValueError(f"Patch not found: {patch_id} in region {region_id}")
+    return {
+        "bounds_wgs84": patch.get("bounds_wgs84"),
+        "bounds": patch.get("bounds"),
+        "crs": patch.get("crs"),
+    }
 
 
 def _build_transform(bbox: Tuple[float, float, float, float], size: Tuple[int, int]) -> Affine:
@@ -69,6 +83,36 @@ def rasterize_geometry(
         dtype=np.uint8,
     )
     return mask
+
+
+def rasterize_patch_geometry(
+    geometry: Dict[str, Any],
+    spatial_ref: Dict[str, Any],
+    size: Tuple[int, int] = DEFAULT_MASK_SIZE,
+) -> np.ndarray:
+    """Rasterize WGS84 geometry using the patch's native grid when available."""
+    native_bounds = spatial_ref.get("bounds")
+    native_crs = spatial_ref.get("crs")
+    if native_bounds and len(native_bounds) == 4 and native_crs:
+        geom = shape(geometry)
+        transformer = Transformer.from_crs(
+            "EPSG:4326", native_crs, always_xy=True
+        )
+        native_geom = shapely_transform(transformer.transform, geom)
+        transform = _build_transform(tuple(native_bounds), size)
+        return rasterio_features.rasterize(
+            [(native_geom, 1)],
+            out_shape=size,
+            transform=transform,
+            fill=0,
+            default_value=1,
+            dtype=np.uint8,
+        )
+
+    bbox = spatial_ref.get("bounds_wgs84")
+    if not bbox or len(bbox) != 4:
+        raise ValueError("Patch has no valid spatial bounds for rasterization")
+    return rasterize_geometry(geometry, tuple(bbox), size=size)
 
 
 def group_features_by_patch(features: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
@@ -117,7 +161,7 @@ def parse_annotations_for_training(
     records = []
     for patch_id, features in groups.items():
         region_id = features[0]["properties"]["region_id"]
-        bbox = _get_patch_bbox(region_id, patch_id)
+        spatial_ref = _get_patch_spatial_ref(region_id, patch_id)
 
         # Merge masks per (class_id, time)
         masks: Dict[Tuple[str, str], np.ndarray] = {}
@@ -132,7 +176,7 @@ def parse_annotations_for_training(
             else:  # change_detection
                 time_key = f"{props.get('before_month')}_vs_{props.get('after_month')}"
 
-            mask = rasterize_geometry(f["geometry"], bbox)
+            mask = rasterize_patch_geometry(f["geometry"], spatial_ref)
             key = (cls_id, time_key)
             if key in masks:
                 masks[key] = np.maximum(masks[key], mask)

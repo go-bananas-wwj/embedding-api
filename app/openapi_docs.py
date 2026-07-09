@@ -459,6 +459,7 @@ FIELD_DOCS = {
     "page": "页码。从 1 开始；用于分页获取列表。",
     "page_size": "每页数量。默认通常为 20，最大通常为 100；用于控制单次返回条数。",
     "bbox": "WGS84 边界框过滤条件，格式为 `min_lon,min_lat,max_lon,max_lat`。",
+    "footprint_wgs84": "Patch 的真实 WGS84 GeoJSON 四边形边界。前端绘制边框时优先使用它，不要用外接矩形代替。",
     "format": "返回格式。按接口可选 `png`、`npy`、`json`、`cache` 或 `tif`。",
     "version": "数据或模型版本。按接口可选 `v1`、`v2`；海淀最新模型通常使用 `v1`。",
     "month": "影像月份或日期。支持 `YYYY-MM`、`YYYYMM` 或部分接口的 `YYYYMMDD`；日级表示精确日期，月级请求会按日期倒序选择同月最新的一景。",

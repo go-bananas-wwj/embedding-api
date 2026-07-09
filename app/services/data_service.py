@@ -12,6 +12,8 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from pyproj import Transformer
+
 from app.config import get_config
 from app.services.time_utils import normalize_month, normalize_period
 
@@ -699,6 +701,50 @@ class DataService:
         return sorted(months)
 
     @staticmethod
+    def _build_patch_footprint_wgs84(patch: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Build the exact patch footprint as WGS84 GeoJSON.
+
+        ``bounds_wgs84`` is only an axis-aligned geographic envelope. Projected
+        patch grids become slightly tilted quadrilaterals in WGS84, so drawing
+        the envelope as a rectangle can create visible gaps or overlaps between
+        neighboring patches.
+        """
+        bounds = patch.get("bounds")
+        crs = patch.get("crs")
+        if bounds and len(bounds) == 4 and crs:
+            minx, miny, maxx, maxy = bounds
+            native_coords = [
+                (minx, miny),
+                (maxx, miny),
+                (maxx, maxy),
+                (minx, maxy),
+                (minx, miny),
+            ]
+            transformer = Transformer.from_crs(crs, "EPSG:4326", always_xy=True)
+            xs, ys = transformer.transform(
+                [pt[0] for pt in native_coords],
+                [pt[1] for pt in native_coords],
+            )
+            coords = [
+                [round(float(x), 9), round(float(y), 9)]
+                for x, y in zip(xs, ys)
+            ]
+            return {"type": "Polygon", "coordinates": [coords]}
+
+        bbox = patch.get("bounds_wgs84")
+        if not bbox or len(bbox) != 4:
+            return None
+        minx, miny, maxx, maxy = bbox
+        coords = [
+            [minx, miny],
+            [maxx, miny],
+            [maxx, maxy],
+            [minx, maxy],
+            [minx, miny],
+        ]
+        return {"type": "Polygon", "coordinates": [coords]}
+
+    @staticmethod
     def enrich_patches(region_id: str, patches: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Batch-enrich patches with embedding/task metadata.
 
@@ -710,6 +756,7 @@ class DataService:
             result.append({
                 "patch_id": patch_id,
                 "bounds_wgs84": p.get("bounds_wgs84", []),
+                "footprint_wgs84": DataService._build_patch_footprint_wgs84(p),
                 "bounds": p.get("bounds"),
                 "crs": p.get("crs"),
                 "sources": p.get("sources", {}),

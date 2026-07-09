@@ -130,7 +130,7 @@ def _train_binary_conv_head(
         raise ValueError("No valid training samples after filtering")
 
     embed_dim = samples[0][0].shape[0]
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = _select_training_device()
     model = BinaryConv3x3ProbeHead(embed_dim=embed_dim).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-4)
     effective_epochs = max(1, min(int(epochs), 100))
@@ -163,6 +163,23 @@ def _train_binary_conv_head(
     threshold, f1 = _tune_threshold(model, tensors)
     model.cpu().eval()
     return model, threshold, f1, valid_count, effective_epochs
+
+
+def _select_training_device() -> torch.device:
+    if not torch.cuda.is_available():
+        return torch.device("cpu")
+    try:
+        free_bytes, _ = torch.cuda.mem_get_info()
+        if free_bytes < 512 * 1024 * 1024:
+            logger.warning(
+                "CUDA free memory is low (%s MB); using CPU for few-shot training",
+                int(free_bytes / 1024 / 1024),
+            )
+            return torch.device("cpu")
+    except RuntimeError as exc:
+        logger.warning("Unable to inspect CUDA memory; using CPU: %s", exc)
+        return torch.device("cpu")
+    return torch.device("cuda")
 
 
 def _tune_threshold(
