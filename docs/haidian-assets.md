@@ -14,6 +14,22 @@ artifacts/haidian-embedding-v1
 
 旧的 `haidian/v1/api_ready` 不再作为当前 API 的数据来源。
 
+## P10C 来源校验
+
+当前部署的是 P10C epoch 800，不是 P10A/P10B 或旧版 P2A 静态资产：
+
+| 校验项 | 当前值 |
+|------|------|
+| 来源实验 | `v2_p10c_haidian_202512_202605_osm_semantic_hardneg_20260704` |
+| 月度 embedding 目录 | `haidian_202512_202605_p10c_epoch800` |
+| Checkpoint | `haidian_embedding_v1_p10c_epoch800.pt` |
+| Checkpoint SHA-256 | `69dfd81c898544413a747f5c7304cc9210ad1cf420ce724864b8bd7deb6ed790` |
+
+API 使用的 `{patch_id}.png` PCA 预览不是直接复制 ModelScope 中的整幅展示图，
+而是从同批 P10C `{patch_id}.npy` embedding 重新生成。所有 patch 共用同一套
+PCA 基和全局 2%–98% 色阶，并仅对共享边界最外侧像素做轻量展示混合；原始
+NPY 和模型推理输入不受影响。
+
 ## 下载并安装
 
 ```bash

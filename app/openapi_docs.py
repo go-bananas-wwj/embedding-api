@@ -464,7 +464,7 @@ FIELD_DOCS = {
     "version": "数据或模型版本。按接口可选 `v1`、`v2`；系统模型不传时会按区域自动选择可用版本，海淀最新模型通常使用 `v1`。",
     "month": "影像月份或日期。支持 `YYYY-MM`、`YYYYMM` 或部分接口的 `YYYYMMDD`；日级表示精确日期，月级请求会按日期倒序选择同月最新的一景。",
     "date": "影像日期或月份。支持 `YYYY-MM`、`YYYYMM` 或 `YYYYMMDD`；`YYYYMMDD` 精确命中，月级请求会按日期倒序选择同月最新的一景。",
-    "sensor_type": "传感器类型。可选 `s2`、`s1`、`landsat`；普通光学影像建议用 `s2`。",
+    "sensor_type": "传感器类型。可选 `s2`、`s1`、`landsat`、`highres`；`highres` 用于带地理参考的高分辨率 RGB 光学 GeoTIFF。",
     "patch_ids": "Patch 编号数组。每项格式为 `patch_000000`；批量推理最多 100 个。",
     "task_type": "任务类型，例如 `building_extraction`、`water_extraction`、`change_detection`。自定义训练的 GeoJSON Feature 中可不传；不传时后端按模型类型推导默认任务。",
     "task_id": "系统模型任务 ID，例如 `building_extraction`、`water_extraction`。",

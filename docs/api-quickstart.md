@@ -73,6 +73,9 @@ curl -s -X POST "$BASE/regions/haidian/sam3/segment" \
 
 返回结果是 WGS84 GeoJSON。每个 feature 通常是 SAM3 mask 的 `Polygon` 或 `MultiPolygon`，不是矩形框。
 
+高分辨率 RGB 光学 GeoTIFF 使用 `"sensor_type": "highres"`。影像需预先切到
+对应 patch，包含 CRS 和仿射变换，前三个波段依次为 R/G/B。
+
 ## 自定义模型批量推理
 
 创建模型并等待训练完成后：

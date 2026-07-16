@@ -25,6 +25,15 @@ def test_segment_request_valid():
     assert req.multimask_output is False
 
 
+def test_segment_request_accepts_highres_optical():
+    req = SegmentRequest(
+        date="2025-10",
+        sensor_type="highres",
+        point_coords=[[126.52, 45.75]],
+    )
+    assert req.sensor_type == "highres"
+
+
 def test_segment_request_rejects_legacy_month():
     with pytest.raises(ValidationError):
         SegmentRequest(

@@ -241,13 +241,27 @@ class SAM3Service:
         from rasterio.enums import Resampling
 
         image_path = self._resolve_image_path(region_id, patch_id, date, sensor_type)
-        image_size = int(get_config().get_sam3_config().get("image_size", 256))
+        sam3_config = get_config().get_sam3_config()
 
         with rasterio.open(str(image_path)) as ds:
+            if ds.crs is None:
+                raise DataValidationError(
+                    f"Source image '{image_path}' has no CRS; SAM3 WGS84 prompts require a georeferenced image"
+                )
+            max_side = int(
+                sam3_config.get("highres_image_size", 1024)
+                if sensor_type == "highres"
+                else sam3_config.get("image_size", 256)
+            )
+            if max_side < 64:
+                raise DataValidationError("SAM3 image size must be at least 64 pixels")
+            scale = min(1.0, float(max_side) / float(max(ds.width, ds.height)))
+            target_width = max(1, int(round(ds.width * scale)))
+            target_height = max(1, int(round(ds.height * scale)))
             source_scene = Path(image_path).stem
             source_image_date = source_scene[:8] if source_scene[:8].isdigit() else source_scene
             data = ds.read(
-                out_shape=(ds.count, image_size, image_size),
+                out_shape=(ds.count, target_height, target_width),
                 resampling=Resampling.lanczos,
             )
             rgba = _to_rgb(data.astype(np.float32), sensor_type)
@@ -258,8 +272,8 @@ class SAM3Service:
                 "source_height": ds.height,
                 "source_scene": source_scene,
                 "source_image_date": source_image_date,
-                "sam_width": image_size,
-                "sam_height": image_size,
+                "sam_width": target_width,
+                "sam_height": target_height,
                 "transform": ds.transform,
                 "crs": ds.crs,
                 "patch_id": patch_id,

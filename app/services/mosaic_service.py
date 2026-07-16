@@ -18,7 +18,7 @@ from app.services.time_utils import normalize_quarter_date
 
 logger = logging.getLogger(__name__)
 
-RAW_ROOT = "/workspace/raw"
+RAW_ROOT = "/workspace/data/raw"
 _YYYYMMDD_RE = re.compile(r"^(\d{4})(\d{2})(\d{2})$")
 _YYYYMM_RE = re.compile(r"^(\d{4})(\d{2})$")
 _YYYY_HYPHEN_MM_RE = re.compile(r"^(\d{4})-(\d{2})$")
@@ -34,6 +34,10 @@ _SENSOR_RGB = {
     "landsat": (2, 1, 0),
     # Sentinel-1: 2 bands VV(idx0), VH(idx1) -> R=VV, G=VH, B=VH/VV ratio
     "s1": (0, 1, None),
+    # Generic high-resolution optical GeoTIFF: RGB bands in display order.
+    # Files are discovered from a ``highres`` sensor directory, matching the
+    # same per-region/per-patch layouts used by the other sensors.
+    "highres": (0, 1, 2),
 }
 
 
@@ -172,7 +176,7 @@ def build_mosaic(
 ) -> Tuple[bytes, str]:
     """Build a mosaic image for the given region, date and sensor.
 
-    Reads raw per-patch TIFFs from /workspace/raw/{region_id}/{sensor_type}.
+    Reads raw per-patch TIFFs from /workspace/data/raw/{region_id}/{sensor_type}.
     The `version` parameter is kept for API compatibility but is ignored for
     raw satellite sensors.
 
@@ -186,7 +190,7 @@ def build_mosaic(
         raise DataValidationError(f"Region '{region_id}' does not exist")
 
     # Allow per-region raw scene directory (e.g. Haidian scenes live under
-    # /workspace/olmo/data/haidian/scenes, not /workspace/raw/haidian/s2).
+    # /workspace/projects/olmo/data/haidian/scenes, not /workspace/data/raw/haidian/s2).
     region_cfg = config.get_region(region_id) or {}
     s2_dir = region_cfg.get("s2_dir")
     roots = [RAW_ROOT]
@@ -268,6 +272,13 @@ def _to_rgb(arr: np.ndarray, sensor_type: str) -> np.ndarray:
     """Convert a multi-band float array to an 8-bit RGBA image."""
     count, height, width = arr.shape
     red_i, green_i, blue_i = _SENSOR_RGB[sensor_type]
+
+    required_indices = [i for i in (red_i, green_i, blue_i) if i is not None]
+    if not required_indices or max(required_indices) >= count:
+        raise DataValidationError(
+            f"{sensor_type} image has {count} band(s), but its RGB mapping "
+            f"requires at least {max(required_indices) + 1} band(s)"
+        )
 
     red = arr[red_i]
     green = arr[green_i]

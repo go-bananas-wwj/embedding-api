@@ -591,6 +591,11 @@ GET /regions/{region_id}/patches/{patch_id}/embedding?format=png
 - **哈尔滨**: 64×64 像素的 RGB 可视化图
 - **海淀**: 如果有可视化图则返回，否则尝试返回多源数据合成图
 
+同一区域和 embedding 版本的 PCA 预览使用统一的 PCA 基和全局 2%–98%
+分位数范围。前端拼接多个 patch 时不要再对单张 PNG 分别做自动对比度或
+颜色归一化，否则会重新引入明显的色彩接缝。PCA 图仅用于特征可视化，
+模型推理仍使用原始 NPY embedding。
+
 **curl 示例**:
 ```bash
 curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000/embedding?format=png&version=v2&month=2025-04" -o /tmp/emb_patch_000000.png
@@ -2008,7 +2013,7 @@ POST /regions/{region_id}/sam3/embed
 |------|------|------|------|
 | `patch_id` | string | 是 | Patch ID |
 | `month` | string | 是 | 日期/月，如 `2025-10`、`202510`、`20251214`。`YYYYMMDD` 精确到某一天；月级请求会在同月多景中按日期倒序取最新一景 |
-| `sensor_type` | string | 否 | 传感器类型：`s2`、`s1`、`landsat`，默认 `s2` |
+| `sensor_type` | string | 否 | 传感器类型：`s2`、`s1`、`landsat`、`highres`，默认 `s2`；`highres` 表示高分辨率 RGB 光学 GeoTIFF |
 
 **curl 示例**:
 ```bash
@@ -2050,7 +2055,7 @@ curl -s -X POST "http://60.31.21.42:22065/regions/harbin/sam3/embed" \
 
 **错误码**:
 - `400`: 请求参数错误（如非法 patch_id、路径穿越尝试）
-- `404`: Patch 或 S2 影像不存在
+- `404`: Patch 或所选传感器影像不存在
 - `503`: GPU 内存不足或模型加载失败
 
 **前端提示**: `image.data` 可直接解码为 `<img>` 标签显示，让用户在影像上点击。
@@ -2077,11 +2082,26 @@ POST /regions/{region_id}/sam3/segment
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `date` | string | 是 | 影像日期/月，用于选择要分割的遥感影像。支持 `2025-10`、`202510`、`20251001`。`YYYYMMDD` 精确到某一天；月级请求会在同月多景中按日期倒序取最新一景 |
-| `sensor_type` | string | 否 | 传感器类型：`s2`=Sentinel-2 光学影像，`s1`=Sentinel-1 SAR，`landsat`=Landsat 光学影像；默认 `s2` |
+| `sensor_type` | string | 否 | `s2`=Sentinel-2，`s1`=Sentinel-1，`landsat`=Landsat，`highres`=高分辨率 RGB 光学 GeoTIFF；默认 `s2` |
 | `point_coords` | float[][] | 是 | 用户点击的 WGS84 经纬度点列表，每个点为 `[longitude, latitude]`，即 `[经度, 纬度]` |
 | `point_labels` | int[] | 否 | 可选点标签。`1`=前景目标点，`0`=背景排除点。当前前端不用传；不传时后端默认所有点都是 `1` |
 | `multimask_output` | bool | 否 | 是否返回多个候选结果。`false`=只返回一个最优候选，适合常规交互；`true`=返回多个候选供用户二次选择。默认 `false` |
 | `include_masks` | bool | 否 | 是否在 GeoJSON 标注框之外额外返回 base64 PNG mask。默认 `false`，响应更小 |
+
+#### 高分辨率光学影像约定
+
+`highres` 不是特定卫星品牌，而是通用的高分辨率 RGB 光学数据源。部署前需按
+以下任一目录结构放置已经切到对应 patch 的 GeoTIFF：
+
+```text
+/workspace/data/raw/{region_id}/highres/{patch_id}/{YYYYMMDD}.tif
+{region.s2_dir}/{patch_id}/highres/{YYYYMMDD}.tif
+```
+
+文件必须包含 CRS 和仿射变换，至少 3 个波段，前三个波段依次为 R、G、B。
+接口保持原始长宽比；最长边超过 1024 像素时缩至 1024 再送入 SAM3。月级
+请求仍按文件日期倒序选择当月最新一景。当前接口不负责把任意整幅大图上传后
+自动切 patch；这类数据需要先完成切片和地理配准。
 
 **curl 示例**:
 ```bash

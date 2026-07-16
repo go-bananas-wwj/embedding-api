@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from app.services.mosaic_service import build_mosaic
+from app.services.mosaic_service import _to_rgb, build_mosaic
 from app.services.data_service import DataNotFoundError, DataValidationError
 
 
@@ -87,6 +87,23 @@ def test_build_mosaic_unsupported_sensor():
             sensor_type="modis",
             fmt="png",
         )
+
+
+def test_highres_rgb_mapping_uses_first_three_bands():
+    arr = np.stack(
+        [
+            np.arange(16, dtype=np.float32).reshape(4, 4),
+            np.arange(16, dtype=np.float32).reshape(4, 4) * 2,
+            np.arange(16, dtype=np.float32).reshape(4, 4) * 3,
+        ]
+    )
+    rgba = _to_rgb(arr, "highres")
+    assert rgba.shape == (4, 4, 4)
+
+
+def test_highres_rgb_mapping_rejects_two_band_image():
+    with pytest.raises(DataValidationError, match="requires at least 3"):
+        _to_rgb(np.ones((2, 4, 4), dtype=np.float32), "highres")
 
 
 def test_build_mosaic_unknown_region():

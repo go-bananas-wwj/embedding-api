@@ -44,11 +44,11 @@ class EmbedRequest(BaseModel):
         ),
         examples=["202512"],
     )
-    sensor_type: Literal["s2", "s1", "landsat"] = Field(
+    sensor_type: Literal["s2", "s1", "landsat", "highres"] = Field(
         "s2",
         description=(
-            "传感器类型。可选值：s2、s1、landsat。默认 s2。"
-            "s2=Sentinel-2 光学影像；s1=Sentinel-1 SAR；landsat=Landsat 光学影像。"
+            "传感器类型。可选值：s2、s1、landsat、highres。默认 s2。"
+            "highres=带 CRS/仿射变换的高分辨率 RGB 光学 GeoTIFF，波段顺序为 R/G/B。"
         ),
         examples=["s2"],
     )
@@ -111,11 +111,12 @@ class SegmentRequest(BaseModel):
         ),
         examples=["2025-10"],
     )
-    sensor_type: Literal["s2", "s1", "landsat"] = Field(
+    sensor_type: Literal["s2", "s1", "landsat", "highres"] = Field(
         "s2",
         description=(
             "传感器类型。s2=Sentinel-2 光学影像；s1=Sentinel-1 SAR；"
-            "landsat=Landsat 光学影像。前端普通光学点选分割建议使用 s2。"
+            "landsat=Landsat 光学影像；highres=高分辨率 RGB 光学 GeoTIFF。"
+            "高分辨率影像必须包含 CRS 和仿射变换，前三个波段依次为 R/G/B。"
         ),
         examples=["s2"],
     )
@@ -201,7 +202,7 @@ class SAM3BBoxProperties(BaseModel):
         description="WGS84 bbox [min_lon, min_lat, max_lon, max_lat].",
     )
     patch_id: str = Field(..., description="Patch containing the prompt points.")
-    sensor_type: Literal["s2", "s1", "landsat"] = Field(
+    sensor_type: Literal["s2", "s1", "landsat", "highres"] = Field(
         ...,
         description="Remote-sensing source used for segmentation.",
     )
