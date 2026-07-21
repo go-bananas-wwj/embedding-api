@@ -57,6 +57,16 @@ python pipelines/harbin/download_modelscope_assets.py \
   --verify-checksums
 ```
 
+已有任务结果可以作为小型覆盖包单独发布，不需要重新上传完整的
+`data_harbin.tar`：
+
+```bash
+python pipelines/harbin/prepare_task_overlays.py \
+  --output-root /workspace/modelscope_upload/harbin/task_overlays
+```
+
+当前覆盖包包含 `road_extraction.tar`，下载器会在基础数据包之后解压它。
+
 脚本会把归档下载到 `.modelscope_cache/harbin_v1`，校验 `checksums.sha256` 后
 自动解压：`data/harbin`、`models/harbin`、`models/sam3` 放到项目根目录，
 原始卫星场景放到真实的 `/workspace/data/raw/...` 路径，与 `config.yaml` 中的绝对

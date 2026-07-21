@@ -14,22 +14,32 @@ Credentials stay outside the repo: pass ``MODELSCOPE_TOKEN`` when needed.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
 import subprocess
+import tarfile
 from pathlib import Path
 
 import numpy as np
 import torch
 from PIL import Image
 
-from paths import (
-    DEFAULT_EMBEDDING_ARTIFACT,
-    DEFAULT_MODELSCOPE_PREFIX,
-    DEFAULT_MODELSCOPE_REPO,
-    PROJECT_ROOT,
-)
+try:
+    from .paths import (
+        DEFAULT_EMBEDDING_ARTIFACT,
+        DEFAULT_MODELSCOPE_PREFIX,
+        DEFAULT_MODELSCOPE_REPO,
+        PROJECT_ROOT,
+    )
+except ImportError:  # Direct script execution.
+    from paths import (
+        DEFAULT_EMBEDDING_ARTIFACT,
+        DEFAULT_MODELSCOPE_PREFIX,
+        DEFAULT_MODELSCOPE_REPO,
+        PROJECT_ROOT,
+    )
 
 
 def parse_args() -> argparse.Namespace:
@@ -87,7 +97,60 @@ def _default_includes(prefix: str) -> list[str]:
         f"{prefix}/embeddings/**",
         f"{prefix}/checkpoints/**",
         f"{prefix}/downstream_heads/**",
+        f"{prefix}/deployment/**",
     ]
+
+
+def _verify_deployment_checksums(deployment_dir: Path) -> None:
+    checksum_file = deployment_dir / "checksums.sha256"
+    if not checksum_file.exists():
+        return
+    for line in checksum_file.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        expected, filename = line.split("  ", 1)
+        path = deployment_dir / filename
+        if not path.is_file():
+            raise FileNotFoundError(f"Deployment asset is missing: {path}")
+        digest = hashlib.sha256()
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        if digest.hexdigest() != expected:
+            raise ValueError(f"Deployment asset checksum mismatch: {filename}")
+
+
+def _extract_deployment_archive(archive: Path, target: Path, force: bool) -> None:
+    target_resolved = target.resolve()
+    with tarfile.open(archive, "r") as tar:
+        for member in tar.getmembers():
+            if not member.isfile():
+                continue
+            output = (target / member.name).resolve()
+            if output != target_resolved and target_resolved not in output.parents:
+                raise ValueError(f"Unsafe path in deployment archive: {member.name}")
+            if output.exists() and not force:
+                continue
+            output.parent.mkdir(parents=True, exist_ok=True)
+            source = tar.extractfile(member)
+            if source is None:
+                raise ValueError(f"Could not read archive member: {member.name}")
+            with source, output.open("wb") as destination:
+                shutil.copyfileobj(source, destination)
+
+
+def install_deployment_assets(src: Path, target: Path, force: bool) -> None:
+    deployment_dir = src / "deployment"
+    if not deployment_dir.is_dir():
+        print("No optional Haidian deployment overlays found")
+        return
+    _verify_deployment_checksums(deployment_dir)
+    manifest_path = deployment_dir / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    for info in manifest.get("assets", {}).values():
+        archive = deployment_dir / info["archive"]
+        print(f"Installing Haidian deployment overlay: {archive.name}")
+        _extract_deployment_archive(archive, target, force)
 
 
 def download_with_cli(
@@ -235,6 +298,7 @@ def install_artifacts(src: Path, target: Path, embedding_artifact: str, force: b
 
     print(f"Converted {converted} embedding maps into {emb_out}")
     print(f"Installed checkpoints/heads into {models_root}")
+    install_deployment_assets(src, target, force)
 
 
 def main() -> None:

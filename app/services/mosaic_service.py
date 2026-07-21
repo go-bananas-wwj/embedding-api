@@ -102,6 +102,25 @@ def _select_daily_candidate(candidates: List[Path], prefixes: List[str]) -> Opti
     return sorted(matching, key=lambda p: p.stem, reverse=True)[0]
 
 
+def _select_flat_patch_candidate(
+    root: Path, sensor_type: str, patch_id: str, prefixes: List[str]
+) -> Optional[Path]:
+    """Resolve extracted ``SENSOR_YYYYMMDD_PATCH.tif`` training archives."""
+    if not root.is_dir():
+        return None
+    matches = []
+    for candidate_dir in (root, root / sensor_type):
+        if not candidate_dir.is_dir():
+            continue
+        for path in candidate_dir.glob(f"{sensor_type}_*_{patch_id}.tif"):
+            date_match = re.search(r"(?<!\d)(\d{8})(?!\d)", path.stem)
+            if date_match and any(date_match.group(1).startswith(p) for p in prefixes):
+                matches.append((date_match.group(1), path))
+    if not matches:
+        return None
+    return max(matches, key=lambda item: (item[0], item[1].name))[1]
+
+
 def _get_raw_tiff_path(
     region_id: str,
     patch_id: str,
@@ -162,6 +181,11 @@ def _get_raw_tiff_path(
                 path = layout_dir / f"{period}.tif"
                 if path.exists() and path.is_file():
                     return str(path)
+        flat = _select_flat_patch_candidate(
+            Path(root), sensor_type, patch_id, fuzzy_prefixes
+        )
+        if flat:
+            return str(flat)
     return None
 
 

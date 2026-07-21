@@ -130,3 +130,22 @@ def test_get_raw_tiff_path_month_can_fall_back_to_legacy_quarter(tmp_path: Path)
     )
 
     assert path == str(legacy_quarter)
+
+
+def test_get_raw_tiff_path_supports_flat_extracted_haidian_scenes(tmp_path: Path):
+    scene_dir = tmp_path / "s2"
+    scene_dir.mkdir()
+    older = scene_dir / "s2_20260302_patch_000212.tif"
+    latest = scene_dir / "s2_20260327_patch_000212.tif"
+    older.touch()
+    latest.touch()
+
+    path = _get_raw_tiff_path(
+        "haidian",
+        "patch_000212",
+        "s2",
+        ["202603", "2026-03"],
+        roots=[str(scene_dir)],
+    )
+
+    assert path == str(latest)

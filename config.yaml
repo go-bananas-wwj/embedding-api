@@ -160,7 +160,7 @@ regions:
   haidian:
     name: "海淀区"
     patches_meta: "data/haidian/patches_meta_v1.json"
-    s2_dir: "/workspace/projects/olmo/data/haidian/scenes"
+    s2_dir: "data/haidian/archive/processed_training_data/extracted/patches/s2"
     highres_dir: "data/haidian/archive/processed_training_data/extracted/patches/highres_optical"
     embeddings:
       v1:

@@ -53,6 +53,17 @@ python pipelines/haidian/download_modelscope_assets.py \
   --target .
 ```
 
+下载器也会安装 `artifacts/haidian-embedding-v1/deployment` 下的可选部署归档，
+包括已经生成的任务结果、S2 GeoTIFF 和高分光学 GeoTIFF。归档在解压前会进行
+SHA256 校验。
+
+只把本机已经存在的 API 资产整理成部署归档，不会重新训练或推理：
+
+```bash
+python pipelines/haidian/prepare_deployment_assets.py \
+  --output-root /workspace/modelscope_upload/haidian/deployment
+```
+
 After download, start the API normally:
 
 ```bash

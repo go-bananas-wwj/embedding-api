@@ -24,11 +24,15 @@ from pathlib import Path
 if __package__ is None or __package__ == "":
     sys.path.append(str(Path(__file__).resolve().parent))
 
-from paths import DEFAULT_MODELSCOPE_PREFIX, DEFAULT_MODELSCOPE_REPO, PROJECT_ROOT
+try:
+    from .paths import DEFAULT_MODELSCOPE_PREFIX, DEFAULT_MODELSCOPE_REPO, PROJECT_ROOT
+except ImportError:  # Direct script execution.
+    from paths import DEFAULT_MODELSCOPE_PREFIX, DEFAULT_MODELSCOPE_REPO, PROJECT_ROOT
 
 
 ARCHIVE_NAMES = [
     "data_harbin",
+    "road_extraction",
     "models_harbin",
     "models_sam3",
     "raw_harbin",
@@ -97,7 +101,7 @@ def verify_checksums(src: Path) -> bool:
     lines = checksum_file.read_text(encoding="utf-8").strip().splitlines()
     mismatches = 0
     for line in lines:
-        expected, name = line.split("  ", 1)
+        expected, name = line.split(maxsplit=1)
         path = src / name
         if not path.exists():
             print(f"MISS: {name}")
@@ -130,8 +134,14 @@ def extract_archive(archive: Path, target: Path, force: bool) -> None:
             # extracted to the real filesystem root.
             if len(parts) >= 3 and parts[0] == "workspace" and parts[1] == "raw":
                 out = Path("/") / rel
+                allowed_root = Path("/workspace/data/raw").resolve()
             else:
                 out = target / rel
+                allowed_root = target.resolve()
+
+            resolved_out = out.resolve()
+            if resolved_out != allowed_root and allowed_root not in resolved_out.parents:
+                raise ValueError(f"Unsafe path in archive {archive.name}: {member.name}")
 
             if out.exists() and not force:
                 continue
