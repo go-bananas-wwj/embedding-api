@@ -65,11 +65,12 @@
 ```bash
 mkdir -p /tmp/hd_osm_archives
 cd /tmp/hd_osm_archives
+export MODELSCOPE_API_TOKEN='<your-modelscope-token>'
 python - <<'PY'
 from modelscope.hub.api import HubApi
 import requests, os
 api = HubApi()
-api.login('ms-399d1804-1cb3-446a-a3f7-dfc4dc70d977')
+api.login(os.environ['MODELSCOPE_API_TOKEN'])
 months = ['202512','202601','202602','202603','202604','202605']
 for m in months:
     path = f'haidian/v1/reports/monthly_osm_assisted_patch_tiles/archives/haidian_v1_{m}_monthly_osm_assisted_patch_tiles.tar'
@@ -95,7 +96,7 @@ cd /tmp/hd_osm_archives
 python - <<'PY'
 from modelscope.hub.api import HubApi
 import requests, hashlib, os
-api = HubApi(); api.login('ms-399d1804-1cb3-446a-a3f7-dfc4dc70d977')
+api = HubApi(); api.login(os.environ['MODELSCOPE_API_TOKEN'])
 url = api.get_dataset_file_url(
     'haidian/v1/reports/monthly_osm_assisted_patch_tiles/archives/checksums.sha256',
     'xuannv_embdding_api', 'WeijieWu', revision='master')
@@ -244,7 +245,7 @@ if __name__ == '__main__':
 - [ ] **Step 2: 先 dry-run 验证输出路径**
 
 ```bash
-cd /workspace/embedding-api
+cd /workspace/projects/embedding-api
 python scripts/replace_haidian_results_from_osm_archives.py --dry-run
 ```
 
@@ -260,7 +261,7 @@ python scripts/replace_haidian_results_from_osm_archives.py --dry-run
 - [ ] **Step 1: 备份旧 tiles**
 
 ```bash
-cd /workspace/embedding-api
+cd /workspace/projects/embedding-api
 python - <<'PY'
 from pathlib import Path
 import shutil, datetime
@@ -277,7 +278,7 @@ PY
 - [ ] **Step 2: 删除旧结果（保留备份）**
 
 ```bash
-cd /workspace/embedding-api
+cd /workspace/projects/embedding-api
 python - <<'PY'
 from pathlib import Path
 for task in ['building_extraction','road_extraction','construction','construction_joint','water_extraction']:
@@ -292,7 +293,7 @@ PY
 - [ ] **Step 3: 正式运行转换脚本**
 
 ```bash
-cd /workspace/embedding-api
+cd /workspace/projects/embedding-api
 python scripts/replace_haidian_results_from_osm_archives.py
 ```
 
@@ -301,7 +302,7 @@ python scripts/replace_haidian_results_from_osm_archives.py
 - [ ] **Step 4: 统计验证**
 
 ```bash
-cd /workspace/embedding-api
+cd /workspace/projects/embedding-api
 for task in building_extraction road_extraction construction water_extraction; do
   echo -n "$task fallback: "
   ls data/haidian/tasks/$task/v1/results/tiles/*.png 2>/dev/null | wc -l
@@ -355,7 +356,7 @@ construction:
 本计划默认：**保留 `construction_joint` 旧结果不变**；如需删除，执行：
 
 ```bash
-cd /workspace/embedding-api
+cd /workspace/projects/embedding-api
 rm -rf data/haidian/tasks/construction_joint/v1/results/tiles
 ```
 
@@ -369,7 +370,7 @@ rm -rf data/haidian/tasks/construction_joint/v1/results/tiles
 - [ ] **Step 1: 重启服务**
 
 ```bash
-cd /workspace/embedding-api
+cd /workspace/projects/embedding-api
 # 停止旧进程
 kill $(cat server.pid) 2>/dev/null || true
 sleep 2
@@ -385,7 +386,7 @@ curl -s http://127.0.0.1:9061/health
 - [ ] **Step 2: 逐个任务采样请求**
 
 ```bash
-cd /workspace/embedding-api
+cd /workspace/projects/embedding-api
 for task in building_extraction road_extraction construction water_extraction; do
   curl -s "http://127.0.0.1:9061/regions/haidian/patches/patch_000000/tasks/${task}/result?format=png&before_month=202605&after_month=202605" \
        -o /tmp/hd_sample_${task}.png
@@ -398,7 +399,7 @@ done
 - [ ] **Step 3: 跑单元测试**
 
 ```bash
-cd /workspace/embedding-api
+cd /workspace/projects/embedding-api
 pytest -q -m "not slow"
 ```
 
@@ -414,7 +415,7 @@ pytest -q -m "not slow"
 - [ ] **Step 1: 运行 mosaic 脚本**
 
 ```bash
-cd /workspace/embedding-api
+cd /workspace/projects/embedding-api
 python - <<'PY'
 import json, pickle, os, requests
 from PIL import Image, ImageDraw, ImageFont
@@ -505,7 +506,7 @@ file test_output/hd_v2/full_region_all_tasks.png
 - [ ] **Step 3: 提交代码/文档变更**
 
 ```bash
-cd /workspace/embedding-api
+cd /workspace/projects/embedding-api
 git add config.yaml docs/API.md progress.md scripts/replace_haidian_results_from_osm_archives.py
 git commit -m "feat(haidian): replace Haidian V1 results with monthly OSM-assisted diagnostic archives
 
@@ -527,7 +528,7 @@ git push origin main
 如果替换后效果不如预期：
 
 ```bash
-cd /workspace/embedding-api
+cd /workspace/projects/embedding-api
 # 恢复旧 tiles（假设备份名为 tiles_backup_YYYYMMDD_HHMMSS）
 python - <<'PY'
 from pathlib import Path

@@ -19,8 +19,8 @@ HARBIN_PATCHES_META: Path = HARBIN_DIR / "patches_meta.json"
 
 SAM3_MODELS_DIR: Path = MODELS_DIR / "sam3"
 
-RAW_HARBIN_DIR: Path = Path("/workspace/raw/harbin")
-RAW_HARBIN_SCENES_DIR: Path = Path("/workspace/raw/harbin_scenes")
+RAW_HARBIN_DIR: Path = Path("/workspace/data/raw/harbin")
+RAW_HARBIN_SCENES_DIR: Path = Path("/workspace/data/raw/harbin_scenes")
 
 DEFAULT_MODELSCOPE_REPO = "WeijieWu/xuannv_embdding_api"
 DEFAULT_MODELSCOPE_PREFIX = "harbin/v1/api_ready"

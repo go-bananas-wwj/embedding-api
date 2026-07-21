@@ -211,3 +211,59 @@ def parse_annotations_for_training(
         raise ValueError("No valid training records after parsing annotations")
 
     return records, class_map
+
+
+def parse_polygon_annotations_for_training(
+    annotations: GeoJSONFeatureCollection,
+    classes: List[ModelClass],
+    class_ids: List[str],
+    model_type: str,
+) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
+    """Parse annotations without merging separate polygons.
+
+    A Polygon is one few-shot sample. Each component of a MultiPolygon is also
+    treated as one sample so the ``< 10`` training strategy switch reflects the
+    amount of geometry the user actually labelled.
+    """
+    all_class_ids = {c.id for c in classes}
+    active_class_ids = set(class_ids) if class_ids else all_class_ids
+    class_map = build_class_map([c for c in classes if c.id in active_class_ids])
+    records: List[Dict[str, Any]] = []
+
+    for feature in annotations.features:
+        raw = feature.model_dump()
+        props = raw["properties"]
+        class_id = props["class_id"]
+        if class_id not in active_class_ids:
+            continue
+
+        geometry = raw["geometry"]
+        if geometry.get("type") == "MultiPolygon":
+            geometries = [
+                {"type": "Polygon", "coordinates": coordinates}
+                for coordinates in geometry.get("coordinates", [])
+            ]
+        else:
+            geometries = [geometry]
+
+        spatial_ref = _get_patch_spatial_ref(props["region_id"], props["patch_id"])
+        for polygon_index, polygon in enumerate(geometries):
+            mask = rasterize_patch_geometry(polygon, spatial_ref)
+            record = {
+                "region_id": props["region_id"],
+                "patch_id": props["patch_id"],
+                "class_id": class_id,
+                "label_index": class_map[class_id],
+                "polygon_index": polygon_index,
+                "mask": mask,
+            }
+            if model_type == "classification":
+                record["month"] = props.get("month")
+            else:
+                record["before_month"] = props.get("before_month")
+                record["after_month"] = props.get("after_month")
+            records.append(record)
+
+    if not records:
+        raise ValueError("No valid polygons after parsing annotations")
+    return records, class_map

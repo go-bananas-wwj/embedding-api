@@ -18,8 +18,13 @@ import torch.nn.functional as F
 from app.schemas.models import GeoJSONFeatureCollection, ModelClass
 from app.services.data_service import DataService
 from app.services.fewshot_heads import BinaryConv3x3ProbeHead
-from app.services.geojson_adapter import parse_annotations_for_training
+from app.services.geojson_adapter import (
+    parse_annotations_for_training,
+    parse_polygon_annotations_for_training,
+)
 from app.services.model_registry import get_model_registry
+from app.services.pu_query import CHECKPOINT_FORMAT as PU_QUERY_CHECKPOINT_FORMAT
+from app.services.pu_query import train_pu_query
 from app.services.user_paths import get_user_dir
 
 logger = logging.getLogger(__name__)
@@ -239,6 +244,76 @@ def _save_torch_checkpoint(
     return model_path
 
 
+def _save_pu_query_checkpoint(
+    user_id: str,
+    model_id: str,
+    retrieval_data: Dict[str, Any],
+    metadata: Dict[str, Any],
+) -> Path:
+    registry = get_model_registry(user_id)
+    record = registry.get_model(model_id)
+    if record is None:
+        raise ValueError(f"Model {model_id} not found in registry")
+    model_path = Path(record["model_path"])
+    model_path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(
+        {
+            "__format__": PU_QUERY_CHECKPOINT_FORMAT,
+            "head_type": "pu_query_retrieval",
+            **retrieval_data,
+            **metadata,
+        },
+        model_path,
+    )
+    return model_path
+
+
+def _classification_polygon_samples(
+    records: List[Dict[str, Any]], region_id: str, embedding_version: str
+) -> List[Tuple[str, np.ndarray, np.ndarray]]:
+    samples: List[Tuple[str, np.ndarray, np.ndarray]] = []
+    cache: Dict[Tuple[str, str], Optional[np.ndarray]] = {}
+    for record in records:
+        key = (record["patch_id"], record["month"])
+        if key not in cache:
+            cache[key] = _load_embedding_for_training(
+                region_id, key[0], key[1], version=embedding_version
+            )
+        embedding = cache[key]
+        if embedding is None:
+            logger.warning("Embedding not found for %s %s; skipping", *key)
+            continue
+        mask = _resize_mask(record["mask"], embedding.shape[1], embedding.shape[2]) > 0
+        if np.any(mask):
+            samples.append((f"{key[0]}:{key[1]}", embedding.astype(np.float32, copy=False), mask))
+    return samples
+
+
+def _change_polygon_samples(
+    records: List[Dict[str, Any]], region_id: str, embedding_version: str
+) -> List[Tuple[str, np.ndarray, np.ndarray]]:
+    samples: List[Tuple[str, np.ndarray, np.ndarray]] = []
+    cache: Dict[Tuple[str, str, str], Optional[np.ndarray]] = {}
+    for record in records:
+        key = (record["patch_id"], record["before_month"], record["after_month"])
+        if key not in cache:
+            before = _load_embedding_for_training(
+                region_id, key[0], key[1], version=embedding_version
+            )
+            after = _load_embedding_for_training(
+                region_id, key[0], key[2], version=embedding_version
+            )
+            cache[key] = None if before is None or after is None else after - before
+        difference = cache[key]
+        if difference is None:
+            logger.warning("Embedding not found for %s %s/%s; skipping", *key)
+            continue
+        mask = _resize_mask(record["mask"], difference.shape[1], difference.shape[2]) > 0
+        if np.any(mask):
+            samples.append((f"{key[0]}:{key[1]}:{key[2]}", difference.astype(np.float32, copy=False), mask))
+    return samples
+
+
 class ClassificationTrainingEngine:
     """Train a lightweight classification head from frontend GeoJSON annotations."""
 
@@ -275,7 +350,47 @@ class ClassificationTrainingEngine:
             raise ValueError(
                 "Binary Conv 3x3 few-shot training requires exactly one target class_id"
             )
-        records, class_map = parse_annotations_for_training(
+        polygon_records, class_map = parse_polygon_annotations_for_training(
+            annotations=annotations,
+            classes=classes,
+            class_ids=class_ids,
+            model_type="classification",
+        )
+        polygon_samples = _classification_polygon_samples(
+            polygon_records, region_id, embedding_version
+        )
+        polygon_count = len(polygon_samples)
+        if polygon_count == 0:
+            raise ValueError("No valid training polygons with available embeddings")
+
+        class_records = [c.model_dump() for c in classes if c.id in class_ids]
+        metadata = {
+            "classes": class_records,
+            "class_ids": class_ids,
+            "class_map": class_map,
+            "positive_class_id": class_ids[0] if class_ids else None,
+            "feature_type": "embedding",
+            "task_type": task_type,
+            "region_id": region_id,
+            "embedding_version": embedding_version,
+            "embed_dim": polygon_samples[0][1].shape[0],
+            "polygon_count": polygon_count,
+            "trained_at": datetime.now().isoformat(),
+        }
+        if polygon_count < 10:
+            retrieval_data = train_pu_query(polygon_samples)
+            metadata.update({"epochs": 0, "training_strategy": "pu_query_retrieval"})
+            model_path = _save_pu_query_checkpoint(
+                self._user_id, model_id, retrieval_data, metadata
+            )
+            return {
+                "model_id": model_id,
+                "model_path": str(model_path),
+                "accuracy": retrieval_data["training_f05"],
+                "n_samples": polygon_count,
+            }
+
+        records, _ = parse_annotations_for_training(
             annotations=annotations,
             classes=classes,
             class_ids=class_ids,
@@ -301,31 +416,21 @@ class ClassificationTrainingEngine:
             target = _build_binary_target(emb, mask)
             samples.append((emb.astype(np.float32, copy=False), target))
 
-        model, threshold, f1, n_samples, effective_epochs = _train_binary_conv_head(
+        model, threshold, f1, _valid_pixels, effective_epochs = _train_binary_conv_head(
             samples, epochs
         )
 
-        class_records = [c.model_dump() for c in classes if c.id in class_ids]
-        metadata = {
-            "classes": class_records,
-            "class_ids": class_ids,
-            "class_map": class_map,
-            "positive_class_id": class_ids[0] if class_ids else None,
-            "feature_type": "embedding",
-            "task_type": task_type,
-            "region_id": region_id,
-            "embedding_version": embedding_version,
-            "embed_dim": samples[0][0].shape[0],
+        metadata.update({
             "threshold": threshold,
             "epochs": effective_epochs,
-            "trained_at": datetime.now().isoformat(),
-        }
+            "training_strategy": "binary_conv3x3",
+        })
         model_path = _save_torch_checkpoint(self._user_id, model_id, model, metadata)
         return {
             "model_id": model_id,
             "model_path": str(model_path),
             "accuracy": f1,
-            "n_samples": n_samples,
+            "n_samples": polygon_count,
         }
 
 
@@ -365,7 +470,53 @@ class ChangeDetectionTrainingEngine:
             raise ValueError(
                 "Binary Conv 3x3 few-shot training requires exactly one target class_id"
             )
-        records, class_map = parse_annotations_for_training(
+        polygon_records, class_map = parse_polygon_annotations_for_training(
+            annotations=annotations,
+            classes=classes,
+            class_ids=class_ids,
+            model_type="change_detection",
+        )
+        polygon_samples = _change_polygon_samples(
+            polygon_records, region_id, embedding_version
+        )
+        polygon_count = len(polygon_samples)
+        if polygon_count == 0:
+            raise ValueError("No valid training polygons with available embeddings")
+        used_months = {
+            (record["before_month"], record["after_month"])
+            for record in polygon_records
+        }
+        before_month, after_month = sorted(used_months)[0]
+        class_records = [c.model_dump() for c in classes if c.id in class_ids]
+        metadata = {
+            "classes": class_records,
+            "class_ids": class_ids,
+            "class_map": class_map,
+            "positive_class_id": class_ids[0] if class_ids else None,
+            "feature_type": "diff",
+            "task_type": task_type,
+            "region_id": region_id,
+            "embedding_version": embedding_version,
+            "before_month": before_month,
+            "after_month": after_month,
+            "embed_dim": polygon_samples[0][1].shape[0],
+            "polygon_count": polygon_count,
+            "trained_at": datetime.now().isoformat(),
+        }
+        if polygon_count < 10:
+            retrieval_data = train_pu_query(polygon_samples)
+            metadata.update({"epochs": 0, "training_strategy": "pu_query_retrieval"})
+            model_path = _save_pu_query_checkpoint(
+                self._user_id, model_id, retrieval_data, metadata
+            )
+            return {
+                "model_id": model_id,
+                "model_path": str(model_path),
+                "accuracy": retrieval_data["training_f05"],
+                "n_samples": polygon_count,
+            }
+
+        records, _ = parse_annotations_for_training(
             annotations=annotations,
             classes=classes,
             class_ids=class_ids,
@@ -373,7 +524,7 @@ class ChangeDetectionTrainingEngine:
         )
 
         samples: List[Tuple[np.ndarray, np.ndarray]] = []
-        used_months: set = set()
+        used_months = set()
         for record in records:
             patch_id = record["patch_id"]
             before_month = record["before_month"]
@@ -400,33 +551,23 @@ class ChangeDetectionTrainingEngine:
             samples.append((diff.astype(np.float32, copy=False), target))
             used_months.add((before_month, after_month))
 
-        model, threshold, f1, n_samples, effective_epochs = _train_binary_conv_head(
+        model, threshold, f1, _valid_pixels, effective_epochs = _train_binary_conv_head(
             samples, epochs
         )
 
-        class_records = [c.model_dump() for c in classes if c.id in class_ids]
         # Determine the before/after months that were actually used.
-        before_month, after_month = next(iter(used_months))
-        metadata = {
-            "classes": class_records,
-            "class_ids": class_ids,
-            "class_map": class_map,
-            "positive_class_id": class_ids[0] if class_ids else None,
-            "feature_type": "diff",
-            "task_type": task_type,
-            "region_id": region_id,
-            "embedding_version": embedding_version,
+        before_month, after_month = sorted(used_months)[0]
+        metadata.update({
             "before_month": before_month,
             "after_month": after_month,
-            "embed_dim": samples[0][0].shape[0],
             "threshold": threshold,
             "epochs": effective_epochs,
-            "trained_at": datetime.now().isoformat(),
-        }
+            "training_strategy": "binary_conv3x3",
+        })
         model_path = _save_torch_checkpoint(self._user_id, model_id, model, metadata)
         return {
             "model_id": model_id,
             "model_path": str(model_path),
             "accuracy": f1,
-            "n_samples": n_samples,
+            "n_samples": polygon_count,
         }

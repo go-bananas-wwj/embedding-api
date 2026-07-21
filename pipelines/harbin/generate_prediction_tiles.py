@@ -17,9 +17,9 @@ import numpy as np
 from PIL import Image
 from tqdm import tqdm
 
-PREDICTIONS_DIR = "/workspace/xuannv_show/data/harbin/predictions"
-PATCHES_META_PATH = "/workspace/xuannv_show/data/harbin/patches_meta.json"
-OUTPUT_BASE = "/workspace/xuannv_show/data/harbin/results"
+PREDICTIONS_DIR = "/workspace/projects/xuannv-show/data/harbin/predictions"
+PATCHES_META_PATH = "/workspace/projects/xuannv-show/data/harbin/patches_meta.json"
+OUTPUT_BASE = "/workspace/projects/xuannv-show/data/harbin/results"
 
 # 颜色映射: 概率 0→1 映射到 蓝→青→绿→黄→红 (类似 jet)
 import matplotlib.cm as cm

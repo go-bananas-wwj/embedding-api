@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """预计算 OlmoEarth-Large 在海淀区数据上的 per-patch tokens 与 project_aggregated.
 
-输入: /workspace/olmo/data/haidian/olmoearth/  (已对齐 OlmoEarth band sets)
-输出: /workspace/olmo/embeddings_cache/olmoearth/{patch_id}/
+输入: /workspace/projects/olmo/data/haidian/olmoearth/  (已对齐 OlmoEarth band sets)
+输出: /workspace/projects/olmo/embeddings_cache/olmoearth/{patch_id}/
       - tokens_and_masks/{modality}/tokens.pt
       - tokens_and_masks/{modality}/mask.pt
       - project_aggregated/all.pt
@@ -28,7 +28,7 @@ from rasterio.enums import Resampling as RioResampling
 from rasterio.errors import RasterioIOError
 from tqdm import tqdm
 
-sys.path.insert(0, "/workspace/olmo/olmoearth_pretrain")
+sys.path.insert(0, "/workspace/projects/olmo/olmoearth_pretrain")
 from olmoearth_pretrain.data.constants import Modality
 from olmoearth_pretrain.datatypes import MaskedOlmoEarthSample, MaskValue
 from olmoearth_pretrain.model_loader import ModelID, load_model_from_id
@@ -39,9 +39,9 @@ warnings.filterwarnings("ignore", category=UserWarning)
 # 配置
 # ---------------------------------------------------------------------------
 
-DATA_ROOT = Path("/workspace/olmo/data/haidian/olmoearth")
-PLANET_ROOT = Path("/workspace/olmo/data/haidian/planetscene")
-OUT_ROOT = Path("/workspace/olmo/embeddings_cache/olmoearth")
+DATA_ROOT = Path("/workspace/projects/olmo/data/haidian/olmoearth")
+PLANET_ROOT = Path("/workspace/projects/olmo/data/haidian/planetscene")
+OUT_ROOT = Path("/workspace/projects/olmo/embeddings_cache/olmoearth")
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 PATCH_SIZE = 8
 

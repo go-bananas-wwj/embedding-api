@@ -18,8 +18,8 @@ import torch
 import yaml
 from tqdm import tqdm
 
-sys.path.insert(0, "/workspace/olmo")
-sys.path.insert(0, "/workspace/olmo/olmoearth_pretrain")
+sys.path.insert(0, "/workspace/projects/olmo")
+sys.path.insert(0, "/workspace/projects/olmo/olmoearth_pretrain")
 
 from src.data.haidian_dataset import distill_collate_fn
 from src.models.distill_decoder import OlmoEarthToAEFDistillationDecoder
@@ -28,9 +28,9 @@ from src.models.distill_decoder import OlmoEarthToAEFDistillationDecoder
 # 配置
 # ---------------------------------------------------------------------------
 
-EMB_CACHE_ROOT = Path("/workspace/olmo/embeddings_cache/olmoearth")
-CHECKPOINT_PATH = Path("/workspace/olmo/checkpoints/checkpoint_best.pt")
-CFG_PATH = Path("/workspace/olmo/configs/distill_large_spatial.yaml")
+EMB_CACHE_ROOT = Path("/workspace/projects/olmo/embeddings_cache/olmoearth")
+CHECKPOINT_PATH = Path("/workspace/projects/olmo/checkpoints/checkpoint_best.pt")
+CFG_PATH = Path("/workspace/projects/olmo/configs/distill_large_spatial.yaml")
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
@@ -259,7 +259,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", default=str(CHECKPOINT_PATH))
     parser.add_argument("--config", default=str(CFG_PATH))
-    parser.add_argument("--output_dir", default="/workspace/olmo/outputs/batch_production")
+    parser.add_argument("--output_dir", default="/workspace/projects/olmo/outputs/batch_production")
     parser.add_argument("--start_date", default="2025-12-01")
     parser.add_argument("--end_date", default="2026-05-01")
     parser.add_argument("--interval_days", type=int, default=11)

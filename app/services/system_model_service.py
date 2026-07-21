@@ -15,6 +15,17 @@ from app.services.data_service import DataService
 logger = logging.getLogger(__name__)
 
 
+HAIDIAN_LAND_COVER_CLASSES = [
+    {"id": "sys_land_cover_classification_1", "name": "树木覆盖", "color": "#006400"},
+    {"id": "sys_land_cover_classification_2", "name": "灌木地", "color": "#B4D250"},
+    {"id": "sys_land_cover_classification_3", "name": "草地", "color": "#F5DC5A"},
+    {"id": "sys_land_cover_classification_4", "name": "耕地", "color": "#D23C3C"},
+    {"id": "sys_land_cover_classification_5", "name": "建成区", "color": "#BEAA82"},
+    {"id": "sys_land_cover_classification_6", "name": "裸地/稀疏植被", "color": "#A0DCDC"},
+    {"id": "sys_land_cover_classification_8", "name": "永久性水体", "color": "#1E64DC"},
+]
+
+
 def _load_embedding(
     region_id: str, patch_id: str, month: str, version: str = "v2"
 ) -> Optional[np.ndarray]:
@@ -241,6 +252,16 @@ def get_system_model_classes(
     region_id: str, task_id: str, version: str = "v2"
 ) -> List[Dict[str, Any]]:
     """Return class definitions for a system model."""
+    # Haidian land-cover output is a pre-generated monthly product rather than
+    # an online checkpoint. Its legend must remain queryable independently of
+    # whether real-time inference is available.
+    if region_id == "haidian" and task_id == "land_cover_classification":
+        if version != "v1":
+            raise FileNotFoundError(
+                f"System model classes not found: {task_id} ({version})"
+            )
+        return [dict(item) for item in HAIDIAN_LAND_COVER_CLASSES]
+
     model_path = _resolve_model_path(region_id, task_id, version)
     if not model_path or not model_path.exists():
         raise FileNotFoundError(f"System model not found: {task_id} ({version})")

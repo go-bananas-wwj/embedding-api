@@ -12,6 +12,7 @@ from app.services.training_engine import (
     ChangeDetectionTrainingEngine,
     ClassificationTrainingEngine,
 )
+from app.services.pu_query import CHECKPOINT_FORMAT as PU_QUERY_CHECKPOINT_FORMAT
 
 
 @pytest.fixture
@@ -84,12 +85,52 @@ def test_classification_training_saves_class_map(
     )
 
     model_data = torch.load(result["model_path"], map_location="cpu", weights_only=False)
-    assert model_data["__format__"] == "torch_fewshot_head"
-    assert model_data["head_type"] == "binary_conv3x3"
+    assert model_data["__format__"] == PU_QUERY_CHECKPOINT_FORMAT
+    assert model_data["head_type"] == "pu_query_retrieval"
+    assert model_data["training_strategy"] == "pu_query_retrieval"
+    assert result["n_samples"] == 1
     assert "class_map" in model_data
     assert model_data["class_map"] == {"cls_001": 1}
     assert model_data["classes"] == [{"id": "cls_001", "name": "建筑", "color": "#FF0000"}]
-    assert 0.1 <= model_data["threshold"] <= 0.9
+    assert np.isfinite(model_data["threshold"])
+    assert model_data["foreground_center"].shape == (model_data["embed_dim"],)
+    assert model_data["background_center"].shape == (model_data["embed_dim"],)
+
+
+def test_ten_polygons_keep_binary_conv_strategy(
+    user_id, classification_annotation, classes
+):
+    """Ten valid polygons are the inclusive boundary for Binary Conv 3x3."""
+    source = classification_annotation.features[0].model_dump()
+    annotations = GeoJSONFeatureCollection(
+        type="FeatureCollection",
+        features=[GeoJSONFeature.model_validate(source) for _ in range(10)],
+    )
+    registry = get_model_registry(user_id)
+    model_id = registry.create_model(
+        name="test-ten-polygons",
+        model_type="classification",
+        classes=[c.model_dump() for c in classes],
+        task_type="building_extraction",
+        region_id="harbin",
+    )
+
+    result = ClassificationTrainingEngine(user_id).train(
+        model_id=model_id,
+        region_id="harbin",
+        task_type="building_extraction",
+        embedding_version="v2",
+        annotations=annotations,
+        classes=classes,
+        class_ids=["cls_001"],
+        epochs=1,
+    )
+
+    model_data = torch.load(result["model_path"], map_location="cpu", weights_only=False)
+    assert model_data["__format__"] == "torch_fewshot_head"
+    assert model_data["head_type"] == "binary_conv3x3"
+    assert model_data["training_strategy"] == "binary_conv3x3"
+    assert result["n_samples"] == 10
 
 
 def test_classification_inference_color_matches_class_map(

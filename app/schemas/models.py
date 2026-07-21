@@ -214,16 +214,16 @@ class ModelCreate(BaseModel):
         ge=1,
         le=1000,
         description=(
-            "训练迭代次数。当前自定义模型使用 binary_conv3x3 few-shot 下游头，"
-            "服务端最多执行 100 轮以控制耗时。"
+            "训练迭代次数。有效 Polygon 大于等于 10 个时使用 Binary Conv 3x3，"
+            "服务端最多执行 100 轮；少于 10 个时使用免迭代的 PU + Query 检索。"
         ),
         examples=[100],
     )
     class_ids: Optional[List[str]] = Field(
         None,
         description=(
-            "Target class ID for binary few-shot training. Current custom "
-            "training supports exactly one selected class."
+            "二分类训练的目标类别 ID。当前每个自定义模型只能选择一个目标类别；"
+            "Polygon 数量只影响后端训练策略，不改变此字段的填写方式。"
         ),
         examples=[["cls_001"]],
     )
@@ -236,7 +236,8 @@ class ModelCreate(BaseModel):
         ...,
         description=(
             "GeoJSON FeatureCollection 用户标注包。坐标必须是 WGS84。"
-            "Polygon 内部作为目标正样本，Polygon 外未标注区域默认不直接当负样本。"
+            "Polygon 内部作为目标正样本，Polygon 外是未标注样本而不是直接负样本。"
+            "有效 Polygon 少于 10 个时自动使用 PU + Query；达到 10 个时使用 Binary Conv 3x3。"
         ),
     )
     classes: List[ModelClass] = Field(
@@ -379,7 +380,9 @@ class ModelOut(BaseModel):
     completed_at: Optional[str] = Field(None, description="ISO timestamp when training completed.")
     classes: List[Dict[str, Any]] = Field(..., description="Classes used by the model.")
     accuracy: Optional[float] = Field(None, description="Training accuracy, if available.")
-    n_samples: Optional[int] = Field(None, description="Number of training samples.")
+    n_samples: Optional[int] = Field(
+        None, description="实际参与训练的有效 Polygon 数量；MultiPolygon 按独立 Polygon 分别计数。"
+    )
     model_path: Optional[str] = Field(None, description="Path to the saved model artifact.")
     description: Optional[str] = Field(None, description="Model description.")
     message: Optional[str] = Field(None, description="Status or error message.")
@@ -532,7 +535,9 @@ class JobStatusOut(BaseModel):
     status: str = Field(..., description="Job status: running, completed, or failed.")
     model_id: str = Field(..., description="Associated model identifier.")
     accuracy: Optional[float] = Field(None, description="Training accuracy, if available.")
-    n_samples: Optional[int] = Field(None, description="Number of training samples.")
+    n_samples: Optional[int] = Field(
+        None, description="实际参与训练的有效 Polygon 数量；MultiPolygon 按独立 Polygon 分别计数。"
+    )
     model_path: Optional[str] = Field(None, description="Path to the saved model artifact.")
     message: Optional[str] = Field(None, description="Status or error message.")
 

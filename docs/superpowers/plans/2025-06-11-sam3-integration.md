@@ -43,13 +43,13 @@ mkdir -p sam3_pkg
 复制模型权重和配置文件（来源：xuannv_show 和 modelscope）：
 
 ```bash
-cp /workspace/models/facebook/sam3/sam3.pt models/sam3/
-cp /workspace/models/facebook/sam3/config.json models/sam3/
-cp /workspace/models/facebook/sam3/processor_config.json models/sam3/
-cp /workspace/models/facebook/sam3/tokenizer.json models/sam3/
-cp /workspace/models/facebook/sam3/vocab.json models/sam3/
-cp /workspace/models/facebook/sam3/merges.txt models/sam3/
-cp /workspace/xuannv_show/backend/sam3/sam3/assets/bpe_simple_vocab_16e6.txt.gz models/sam3/assets/
+cp /workspace/data/models/facebook/sam3/sam3.pt models/sam3/
+cp /workspace/data/models/facebook/sam3/config.json models/sam3/
+cp /workspace/data/models/facebook/sam3/processor_config.json models/sam3/
+cp /workspace/data/models/facebook/sam3/tokenizer.json models/sam3/
+cp /workspace/data/models/facebook/sam3/vocab.json models/sam3/
+cp /workspace/data/models/facebook/sam3/merges.txt models/sam3/
+cp /workspace/projects/xuannv-show/backend/sam3/sam3/assets/bpe_simple_vocab_16e6.txt.gz models/sam3/assets/
 ```
 
 验证文件：
@@ -68,7 +68,7 @@ Expected output:
 ### Step 2: 复制 SAM3 Python 包
 
 ```bash
-cp -r /workspace/xuannv_show/backend/sam3/* sam3_pkg/
+cp -r /workspace/projects/xuannv-show/backend/sam3/* sam3_pkg/
 ```
 
 验证：
@@ -130,7 +130,7 @@ True
 ### Step 3: 安装本地 sam3 包
 
 ```bash
-cd /workspace/embedding-api
+cd /workspace/projects/embedding-api
 /opt/conda/envs/pyseims/bin/pip install -e ./sam3_pkg
 ```
 
@@ -181,7 +181,7 @@ For `harbin`:
   harbin:
     name: "哈尔滨新区"
     patches_meta: "data/harbin/patches_meta.json"
-    s2_dir: "/workspace/raw/harbin_scenes/s2"
+    s2_dir: "/workspace/data/raw/harbin_scenes/s2"
 ```
 
 For `haidian`:
@@ -189,7 +189,7 @@ For `haidian`:
   haidian:
     name: "海淀区"
     patches_meta: "data/haidian/patches_meta_v2.json"
-    s2_dir: "/workspace/raw/haidian_scenes/s2"
+    s2_dir: "/workspace/data/raw/haidian_scenes/s2"
 ```
 
 ### Step 3.2: 扩展 ConfigManager
@@ -225,7 +225,7 @@ def test_region_s2_dir():
     harbin = config.get_region("harbin")
     assert harbin is not None
     assert "s2_dir" in harbin
-    assert "/workspace/raw/harbin_scenes/s2" in harbin["s2_dir"]
+    assert "/workspace/data/raw/harbin_scenes/s2" in harbin["s2_dir"]
 ```
 
 Run:
@@ -1083,7 +1083,7 @@ pkill -f "uvicorn app.main:app --host 0.0.0.0 --port 9061"
 sleep 2
 
 # Restart
-cd /workspace/embedding-api
+cd /workspace/projects/embedding-api
 nohup python -m uvicorn app.main:app --host 0.0.0.0 --port 9061 --reload > uvicorn.log 2>&1 &
 sleep 3
 

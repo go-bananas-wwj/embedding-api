@@ -294,15 +294,35 @@ def copy_training_archive(archive: Path, mode: str) -> dict[str, object]:
     return summary
 
 
-def normalize_rgb(arr: np.ndarray) -> np.ndarray:
+def normalize_rgb(
+    arr: np.ndarray,
+    low_values: np.ndarray | None = None,
+    high_values: np.ndarray | None = None,
+) -> np.ndarray:
+    """Normalize PCA channels with one shared scale for the whole dataset.
+
+    Per-patch percentiles make identical embedding values render as different
+    colors and create artificial seams. Callers producing a patch collection
+    should pass global channel bounds returned by ``fit_embedding_pca``.
+    """
     arr = arr.astype(np.float32)
-    lo = np.percentile(arr, 2, axis=(0, 1), keepdims=True)
-    hi = np.percentile(arr, 98, axis=(0, 1), keepdims=True)
+    lo = (
+        np.asarray(low_values, dtype=np.float32).reshape(1, 1, 3)
+        if low_values is not None
+        else np.percentile(arr, 2, axis=(0, 1), keepdims=True)
+    )
+    hi = (
+        np.asarray(high_values, dtype=np.float32).reshape(1, 1, 3)
+        if high_values is not None
+        else np.percentile(arr, 98, axis=(0, 1), keepdims=True)
+    )
     arr = (arr - lo) / (hi - lo + 1e-6)
     return np.clip(arr, 0, 1)
 
 
-def fit_embedding_pca(files: list[Path], sample_pixels: int = 300_000) -> PCA:
+def fit_embedding_pca(
+    files: list[Path], sample_pixels: int = 300_000
+) -> tuple[PCA, np.ndarray, np.ndarray]:
     samples: list[np.ndarray] = []
     rng = np.random.default_rng(42)
     for path in files:
@@ -312,9 +332,12 @@ def fit_embedding_pca(files: list[Path], sample_pixels: int = 300_000) -> PCA:
         n = min(max(1, sample_pixels // max(1, len(files))), flat.shape[0])
         idx = rng.choice(flat.shape[0], size=n, replace=False)
         samples.append(flat[idx])
+    sample = np.concatenate(samples, axis=0)
     pca = PCA(n_components=3, random_state=42)
-    pca.fit(np.concatenate(samples, axis=0))
-    return pca
+    projected = pca.fit_transform(sample)
+    low_values = np.percentile(projected, 2, axis=0)
+    high_values = np.percentile(projected, 98, axis=0)
+    return pca, low_values, high_values
 
 
 def write_embedding_assets(api_root: Path, max_patches: int) -> dict[str, object]:
@@ -323,13 +346,12 @@ def write_embedding_assets(api_root: Path, max_patches: int) -> dict[str, object
     if max_patches:
         patch_dirs = patch_dirs[:max_patches]
     pca_files = []
-    for patch_dir in patch_dirs[: min(40, len(patch_dirs))]:
+    for patch_dir in patch_dirs:
         for month in MONTHS:
             path = patch_dir / f"{month}_embedding_map.pt"
             if path.exists():
                 pca_files.append(path)
-                break
-    pca = fit_embedding_pca(pca_files) if pca_files else None
+    pca_bundle = fit_embedding_pca(pca_files) if pca_files else None
 
     count = 0
     for patch_dir in tqdm(patch_dirs, desc="Haidian V1 embeddings"):
@@ -356,10 +378,11 @@ def write_embedding_assets(api_root: Path, max_patches: int) -> dict[str, object
                 json.dumps(stats, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
-            if pca is not None:
+            if pca_bundle is not None:
+                pca, low_values, high_values = pca_bundle
                 d, h, w = emb.shape
                 rgb = pca.transform(emb.reshape(d, h * w).T).reshape(h, w, 3)
-                rgb = normalize_rgb(rgb)
+                rgb = normalize_rgb(rgb, low_values, high_values)
                 Image.fromarray((rgb * 255).astype(np.uint8)).save(
                     month_dir / f"{patch_id}.png"
                 )

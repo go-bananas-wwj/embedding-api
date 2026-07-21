@@ -878,6 +878,25 @@ GET /regions/{region_id}/patches/{patch_id}/tasks/{task_type}/result?format=png&
 > - 哈尔滨 `land_cover_classification`、`water_extraction` 没有预生成结果图，接口会根据 `month` 调用系统预训练模型实时推理；`building_extraction`、`land_use_classification` 的 `v1` 优先使用预生成结果，缺失月份同样会回退到系统模型推理。
 > - 海淀区 `road_extraction`、`construction` 与 `building_extraction` 等任务使用相同的时间范围。
 
+#### 海淀土地覆盖分类图例
+
+海淀 `land_cover_classification` V1 结果集一共使用 **7 种颜色**。单个 Patch
+可能只出现其中 6 种或更少，表示该 Patch 不包含其他地类，不是结果缺失。
+
+| 项目类别值 | 颜色 | RGB | 中文含义 | 说明 |
+|--------------|------|-----|----------|------|
+| `1` | `#006400` | `0, 100, 0` | 树木覆盖 | 林地、公园或其他以乔木树冠为主的区域 |
+| `2` | `#B4D250` | `180, 210, 80` | 灌木地 | 以灌木或低矮木本植被为主的区域 |
+| `3` | `#F5DC5A` | `245, 220, 90` | 草地 | 以草本植被为主的区域 |
+| `4` | `#D23C3C` | `210, 60, 60` | 耕地 | 农作物种植地、农田或周期性耕作区域 |
+| `5` | `#BEAA82` | `190, 170, 130` | 建成区 | 建筑、道路及其他人工不透水表面为主的区域 |
+| `6` | `#A0DCDC` | `160, 220, 220` | 裸地/稀疏植被 | 裸土、裸岩或植被覆盖度很低的区域 |
+| `8` | `#1E64DC` | `30, 100, 220` | 永久性水体 | 湖泊、水库、河流等长期有水的区域 |
+
+> **注意**：上表是海淀项目当前 PNG 结果的实际调色板，类别值为项目内部
+> WorldCover 归一化值。它不是 ESA WorldCover 原始 11 类的完整调色板，前端不应
+> 使用 PCA 嵌入图的颜色解释土地覆盖类别。
+
 **curl 示例**:
 ```bash
 # 单期结果（传 month）
@@ -1222,7 +1241,7 @@ curl -s "http://60.31.21.42:22065/models?region_id=harbin"
 | `completed_at` | string | 完成时间 |
 | `classes` | object[] | 模型类别列表 |
 | `accuracy` | float | 训练集有效像素上的 F1 参考值；自定义 few-shot 模型样本少，主要用于判断训练是否收敛，不等同于大规模验证集精度 |
-| `n_samples` | int | 训练样本数 |
+| `n_samples` | int | 实际参与训练的有效 Polygon 数量；MultiPolygon 按独立 Polygon 分别计数 |
 | `model_path` | string | 模型文件路径。自定义模型当前保存为 PyTorch few-shot checkpoint，历史模型可能仍是 `.pkl` |
 | `description` | string | 模型描述 |
 | `message` | string | 失败原因或提示信息 |
@@ -1236,7 +1255,7 @@ curl -s "http://60.31.21.42:22065/models?region_id=harbin"
 
 创建模型并启动异步训练任务。请求体中需要携带完整的 GeoJSON 标注包和类别定义，后端解析后提取训练样本。训练完成后才能调用推理接口。
 
-当前自定义训练使用 `binary_conv3x3` few-shot 二分类下游头：在玄女 embedding 上训练一个轻量卷积分割头，适合少量 Polygon 标注下快速得到边界更连续、展示更自然的结果。每次训练只能选择一个目标 `class_id`，输出为“目标 / 非目标”。注意：**Polygon 内部会作为目标正样本；Polygon 外部默认只是未标注区域，不会整体当作负样本**。当请求中没有显式负样本时，后端只会从低相似度区域抽取少量弱负样本用于稳定训练。
+当前自定义训练根据有效 Polygon 数自动选择二分类策略：少于 10 个时使用 `PU + Query` 向量检索，大于等于 10 个时使用 `binary_conv3x3` few-shot 卷积头。每次训练只能选择一个目标 `class_id`，输出为“目标 / 非目标”。**Polygon 内部是目标正样本；Polygon 外部只是未标注区域，不会整体当作负样本**。PU 策略只从远离标注、且前景相似度最低的未标注像素中估计可靠背景，并在推理时使用带面积增长保护的一次 Query 自适应。训练策略由后端自动选择，前端请求和推理 API 不变。
 
 ```
 POST /models
@@ -1691,7 +1710,7 @@ curl -s "http://60.31.21.42:22065/models/jobs/job_jkl012"
 | `status` | string | `running` / `completed` / `failed` |
 | `model_id` | string | 关联模型 ID |
 | `accuracy` | float | 训练准确率 |
-| `n_samples` | int | 训练样本数 |
+| `n_samples` | int | 实际参与训练的有效 Polygon 数量；MultiPolygon 按独立 Polygon 分别计数 |
 | `model_path` | string | 模型文件路径 |
 | `message` | string | 失败原因或提示 |
 
@@ -2096,6 +2115,7 @@ POST /regions/{region_id}/sam3/segment
 ```text
 /workspace/data/raw/{region_id}/highres/{patch_id}/{YYYYMMDD}.tif
 {region.s2_dir}/{patch_id}/highres/{YYYYMMDD}.tif
+{region.highres_dir}/highres_optical_{YYYYMMDD}_{patch_id}.tif
 ```
 
 文件必须包含 CRS 和仿射变换，至少 3 个波段，前三个波段依次为 R、G、B。

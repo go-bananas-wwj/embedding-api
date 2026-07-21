@@ -29,10 +29,10 @@ from shapely.geometry import box
 from tqdm import tqdm
 
 # ============ 配置 ============
-SHP_DIR = "/workspace/哈尔滨松北新区变化检测汇总文件/变化检测shp文件"
-EXCEL_DIR = "/workspace/哈尔滨松北新区变化检测汇总文件/变化检测清单"
-PATCHES_META_PATH = "/workspace/xuannv_show/data/harbin/patches_meta.json"
-OUTPUT_DIR = "/workspace/xuannv_show/data/harbin/labels_v2"
+SHP_DIR = "/workspace/archive/harbin-change-detection-2025/变化检测shp文件"
+EXCEL_DIR = "/workspace/archive/harbin-change-detection-2025/变化检测清单"
+PATCHES_META_PATH = "/workspace/projects/xuannv-show/data/harbin/patches_meta.json"
+OUTPUT_DIR = "/workspace/projects/xuannv-show/data/harbin/labels_v2"
 GRID_SIZE = 64
 CRS_SRC = "EPSG:4490"
 CRS_DST = "EPSG:32652"

@@ -22,7 +22,7 @@
 
 ### 1.3 自定义训练 + 批量推理 API
 
-参考 `/workspace/xuannv_show` 现有实现：
+参考 `/workspace/projects/xuannv-show` 现有实现：
 
 - **训练引擎**：
   - `training_engine.py`：基于用户标注 mask + embedding，训练 sklearn LogisticRegression 分类头，保存 `.pkl`。

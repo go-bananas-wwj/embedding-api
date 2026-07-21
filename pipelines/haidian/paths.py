@@ -59,7 +59,7 @@ P2A_BENCHMARK_ROOT: Path = Path(
         "benchmarks/p2a_semantic_probe_full_quick_20260627_185700",
     )
 )
-XUANNV_REPO_ROOT: Path = Path(os.environ.get("XUANNV_REPO_ROOT", "/root/workspace/xuannv"))
+XUANNV_REPO_ROOT: Path = Path(os.environ.get("XUANNV_REPO_ROOT", "/root/workspace/projects/xuannv"))
 XUANNV_DATA_ROOT: Path = Path(os.environ.get("XUANNV_DATA_ROOT", "/data/xuannv_embedding"))
 
 MONTHS = ("202512", "202601", "202602", "202603", "202604", "202605")

@@ -114,7 +114,7 @@ def _task_not_found_detail(
     )
 
 # Classification tasks whose visualizations are stored in xuannv_show static seg_tiles.
-_XUANNV_SHOW_SEG_TILE_DIR = Path("/workspace/xuannv_show/static_assets/data/seg_tiles")
+_XUANNV_SHOW_SEG_TILE_DIR = Path("/workspace/projects/xuannv-show/static_assets/data/seg_tiles")
 _CLASS_TASK_TO_XUANNV_HEAD = {
     "building_extraction": "building_extraction",
     "land_use_classification": "dynamic_world",
@@ -530,6 +530,22 @@ async def get_task_result(
     | 海淀 | land_use_classification | v1 | month | 2025-12 ~ 2026-05 |
     | 海淀 | land_cover_classification | v1 | month | 2025-12 ~ 2026-05 |
     | 海淀 | water_extraction | v1 | month | 2025-12 ~ 2026-05 |
+
+    海淀 land_cover_classification V1 图例（整个结果集共 7 色，单个 Patch
+    可能只出现其中一部分）：
+
+    | 类别值 | 颜色 | 含义 |
+    |----------|------|------|
+    | 1 | #006400 | 树木覆盖 |
+    | 2 | #B4D250 | 灌木地 |
+    | 3 | #F5DC5A | 草地 |
+    | 4 | #D23C3C | 耕地 |
+    | 5 | #BEAA82 | 建成区 |
+    | 6 | #A0DCDC | 裸地/稀疏植被 |
+    | 8 | #1E64DC | 永久性水体 |
+
+    注意：这是海淀项目当前 PNG 结果的实际调色板，不是 PCA 嵌入图
+    的颜色，也不是 ESA WorldCover 原始 11 类的完整调色板。
 
     注意：Swagger UI 对二进制响应支持有限，建议在浏览器或 `<img>` 标签中查看图片。
     """

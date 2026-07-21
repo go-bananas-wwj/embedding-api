@@ -40,8 +40,10 @@ class TestSAM3RealModel:
             data = response.json()
             assert "embedding_id" in data
             assert "image" in data
-            assert data["image"]["width"] == 256
-            assert data["image"]["height"] == 256
+            # Preserve the source aspect ratio and only downscale when an input
+            # exceeds the configured SAM3 limit. Small patches are not enlarged.
+            assert 1 <= data["image"]["width"] <= 256
+            assert 1 <= data["image"]["height"] <= 256
 
     def test_segment_real(self):
         """Test segment with WGS84 prompts after embed."""

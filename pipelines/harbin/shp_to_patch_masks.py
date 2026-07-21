@@ -5,7 +5,7 @@ SHP → Patch Mask 转换脚本
 
 输入:
   - data/harbin/patches_meta.json  (patch 元数据, EPSG:32652)
-  - /workspace/哈尔滨松北新区变化检测汇总文件/变化检测shp文件/*.shp  (EPSG:4490)
+  - /workspace/archive/harbin-change-detection-2025/变化检测shp文件/*.shp  (EPSG:4490)
 
 输出:
   - data/harbin/labels/<task_name>/<patch_id>.npy  (64×64 binary mask)
@@ -29,9 +29,9 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 import argparse
 
 # ============ 配置 ============
-SHP_DIR = "/workspace/哈尔滨松北新区变化检测汇总文件/变化检测shp文件"
-PATCHES_META_PATH = "/workspace/xuannv_show/data/harbin/patches_meta.json"
-OUTPUT_DIR = "/workspace/xuannv_show/data/harbin/labels"
+SHP_DIR = "/workspace/archive/harbin-change-detection-2025/变化检测shp文件"
+PATCHES_META_PATH = "/workspace/projects/xuannv-show/data/harbin/patches_meta.json"
+OUTPUT_DIR = "/workspace/projects/xuannv-show/data/harbin/labels"
 GRID_SIZE = 64  # embedding 空间分辨率
 
 TASKS = {

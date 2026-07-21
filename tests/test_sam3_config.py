@@ -16,4 +16,4 @@ def test_region_s2_dir():
     harbin = config.get_region("harbin")
     assert harbin is not None
     assert "s2_dir" in harbin
-    assert "/workspace/raw/harbin_scenes/s2" in harbin["s2_dir"]
+    assert "/workspace/data/raw/harbin_scenes/s2" in harbin["s2_dir"]

@@ -164,7 +164,7 @@ def main() -> None:
             continue
         extract_archive(archive, args.target, args.force)
 
-    print(f"Harbin assets extracted into {args.target} and /workspace/raw")
+    print(f"Harbin assets extracted into {args.target} and /workspace/data/raw")
 
 
 if __name__ == "__main__":

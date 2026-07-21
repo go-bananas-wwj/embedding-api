@@ -38,6 +38,32 @@ class TestSystemModels:
         # 200 if checkpoint exists, 404 if model file missing
         assert response.status_code in (200, 404)
 
+    def test_haidian_land_cover_classes_available_without_online_checkpoint(self):
+        response = client.get(
+            "/system-models/land_cover_classification/classes"
+            "?region_id=haidian&version=v1"
+        )
+        assert response.status_code == 200
+        classes = response.json()
+        assert len(classes) == 7
+        assert classes[0] == {
+            "id": "sys_land_cover_classification_1",
+            "name": "树木覆盖",
+            "color": "#006400",
+        }
+        assert classes[-1] == {
+            "id": "sys_land_cover_classification_8",
+            "name": "永久性水体",
+            "color": "#1E64DC",
+        }
+
+    def test_haidian_land_cover_classes_reject_unknown_version(self):
+        response = client.get(
+            "/system-models/land_cover_classification/classes"
+            "?region_id=haidian&version=v2"
+        )
+        assert response.status_code == 404
+
     def test_haidian_system_model_omitted_version_uses_v1(self):
         response = client.get(
             "/system-models/road_extraction/classes?region_id=haidian"

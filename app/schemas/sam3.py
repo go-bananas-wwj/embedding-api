@@ -1,7 +1,27 @@
 """Pydantic schemas for SAM3 endpoints."""
 
+from datetime import datetime
+import re
 from typing import List, Literal, Optional, Union
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+def _validate_image_date(value: str) -> str:
+    """Validate the three date formats advertised by the SAM3 API."""
+    for pattern, date_format in (
+        (r"\d{4}-\d{2}", "%Y-%m"),
+        (r"\d{6}", "%Y%m"),
+        (r"\d{8}", "%Y%m%d"),
+    ):
+        if re.fullmatch(pattern, value):
+            try:
+                datetime.strptime(value, date_format)
+            except ValueError as exc:
+                raise ValueError(
+                    "Date must be a valid YYYY-MM, YYYYMM, or YYYYMMDD value"
+                ) from exc
+            return value
+    raise ValueError("Date must use YYYY-MM, YYYYMM, or YYYYMMDD format")
 
 
 class ImageData(BaseModel):
@@ -64,10 +84,7 @@ class EmbedRequest(BaseModel):
     @field_validator("month")
     @classmethod
     def validate_month(cls, v: str) -> str:
-        import re
-        if not re.match(r"^[\w\-]{1,32}$", v):
-            raise ValueError("Invalid month format")
-        return v
+        return _validate_image_date(v)
 
 
 class EmbedResponse(BaseModel):
@@ -168,10 +185,7 @@ class SegmentRequest(BaseModel):
     @field_validator("date")
     @classmethod
     def validate_date(cls, v: str) -> str:
-        import re
-        if not re.match(r"^[\w\-]{1,32}$", v):
-            raise ValueError("Invalid date format")
-        return v
+        return _validate_image_date(v)
 
     @field_validator("point_labels")
     @classmethod
@@ -264,7 +278,7 @@ class SegmentResponse(BaseModel):
     )
     features: List[SAM3BBoxFeature] = Field(
         ...,
-        description="GeoJSON polygon features for SAM3 candidate boxes in WGS84.",
+        description="SAM3 mask contours vectorized as WGS84 GeoJSON Polygon/MultiPolygon features.",
     )
     masks: Optional[List[MaskData]] = Field(
         None,

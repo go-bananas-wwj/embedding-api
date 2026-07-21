@@ -13,6 +13,8 @@ import torch
 from app.services.data_service import DataService
 from app.services.fewshot_heads import BinaryConv3x3ProbeHead
 from app.services.model_registry import get_model_registry
+from app.services.pu_query import CHECKPOINT_FORMAT as PU_QUERY_CHECKPOINT_FORMAT
+from app.services.pu_query import score_pu_query
 from app.services.user_paths import get_user_dir
 
 logger = logging.getLogger(__name__)
@@ -81,6 +83,16 @@ class InferenceEngine:
     ) -> str:
         """Run single-patch inference. Returns path to result PNG."""
         model_data = self._load_model(model_id)
+        if model_data.get("__format__") == PU_QUERY_CHECKPOINT_FORMAT:
+            return self._infer_pu_query(
+                model_data,
+                model_id,
+                region_id,
+                patch_id,
+                month=month,
+                before_month=before_month,
+                after_month=after_month,
+            )
         if model_data.get("__format__") == "torch_fewshot_head":
             return self._infer_torch_fewshot(
                 model_data,
@@ -158,6 +170,79 @@ class InferenceEngine:
         )
         result_path = self.results_dir / result_filename
         img.save(result_path)
+        return str(result_path)
+
+    def _infer_pu_query(
+        self,
+        model_data: Dict[str, Any],
+        model_id: str,
+        region_id: str,
+        patch_id: str,
+        month: Optional[str] = None,
+        before_month: Optional[str] = None,
+        after_month: Optional[str] = None,
+    ) -> str:
+        """Run sparse positive-unlabeled retrieval with guarded query adaptation."""
+        task_type = model_data.get("task_type", "single_time_detection")
+        embedding_version = model_data.get("embedding_version", "v2")
+        feature_type = model_data.get("feature_type", "embedding")
+        is_change = feature_type == "diff" or task_type == "change_detection"
+
+        if is_change:
+            before_month = before_month or model_data.get("before_month")
+            after_month = after_month or model_data.get("after_month")
+            if not before_month or not after_month:
+                raise ValueError(
+                    "Change-detection inference requires before_month and after_month"
+                )
+            before = _load_embedding_for_inference(
+                region_id, patch_id, before_month, version=embedding_version
+            )
+            after = _load_embedding_for_inference(
+                region_id, patch_id, after_month, version=embedding_version
+            )
+            if before is None:
+                raise FileNotFoundError(
+                    f"Embedding not found for {patch_id} {before_month}"
+                )
+            if after is None:
+                raise FileNotFoundError(
+                    f"Embedding not found for {patch_id} {after_month}"
+                )
+            feature = after - before
+            result_filename = (
+                f"infer_{model_id}_{region_id}_{patch_id}_"
+                f"{before_month}_vs_{after_month}.png"
+            )
+        else:
+            if not month:
+                raise ValueError("Single-time inference requires month")
+            feature = _load_embedding_for_inference(
+                region_id, patch_id, month, version=embedding_version
+            )
+            if feature is None:
+                raise FileNotFoundError(f"Embedding not found for {patch_id} {month}")
+            result_filename = (
+                f"infer_{model_id}_{region_id}_{patch_id}_{month}.png"
+            )
+
+        score, query_adapted = score_pu_query(feature, model_data)
+        logger.debug(
+            "PU query inference model=%s patch=%s query_adapted=%s",
+            model_id,
+            patch_id,
+            query_adapted,
+        )
+        prediction = (score >= float(model_data["threshold"])).astype(np.uint8)
+        if is_change:
+            rendered = self._color_encode_cd(prediction)
+        else:
+            rendered = self._color_encode_binary_fewshot(prediction, model_data)
+        image = Image.fromarray(rendered).resize(
+            (128, 128), Image.Resampling.NEAREST
+        )
+        result_path = self.results_dir / result_filename
+        image.save(result_path)
         return str(result_path)
 
     def _infer_torch_fewshot(

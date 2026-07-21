@@ -8,6 +8,7 @@ from app.services.geojson_adapter import (
     build_class_map,
     group_features_by_patch,
     parse_annotations_for_training,
+    parse_polygon_annotations_for_training,
     rasterize_geometry,
 )
 
@@ -120,3 +121,35 @@ def test_parse_change_detection_annotations():
     assert len(records) == 1
     assert records[0]["before_month"] == "2025-04"
     assert records[0]["after_month"] == "2025-06"
+
+
+def test_parse_polygon_annotations_counts_multipolygon_components():
+    feature = _make_feature()
+    first = feature["geometry"]["coordinates"]
+    second = [[
+        [126.525, 45.750],
+        [126.528, 45.750],
+        [126.528, 45.752],
+        [126.525, 45.752],
+        [126.525, 45.750],
+    ]]
+    feature["geometry"] = {
+        "type": "MultiPolygon",
+        "coordinates": [first, second],
+    }
+    annotations = GeoJSONFeatureCollection(
+        type="FeatureCollection",
+        features=[GeoJSONFeature.model_validate(feature)],
+    )
+    classes = [ModelClass(id="cls_001", name="建筑", color="#FF0000")]
+
+    records, _ = parse_polygon_annotations_for_training(
+        annotations=annotations,
+        classes=classes,
+        class_ids=["cls_001"],
+        model_type="classification",
+    )
+
+    assert len(records) == 2
+    assert [record["polygon_index"] for record in records] == [0, 1]
+    assert all(record["mask"].sum() > 0 for record in records)

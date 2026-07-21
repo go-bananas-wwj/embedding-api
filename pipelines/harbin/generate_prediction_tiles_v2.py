@@ -18,9 +18,9 @@ from PIL import Image
 from tqdm import tqdm
 import matplotlib.cm as cm
 
-PREDICTIONS_DIR = "/workspace/xuannv_show/data/harbin/predictions_v2"
-PATCHES_META_PATH = "/workspace/xuannv_show/data/harbin/patches_meta.json"
-OUTPUT_BASE = "/workspace/xuannv_show/data/harbin/results_v2"
+PREDICTIONS_DIR = "/workspace/projects/xuannv-show/data/harbin/predictions_v2"
+PATCHES_META_PATH = "/workspace/projects/xuannv-show/data/harbin/patches_meta.json"
+OUTPUT_BASE = "/workspace/projects/xuannv-show/data/harbin/results_v2"
 
 try:
     _CMAP = cm.colormaps["jet"]

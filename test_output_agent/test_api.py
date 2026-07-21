@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 BASE_URL = "http://localhost:9061"
-OUTPUT_DIR = Path("/workspace/embedding-api/test_output_agent")
+OUTPUT_DIR = Path("/workspace/projects/embedding-api/test_output_agent")
 CURL_PROXY = ["--noproxy", "*"]
 
 # Results tracking

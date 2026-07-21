@@ -9,9 +9,9 @@ services:
     volumes:
       - ./config.docker.yaml:/app/config.yaml:ro
       # Mount data directories (adjust paths as needed)
-      - /workspace/xuannv_show/data/harbin:/data/harbin:ro
-      - /workspace/olmo/data/haidian:/data/haidian:ro
-      - /workspace/olmo/embeddings_cache:/data/embeddings_cache:ro
+      - /workspace/projects/xuannv-show/data/harbin:/data/harbin:ro
+      - /workspace/projects/olmo/data/haidian:/data/haidian:ro
+      - /workspace/projects/olmo/embeddings_cache:/data/embeddings_cache:ro
     environment:
       - PYTHONUNBUFFERED=1
       - CONFIG_PATH=/app/config.yaml

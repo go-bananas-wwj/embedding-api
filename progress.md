@@ -60,9 +60,9 @@
 
 ## 2026-06-28 mosaic 接口扩展为 S2/S1/Landsat
 
-- 发现 `/workspace/raw/harbin/` 下已有 S2、S1、Landsat 的原始 per-patch TIFF 数据。
+- 发现 `/workspace/data/raw/harbin/` 下已有 S2、S1、Landsat 的原始 per-patch TIFF 数据。
 - 重写 `app/services/mosaic_service.py`：
-  - 从 `/workspace/raw/{region}/{sensor}/{patch_id}/{period}.tif` 读取原始数据。
+  - 从 `/workspace/data/raw/{region}/{sensor}/{patch_id}/{period}.tif` 读取原始数据。
   - `date=YYYY-MM` 自动映射到季度文件名（如 `2025-04` → `2025Q2`）。
   - 支持 `sensor_type=s2|s1|landsat`。
   - PNG 输出使用标准波段合成：S2/Landsat 真彩色（B4/B3/B2），S1 伪彩色（R=VV, G=VH, B=VH/VV）。
@@ -144,14 +144,14 @@
   - 合并后未重启服务，当前后端继续运行。
 - 新增哈尔滨资产上传/下载流水线：
   - `pipelines/harbin/paths.py`：集中定义哈尔滨本地源路径与 ModelScope 默认仓库/前缀。
-  - `pipelines/harbin/prepare_harbin_api_assets.py`：把 `data/harbin`、`models/harbin`、`models/sam3`、`/workspace/raw/harbin`、`/workspace/raw/harbin_scenes` 打包到 `api_ready`，自动生成 `manifest.json` 与 `checksums.sha256`。
-  - `pipelines/harbin/download_modelscope_assets.py`：从 ModelScope 下载并按真实文件系统路径展开（含 `/workspace/raw/...`）。
+  - `pipelines/harbin/prepare_harbin_api_assets.py`：把 `data/harbin`、`models/harbin`、`models/sam3`、`/workspace/data/raw/harbin`、`/workspace/data/raw/harbin_scenes` 打包到 `api_ready`，自动生成 `manifest.json` 与 `checksums.sha256`。
+  - `pipelines/harbin/download_modelscope_assets.py`：从 ModelScope 下载并按真实文件系统路径展开（含 `/workspace/data/raw/...`）。
 - 上传范围（约 31 GB，149,498 个文件）：
   - `data/harbin`：12.59 GB
   - `models/harbin`：422 MB
   - `models/sam3`：3.22 GB
-  - `/workspace/raw/harbin`：2.80 GB
-  - `/workspace/raw/harbin_scenes`：11.94 GB
+  - `/workspace/data/raw/harbin`：2.80 GB
+  - `/workspace/data/raw/harbin_scenes`：11.94 GB
 - 已用 Token 对数据集 `WeijieWu/xuannv_embdding_api` 做写入测试，权限正常。
 - 文档更新：
   - `README.md` 新增「下载哈尔滨 V1/V2 资产」小节。
@@ -177,7 +177,7 @@
 ## 2026-06-29 在本机部署海淀区 V1 embedding 服务
 
 - 目标：在不影响哈尔滨新区服务的前提下，使 `GET /regions/haidian/patches/{patch_id}/embedding` 可用。
-- 保留哈尔滨 staging `/workspace/modelscope_upload/harbin/v1` 不清理（磁盘空间足够）。
+- 保留哈尔滨 staging `/workspace/data/modelscope-upload/harbin/v1` 不清理（磁盘空间足够）。
 - 新增 `pipelines/haidian/download_embeddings.py`：
   - 仅从 ModelScope 下载 `data/haidian/embeddings/v1/**` 与 `data/haidian/patches_meta_v1.json`。
   - Token 从 `MODELSCOPE_TOKEN` 环境变量读取。

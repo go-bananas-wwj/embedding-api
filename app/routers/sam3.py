@@ -62,9 +62,9 @@ async def sam3_embed(
     try:
         result = await svc.embed(region_id, req.patch_id, req.month, req.sensor_type)
         return result
-    except FileNotFoundError as e:
+    except (DataNotFoundError, FileNotFoundError) as e:
         raise HTTPException(status_code=404, detail=str(e))
-    except ValueError as e:
+    except (DataValidationError, ValueError) as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception:
         logger.exception("SAM3 embed failed for %s/%s/%s", region_id, req.patch_id, req.month)

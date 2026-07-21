@@ -82,9 +82,16 @@ async def get_classes(
 
     用于在结果可视化时生成图例，或在前端显示类别名称与颜色对应关系。
     返回类别 ID、名称和调色板等 JSON 列表。
+
+    海淀 `land_cover_classification` V1 使用预生成月度结果，没有在线推理
+    checkpoint；本接口仍会返回其 7 类静态图例。该例外只表示类别定义可用，
+    不表示 `/system-models/land_cover_classification/infer` 支持海淀实时推理。
     """
     try:
-        resolved_version = resolve_system_model_version(region_id, task_id, version)
+        if region_id == "haidian" and task_id == "land_cover_classification":
+            resolved_version = version or "v1"
+        else:
+            resolved_version = resolve_system_model_version(region_id, task_id, version)
         return get_system_model_classes(region_id, task_id, resolved_version)
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))

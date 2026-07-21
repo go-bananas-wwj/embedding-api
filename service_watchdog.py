@@ -18,7 +18,7 @@ import sys
 import time
 from typing import Optional
 
-PROJECT_DIR = "/workspace/embedding-api"
+PROJECT_DIR = "/workspace/projects/embedding-api"
 PID_FILE = os.path.join(PROJECT_DIR, "service_watchdog.pid")
 LOG_DIR = os.path.join(PROJECT_DIR, "logs")
 WATCHDOG_LOG_FILE = os.path.join(LOG_DIR, "watchdog.log")

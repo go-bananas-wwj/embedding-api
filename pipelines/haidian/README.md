@@ -45,7 +45,7 @@ The latest assets are stored in the ModelScope dataset
 `artifacts/haidian-embedding-v1`.
 
 ```bash
-cd /workspace/embedding-api
+cd /workspace/projects/embedding-api
 export MODELSCOPE_TOKEN="..."  # only needed for private datasets
 python pipelines/haidian/download_modelscope_assets.py \
   --repo WeijieWu/xuannv_haidian_embdding \
@@ -64,7 +64,7 @@ DOCS_URL=/docs uvicorn app.main:app --host 0.0.0.0 --port 9061
 On the xuannv training machine, create the ModelScope upload package:
 
 ```bash
-cd /workspace/embedding-api
+cd /workspace/projects/embedding-api
 python pipelines/haidian/prepare_v1_api_assets.py \
   --output-root /data/xuannv_embedding/modelscope_upload/haidian/v1
 ```

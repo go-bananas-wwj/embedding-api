@@ -40,7 +40,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 9061
 API 本身已经提供 `/logs`，只有需要单独暴露 `9091` 时才启动这个服务：
 
 ```bash
-python scripts/static_logs_server.py --host 0.0.0.0 --port 9091 --root /workspace/embedding-api
+python scripts/static_logs_server.py --host 0.0.0.0 --port 9091 --root /workspace/projects/embedding-api
 ```
 
 ## 日志文件

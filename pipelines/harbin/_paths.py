@@ -22,7 +22,7 @@ def add_backend_to_path() -> None:
     if backend_str not in sys.path:
         sys.path.insert(0, backend_str)
     # xuannv 核心库路径优先从环境变量读取
-    xuannv_root = Path(os.environ.get("XUANNV_ROOT", "/workspace/xuannv"))
+    xuannv_root = Path(os.environ.get("XUANNV_ROOT", "/workspace/projects/xuannv"))
     xuannv_str = str(xuannv_root)
     if xuannv_str not in sys.path:
         sys.path.insert(0, xuannv_str)
@@ -30,14 +30,14 @@ def add_backend_to_path() -> None:
 
 def get_raw_scenes_dir() -> Path:
     """原始影像目录，支持环境变量覆盖."""
-    return Path(os.environ.get("RAW_SCENES_DIR", "/workspace/raw/harbin_scenes"))
+    return Path(os.environ.get("RAW_SCENES_DIR", "/workspace/data/raw/harbin_scenes"))
 
 
 def get_embeddings_dir() -> Path:
     """Embedding 张量目录，支持环境变量覆盖."""
     return Path(os.environ.get(
         "EMBEDDINGS_DIR",
-        "/workspace/raw/xuannv_modelscope_upload/embeddings/v5_mixed_scale/monthly_embeddings_2025",
+        "/workspace/data/raw/xuannv_modelscope_upload/embeddings/v5_mixed_scale/monthly_embeddings_2025",
     ))
 
 

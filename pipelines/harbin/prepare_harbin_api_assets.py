@@ -53,7 +53,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output-root",
         type=Path,
-        default=Path("/workspace/modelscope_upload/harbin/v1"),
+        default=Path("/workspace/data/modelscope-upload/harbin/v1"),
         help="Root directory where api_ready/ will be created.",
     )
     parser.add_argument(

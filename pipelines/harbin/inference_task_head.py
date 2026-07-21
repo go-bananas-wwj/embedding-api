@@ -20,9 +20,9 @@ from tqdm import tqdm
 
 from train_task_head import TaskHead
 
-EMBEDDING_DIR = "/workspace/raw/xuannv_modelscope_upload/embeddings/v5_mixed_scale/monthly_embeddings_2025"
-MODEL_DIR = "/workspace/embedding-api/models/harbin/v1"
-OUTPUT_DIR = "/workspace/xuannv_show/data/harbin/predictions"
+EMBEDDING_DIR = "/workspace/data/raw/xuannv_modelscope_upload/embeddings/v5_mixed_scale/monthly_embeddings_2025"
+MODEL_DIR = "/workspace/projects/embedding-api/models/harbin/v1"
+OUTPUT_DIR = "/workspace/projects/xuannv-show/data/harbin/predictions"
 
 
 def load_best_model(task_name: str, device: str):

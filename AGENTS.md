@@ -54,6 +54,8 @@ SAM3 package.
 app/
   main.py                 FastAPI app, CORS, docs URLs, router inclusion
   config.py               Config manager, hot reload, patch metadata cache
+  openapi_docs.py         OpenAPI schema enrichment for Swagger readability
+  request_audit.py        Request audit middleware writing logs/request_audit.jsonl
   routers/
     regions.py            Region metadata and `/regions/{id}/mosaic`
     patches.py            Patch list/detail
@@ -62,6 +64,7 @@ app/
     models.py             Custom model CRUD, training, inference, result download
     system_models.py      System model listing/classes/inference/result download
     sam3.py               SAM3 embed/segment/status API
+    logs.py               Browser-accessible log/request-audit pages (internal)
   schemas/                Pydantic request/response models
   services/
     data_service.py       Secure path resolution for embeddings/tasks
@@ -74,6 +77,10 @@ app/
     model_registry.py     Custom model/job metadata
     training_engine.py    Lightweight downstream head training
     inference_engine.py   Custom/system inference helpers
+    system_model_service.py  System pre-trained head metadata and inference
+    fewshot_heads.py      PyTorch heads for user few-shot downstream tasks
+    mask_noise.py         Mask noise utilities to make GT labels look model-like
+    time_utils.py         Month/period/date normalization across regions
 data/                     Regional metadata, embeddings, task outputs
 docs/                     API and workflow docs
 models/                   Checkpoints and generated model artifacts
@@ -238,7 +245,7 @@ SAM3 is lazy-loaded in `app/services/sam3_service.py`.
 - `/sam3/embed` remains available for preloading by explicit `patch_id`, `month`,
   and optional `sensor_type`; cached IDs include sensor type.
 - Raw imagery is resolved through the same path helpers as mosaics, including
-  each region's `s2_dir` and `/workspace/raw`.
+  each region's `s2_dir` and `/workspace/data/raw`.
 - Embeddings are cached with an LRU cache controlled by `max_cache_size`.
 - GPU/model inference is serialized with an `asyncio.Lock`.
 - Integration tests are marked slow and should tolerate missing GPU/data/model

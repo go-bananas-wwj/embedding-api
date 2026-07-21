@@ -4,10 +4,12 @@ import asyncio
 import base64
 import io
 import logging
+import os
 import re
 import sys
 import threading
 from collections import OrderedDict
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -20,6 +22,17 @@ from app.services.mosaic_service import RAW_ROOT, _SENSOR_RGB, _get_raw_tiff_pat
 from app.services.time_utils import normalize_quarter_date
 
 logger = logging.getLogger(__name__)
+
+
+def _configure_rasterio_proj_data() -> None:
+    """Use the PROJ database bundled with the installed Rasterio build."""
+    import rasterio
+    from rasterio._env import set_proj_data_search_path
+
+    bundled = Path(rasterio.__file__).resolve().parent / "proj_data"
+    if (bundled / "proj.db").is_file():
+        os.environ["PROJ_DATA"] = str(bundled)
+        set_proj_data_search_path(str(bundled))
 
 
 class SAM3Service:
@@ -81,6 +94,7 @@ class SAM3Service:
         """Transform coordinates, falling back to pyproj if rasterio's PROJ DB is stale."""
         from rasterio.warp import transform as warp_transform
 
+        _configure_rasterio_proj_data()
         try:
             return warp_transform(src_crs, dst_crs, xs, ys)
         except Exception as exc:
@@ -132,17 +146,19 @@ class SAM3Service:
                     bpe_path=bpe_path,
                     checkpoint_path=checkpoint_path,
                     device=device,
-                    enable_inst_interactivity=True,
+                    enable_inst_interactivity=bool(
+                        config.get("enable_inst_interactivity", True)
+                    ),
                 )
                 model.to(device)
 
-                # Convert float32 to bfloat16 for autocast compatibility
-                for p in model.parameters():
-                    if p.dtype == torch.float32:
-                        p.data = p.data.to(torch.bfloat16)
-                for b in model.buffers():
-                    if b.dtype == torch.float32:
-                        b.data = b.data.to(torch.bfloat16)
+                if torch.device(device).type == "cuda":
+                    for p in model.parameters():
+                        if p.dtype == torch.float32:
+                            p.data = p.data.to(torch.bfloat16)
+                    for b in model.buffers():
+                        if b.dtype == torch.float32:
+                            b.data = b.data.to(torch.bfloat16)
 
                 processor = Sam3Processor(model, device=device)
 
@@ -155,6 +171,15 @@ class SAM3Service:
                 self._model = None
                 self._processor = None
                 raise
+
+    def _autocast_context(self):
+        """Use CUDA bfloat16 without passing an indexed device to autocast."""
+        import torch
+
+        device = torch.device(self._device or "cpu")
+        if device.type == "cuda":
+            return torch.autocast(device_type="cuda", dtype=torch.bfloat16)
+        return nullcontext()
 
     def _find_patch_for_points(
         self,
@@ -217,6 +242,13 @@ class SAM3Service:
         if not periods:
             raise DataValidationError(f"Invalid date format: '{date}'")
 
+        if sensor_type == "highres" and region.get("highres_dir"):
+            flat_path = self._resolve_flat_highres_path(
+                Path(region["highres_dir"]), patch_id, date
+            )
+            if flat_path:
+                return flat_path
+
         roots = [RAW_ROOT]
         s2_dir = region.get("s2_dir")
         if s2_dir:
@@ -229,6 +261,35 @@ class SAM3Service:
             )
         return path
 
+    @staticmethod
+    def _resolve_flat_highres_path(
+        highres_dir: Path, patch_id: str, date: str
+    ) -> Optional[str]:
+        """Resolve flat ``highres_optical_DATE_PATCH.tif`` archives."""
+        if not highres_dir.exists() or not highres_dir.is_dir():
+            return None
+        requested = date.replace("-", "")
+        if not re.fullmatch(r"\d{6}(?:\d{2})?", requested):
+            return None
+
+        matches = []
+        try:
+            candidates = highres_dir.glob(f"*_{patch_id}.tif")
+            for path in candidates:
+                date_match = re.search(r"(?<!\d)(\d{8})(?!\d)", path.stem)
+                if not date_match:
+                    continue
+                image_date = date_match.group(1)
+                if image_date == requested or (
+                    len(requested) == 6 and image_date.startswith(requested)
+                ):
+                    matches.append((image_date, path))
+        except OSError:
+            return None
+        if not matches:
+            return None
+        return str(max(matches, key=lambda item: (item[0], item[1].name))[1])
+
     def _load_geo_image(
         self,
         region_id: str,
@@ -240,6 +301,7 @@ class SAM3Service:
         import rasterio
         from rasterio.enums import Resampling
 
+        _configure_rasterio_proj_data()
         image_path = self._resolve_image_path(region_id, patch_id, date, sensor_type)
         sam3_config = get_config().get_sam3_config()
 
@@ -259,7 +321,8 @@ class SAM3Service:
             target_width = max(1, int(round(ds.width * scale)))
             target_height = max(1, int(round(ds.height * scale)))
             source_scene = Path(image_path).stem
-            source_image_date = source_scene[:8] if source_scene[:8].isdigit() else source_scene
+            date_match = re.search(r"(?<!\d)(\d{8})(?!\d)", source_scene)
+            source_image_date = date_match.group(1) if date_match else source_scene
             data = ds.read(
                 out_shape=(ds.count, target_height, target_width),
                 resampling=Resampling.lanczos,
@@ -323,9 +386,8 @@ class SAM3Service:
             cache_date = self._cache_date_key(month)
             meta["date"] = cache_date
 
-            device = self._device or "cpu"
             try:
-                with torch.autocast(device, dtype=torch.bfloat16):
+                with self._autocast_context():
                     state = self._processor.set_image(image)
             except torch.cuda.OutOfMemoryError:
                 # Clear cache and retry once
@@ -333,11 +395,13 @@ class SAM3Service:
                     for key in list(self._cache.keys()):
                         self._evict_cache_entry(key)
                 torch.cuda.empty_cache()
-                with torch.autocast(device, dtype=torch.bfloat16):
+                with self._autocast_context():
                     state = self._processor.set_image(image)
 
             embedding_id = f"{region_id}_{patch_id}_{sensor_type}_{cache_date}"
             with self._cache_lock:
+                if embedding_id in self._cache:
+                    self._evict_cache_entry(embedding_id)
                 self._cache[embedding_id] = {
                     "state": state,
                     "shape": (state["original_height"], state["original_width"]),
@@ -377,47 +441,93 @@ class SAM3Service:
         multimask_output: bool = True,
     ) -> Tuple[List[Tuple[np.ndarray, float, List[int]]], Dict[str, Any]]:
         """Run model prediction against a cached SAM3 state."""
-        import torch
-
-        with self._cache_lock:
-            if embedding_id not in self._cache:
-                raise ValueError(f"Embedding '{embedding_id}' not found. Call embed first.")
-
         async with self._get_inference_lock():
             self._ensure_model()
             with self._cache_lock:
-                state = self._cache[embedding_id]["state"]
-                img_h, img_w = self._cache[embedding_id]["shape"]
+                entry = self._cache.get(embedding_id)
+                if entry is None:
+                    raise ValueError(
+                        f"Embedding '{embedding_id}' not found. Call embed first."
+                    )
+                self._cache.move_to_end(embedding_id)
+                state = entry["state"]
+                img_h, img_w = entry["shape"]
+                meta = entry.get("meta", {})
 
             coords = np.array(point_coords) * np.array([[img_w, img_h]])
-            labels = np.array(point_labels)
+            results = self._predict_state(
+                state, coords, point_labels, multimask_output
+            )
+            return results, meta
 
-            device = self._device or "cpu"
-            try:
-                with torch.autocast(device, dtype=torch.bfloat16):
-                    masks, scores, _ = self._model.predict_inst(
-                        state,
-                        point_coords=coords,
-                        point_labels=labels,
-                        multimask_output=multimask_output,
+    async def _predict_wgs84_from_cache(
+        self,
+        embedding_id: str,
+        point_coords: List[List[float]],
+        point_labels: List[int],
+        multimask_output: bool,
+    ) -> Tuple[List[Tuple[np.ndarray, float, List[int]]], Dict[str, Any]]:
+        """Atomically read cache metadata, convert coordinates, and predict."""
+        async with self._get_inference_lock():
+            self._ensure_model()
+            with self._cache_lock:
+                entry = self._cache.get(embedding_id)
+                if entry is None:
+                    raise ValueError(
+                        f"Embedding '{embedding_id}' not found. Call embed first."
                     )
-            except torch.cuda.OutOfMemoryError:
-                torch.cuda.empty_cache()
-                raise
+                self._cache.move_to_end(embedding_id)
+                state = entry["state"]
+                img_h, img_w = entry["shape"]
+                meta = entry.get("meta", {})
+            normalized_coords = self._wgs84_to_sam_pixels(meta, point_coords)
+            pixel_coords = np.array(normalized_coords) * np.array([[img_w, img_h]])
+            results = self._predict_state(
+                state, pixel_coords, point_labels, multimask_output
+            )
+            return results, meta
 
-            results = []
-            for mask, score in zip(masks, scores.tolist()):
-                ys, xs = np.where(mask)
-                if len(xs) == 0:
-                    bbox = [0, 0, 0, 0]
-                else:
-                    x_min, x_max = xs.min(), xs.max()
-                    y_min, y_max = ys.min(), ys.max()
-                    bbox = [int(x_min), int(y_min), int(x_max - x_min + 1), int(y_max - y_min + 1)]
+    def _predict_state(
+        self,
+        state: Dict[str, Any],
+        pixel_coords: np.ndarray,
+        point_labels: List[int],
+        multimask_output: bool,
+    ) -> List[Tuple[np.ndarray, float, List[int]]]:
+        """Run SAM3 prediction while the caller holds the inference lock."""
+        import torch
 
-                results.append((mask, float(score), bbox))
+        try:
+            with self._autocast_context():
+                masks, scores, _ = self._model.predict_inst(
+                    state,
+                    point_coords=pixel_coords,
+                    point_labels=np.array(point_labels),
+                    multimask_output=multimask_output,
+                )
+        except torch.cuda.OutOfMemoryError:
+            torch.cuda.empty_cache()
+            raise
 
-            return results, self._cache[embedding_id].get("meta", {})
+        results = []
+        for mask, score in zip(masks, scores.tolist()):
+            if hasattr(mask, "detach"):
+                mask = mask.detach().cpu().numpy()
+            mask = np.asarray(mask).astype(bool)
+            ys, xs = np.where(mask)
+            if len(xs) == 0:
+                bbox = [0, 0, 0, 0]
+            else:
+                x_min, x_max = xs.min(), xs.max()
+                y_min, y_max = ys.min(), ys.max()
+                bbox = [
+                    int(x_min),
+                    int(y_min),
+                    int(x_max - x_min + 1),
+                    int(y_max - y_min + 1),
+                ]
+            results.append((mask, float(score), bbox))
+        return results
 
     def _wgs84_to_sam_pixels(
         self,
@@ -453,8 +563,6 @@ class SAM3Service:
         index: int,
     ) -> Tuple[Dict[str, Any], List[float]]:
         """Convert SAM pixel bbox to a WGS84 GeoJSON polygon feature."""
-        from rasterio.transform import xy
-
         x, y, w, h = bbox
         scale_x = float(meta["source_width"]) / float(meta["sam_width"])
         scale_y = float(meta["source_height"]) / float(meta["sam_height"])
@@ -473,7 +581,7 @@ class SAM3Service:
         native_xs = []
         native_ys = []
         for row, col in corners_rc:
-            px, py = xy(meta["transform"], row, col, offset="center")
+            px, py = meta["transform"] * (col, row)
             native_xs.append(px)
             native_ys.append(py)
 
@@ -609,13 +717,9 @@ class SAM3Service:
         if not cached:
             await self.embed(region_id, patch_id, cache_date, sensor_type=sensor_type)
 
-        with self._cache_lock:
-            meta = self._cache[embedding_id]["meta"]
-
-        sam_coords = self._wgs84_to_sam_pixels(meta, point_coords)
-        predictions, meta = await self._predict_from_cache(
+        predictions, meta = await self._predict_wgs84_from_cache(
             embedding_id,
-            sam_coords,
+            point_coords,
             point_labels,
             multimask_output,
         )

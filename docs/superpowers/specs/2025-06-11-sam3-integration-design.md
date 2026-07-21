@@ -66,14 +66,14 @@ embedding-api/
 
 | 文件 | 来源路径 | 大小 |
 |------|----------|------|
-| `sam3.pt` | `/workspace/models/facebook/sam3/sam3.pt` | ~3.45GB |
-| `config.json` | `/workspace/models/facebook/sam3/config.json` | ~26KB |
-| `processor_config.json` | `/workspace/models/facebook/sam3/processor_config.json` | ~1.7KB |
-| `tokenizer.json` | `/workspace/models/facebook/sam3/tokenizer.json` | ~3.6MB |
-| `vocab.json` | `/workspace/models/facebook/sam3/vocab.json` | ~862KB |
-| `merges.txt` | `/workspace/models/facebook/sam3/merges.txt` | ~525KB |
-| `bpe_simple_vocab_16e6.txt.gz` | `/workspace/xuannv_show/backend/sam3/sam3/assets/bpe_simple_vocab_16e6.txt.gz` | ~1.36MB |
-| `sam3_pkg/` | `/workspace/xuannv_show/backend/sam3/` 完整复制 | ~100MB |
+| `sam3.pt` | `/workspace/data/models/facebook/sam3/sam3.pt` | ~3.45GB |
+| `config.json` | `/workspace/data/models/facebook/sam3/config.json` | ~26KB |
+| `processor_config.json` | `/workspace/data/models/facebook/sam3/processor_config.json` | ~1.7KB |
+| `tokenizer.json` | `/workspace/data/models/facebook/sam3/tokenizer.json` | ~3.6MB |
+| `vocab.json` | `/workspace/data/models/facebook/sam3/vocab.json` | ~862KB |
+| `merges.txt` | `/workspace/data/models/facebook/sam3/merges.txt` | ~525KB |
+| `bpe_simple_vocab_16e6.txt.gz` | `/workspace/projects/xuannv-show/backend/sam3/sam3/assets/bpe_simple_vocab_16e6.txt.gz` | ~1.36MB |
+| `sam3_pkg/` | `/workspace/projects/xuannv-show/backend/sam3/` 完整复制 | ~100MB |
 
 > **注意**: `sam3_pkg/` 是源码副本，后续若 xuannv_show 的 sam3 有更新，可手动同步。
 
@@ -233,7 +233,7 @@ SAM3 需要 256×256 的 RGB 自然色影像作为输入。在 embedding-api 中
 ```yaml
 regions:
   harbin:
-    s2_dir: "/workspace/raw/harbin_scenes/s2"
+    s2_dir: "/workspace/data/raw/harbin_scenes/s2"
 ```
 
 `SAM3Service` 内部调用 `load_s2_rgb_natural(patch_id, month, out_size=256)`：
