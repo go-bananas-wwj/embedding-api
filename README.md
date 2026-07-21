@@ -94,6 +94,7 @@ http://60.31.21.42:22065/docs
 | [`docs/api-quickstart.md`](docs/api-quickstart.md) | 前端常用接口示例 |
 | [`docs/operations.md`](docs/operations.md) | 部署、端口、日志、watchdog、请求审计 |
 | [`docs/haidian-assets.md`](docs/haidian-assets.md) | 海淀最新 ModelScope 资产和替换流程 |
+| [`docs/pu-query-reproduction.md`](docs/pu-query-reproduction.md) | PU + Query 原理、模型格式与跨机器复现 |
 | [`docs/custom-training-workflow.md`](docs/custom-training-workflow.md) | 自定义训练和批量推理流程 |
 | [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) | 本轮生产修复与验证记录 |
 | [`AGENTS.md`](AGENTS.md) | 给 AI coding agents 的项目说明 |
