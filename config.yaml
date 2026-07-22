@@ -82,14 +82,14 @@ models:
         path: "models/haidian/v1/embedding/haidian_embedding_v1_p10c_epoch800.pt"
         type: "pytorch"
       task_heads:
-        name: "海淀区 V1 下游任务头"
-        description: "来自最新海淀 V1 embedding 的建筑、道路和水体 MLP 下游任务头"
+        name: "海淀区 V1 Conv 3x3 下游任务头"
+        description: "基于最新海淀 P10C 64 维 embedding 训练的建筑、道路和水体 Binary Conv 3x3 下游任务头"
         path: "models/haidian/v1/task_heads"
         type: "pytorch"
         tasks:
-          building_extraction: {head: "mlp", file: "building_mlp_fold0_best.pt", classes: 2}
-          road_extraction: {head: "mlp", file: "road_mlp_fold0_best.pt", classes: 2}
-          water_extraction: {head: "mlp", file: "water_mlp_fold0_best.pt", classes: 2}
+          building_extraction: {head: "binary_conv3x3", feature_source: "P10C 64D embedding", file: "building_conv3x3_best.pt", classes: 2}
+          road_extraction: {head: "binary_conv3x3", feature_source: "P10C 64D embedding", file: "road_conv3x3_best.pt", classes: 2}
+          water_extraction: {head: "binary_conv3x3", feature_source: "P10C 64D embedding", file: "water_conv3x3_best.pt", classes: 2}
 
 regions:
   harbin:

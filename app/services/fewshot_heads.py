@@ -22,3 +22,22 @@ class BinaryConv3x3ProbeHead(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.net(x)
+
+
+class PixelMLPHead(nn.Module):
+    """Two-layer per-pixel MLP for frozen external embeddings."""
+
+    def __init__(self, embed_dim: int, hidden_dim: int = 128, dropout: float = 0.2):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(embed_dim, hidden_dim),
+            nn.ReLU(inplace=True),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, 1),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # [B, C, H, W] -> [B, 1, H, W]
+        y = x.permute(0, 2, 3, 1)
+        y = self.net(y)
+        return y.permute(0, 3, 1, 2)

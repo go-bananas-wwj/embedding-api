@@ -359,7 +359,7 @@ curl -s "http://60.31.21.42:22065/regions"
 | `patch_count` | int | 该区域包含的 Patch 总数 |
 | `tasks` | string[] | 该区域支持的下游任务列表 |
 
-**注意**: 海淀区 `v1` 使用 xuannv P2A 模型，embedding 月份为 `202512` 至 `202605`。当前可用任务包括 `building_extraction`、`road_extraction`、`construction`、`construction_joint` 和 `water_extraction`；`land_use_classification` 与 `land_cover_classification` 仍保留任务入口，但没有预生成结果。
+**注意**: 海淀区 `v1` 使用玄女 P10C embedding，月份为 `202512` 至 `202605`。当前已部署建筑、道路、施工地、水体、土地利用分类和土地覆盖分类的月度结果。实际可用组合以 `GET /regions/haidian/tasks` 为准。
 
 ---
 
@@ -820,7 +820,7 @@ curl -s "http://60.31.21.42:22065/regions/harbin/tasks/land_use_classification/s
 
 **业务含义**: `positive_patches` / `total_patches` 就是异常检出率。例如 31/424 ≈ 7.3% 的 Patch 发现了建筑工地。
 
-> **注意**: 对于哈尔滨新区，`land_cover_classification` 和 `water_extraction` 当前 `versions` 为空，调用摘要接口会返回 `404`。对于海淀区，`land_use_classification` 和 `land_cover_classification` 的 `versions` 为空；`water_extraction` V1 已可查询单 Patch 结果图，但由于缺少 `labels/meta.json`，调用其摘要接口仍会返回 `404`。
+> **注意**: 任务列表、预生成结果和实时系统模型是不同能力。前端应先读取 `GET /regions/{region_id}/tasks` 和 `GET /system-models?region_id=...`，不要根据旧的静态表推断可用性。海淀土地利用/覆盖分类 V1 已有 `2025-12` 至 `2026-05` 月度结果。
 
 ---
 
@@ -1578,6 +1578,11 @@ curl -s -X POST "http://60.31.21.42:22065/models/building_extraction/infer" \
 ### 20. 批量推理
 
 对最多 100 个 Patch 批量推理。支持自定义模型和系统预训练模型。
+
+自定义模型的 `model_id` 已绑定训练时使用的基座模型版本、特征来源、预处理、
+输入维度和下游头。前端不需要再次提交 `training_method` 或 `head_type`；后端会
+根据 checkpoint 自动分派玄女、AEF、DINOv3-SAT493M 或传统 Sentinel-2 推理
+流程，并拒绝区域或模型绑定不一致的调用。
 
 ```
 POST /models/{model_id}/infer_batch
@@ -2384,7 +2389,7 @@ function getResultImageUrl(regionId: string, patchId: string, taskType: string, 
 | 数据源 | Sentinel-2, Sentinel-1, Landsat, 高分光学, 高分 SAR, WorldCover 等 |
 | 嵌入格式 | NPY 多通道数组 / PNG PCA 预览 / JSON 统计 |
 | 下游任务 | `building_extraction`, `road_extraction`, `construction`, `construction_joint`, `land_use_classification`, `land_cover_classification`, `water_extraction` |
-| 有预生成结果的任务 | `building_extraction` V1、`road_extraction` V1、`construction` V1、`construction_joint` V1、`water_extraction` V1 |
+| 有预生成结果的任务 | `building_extraction` V1、`road_extraction` V1、`construction` V1、`construction_joint` V1、`water_extraction` V1、`land_use_classification` V1、`land_cover_classification` V1 |
 | 可用接口 | `/regions/haidian/patches/*`、`/regions/haidian/patches/*/embedding`、`/regions/haidian/patches/*/tasks/*/result` |
 
 ---

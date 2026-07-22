@@ -96,6 +96,7 @@ http://60.31.21.42:22065/docs
 | [`docs/haidian-assets.md`](docs/haidian-assets.md) | 海淀最新 ModelScope 资产和替换流程 |
 | [`docs/pu-query-reproduction.md`](docs/pu-query-reproduction.md) | PU + Query 原理、模型格式与跨机器复现 |
 | [`docs/custom-training-workflow.md`](docs/custom-training-workflow.md) | 自定义训练和批量推理流程 |
+| [`docs/model-training-integration.md`](docs/model-training-integration.md) | 变化检测、土地分类和四种训练方式的前端对接契约 |
 | [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) | 本轮生产修复与验证记录 |
 | [`AGENTS.md`](AGENTS.md) | 给 AI coding agents 的项目说明 |
 

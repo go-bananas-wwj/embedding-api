@@ -6,6 +6,7 @@ downstream task head.
 """
 
 import logging
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -17,15 +18,22 @@ import torch.nn.functional as F
 
 from app.schemas.models import GeoJSONFeatureCollection, ModelClass
 from app.services.data_service import DataService
-from app.services.fewshot_heads import BinaryConv3x3ProbeHead
+from app.services.fewshot_heads import BinaryConv3x3ProbeHead, PixelMLPHead
+from app.services.external_embeddings import EXTERNAL_MLP_CHECKPOINT_FORMAT, load_external_embedding
 from app.services.geojson_adapter import (
     parse_annotations_for_training,
     parse_polygon_annotations_for_training,
 )
 from app.services.model_registry import get_model_registry
+from app.services.model_binding import build_model_binding
 from app.services.pu_query import CHECKPOINT_FORMAT as PU_QUERY_CHECKPOINT_FORMAT
 from app.services.pu_query import train_pu_query
 from app.services.user_paths import get_user_dir
+from app.services.s2_ml import (
+    load_s2_features,
+    save_random_forest_checkpoint,
+    train_random_forest,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +178,51 @@ def _train_binary_conv_head(
     return model, threshold, f1, valid_count, effective_epochs
 
 
+def _train_pixel_mlp(
+    samples: List[Tuple[np.ndarray, np.ndarray]], epochs: int
+) -> Tuple[PixelMLPHead, float, float, int, np.ndarray, np.ndarray]:
+    if not samples:
+        raise ValueError("No valid external-embedding training samples")
+    # The MLP is lightweight; CPU isolates training from the shared DINO/SAM GPU.
+    device = torch.device("cpu")
+    model = PixelMLPHead(samples[0][0].shape[0]).to(device)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-4)
+    effective_epochs = max(1, min(int(epochs), 100))
+    channel_sum = sum(feature.sum(axis=(1, 2), dtype=np.float64) for feature, _ in samples)
+    channel_sq = sum(np.square(feature, dtype=np.float64).sum(axis=(1, 2)) for feature, _ in samples)
+    pixel_count = sum(feature.shape[1] * feature.shape[2] for feature, _ in samples)
+    mean = (channel_sum / pixel_count).astype(np.float32)
+    variance = np.maximum(channel_sq / pixel_count - np.square(mean), 1e-6)
+    std = np.sqrt(variance).astype(np.float32)
+    tensors = []
+    for feature, target in samples:
+        normalized = (feature - mean[:, None, None]) / std[:, None, None]
+        x = torch.from_numpy(normalized).float().unsqueeze(0).to(device)
+        y = torch.from_numpy(target).float().unsqueeze(0).unsqueeze(0).to(device)
+        tensors.append((x, y))
+    model.train()
+    for _ in range(effective_epochs):
+        for x, y in tensors:
+            valid = y >= 0
+            if not torch.any(valid):
+                continue
+            optimizer.zero_grad(set_to_none=True)
+            logits = model(x)
+            loss = _bce_dice_tversky_loss(logits, y.clamp(min=0), valid)
+            loss.backward()
+            optimizer.step()
+    threshold, f1 = _tune_threshold(model, tensors)
+    return model.cpu().eval(), threshold, f1, effective_epochs, mean, std
+
+
+def _external_temporal_feature(before: np.ndarray, after: np.ndarray) -> np.ndarray:
+    if before.shape != after.shape:
+        raise ValueError(
+            f"External embedding grids do not match: before={before.shape}, after={after.shape}"
+        )
+    return np.concatenate([before, after, np.abs(after - before), before * after], axis=0)
+
+
 def _select_training_device() -> torch.device:
     if not torch.cuda.is_available():
         return torch.device("cpu")
@@ -240,7 +293,14 @@ def _save_torch_checkpoint(
         "hidden_dim": 128,
         **metadata,
     }
-    torch.save(checkpoint, model_path)
+    checkpoint.update(build_model_binding(checkpoint))
+    tmp = model_path.with_suffix(f".tmp.{uuid.uuid4().hex}")
+    try:
+        torch.save(checkpoint, tmp)
+        tmp.replace(model_path)
+    finally:
+        if tmp.exists():
+            tmp.unlink()
     return model_path
 
 
@@ -256,16 +316,51 @@ def _save_pu_query_checkpoint(
         raise ValueError(f"Model {model_id} not found in registry")
     model_path = Path(record["model_path"])
     model_path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(
-        {
+    tmp = model_path.with_suffix(f".tmp.{uuid.uuid4().hex}")
+    try:
+        checkpoint = {
             "__format__": PU_QUERY_CHECKPOINT_FORMAT,
             "head_type": "pu_query_retrieval",
             **retrieval_data,
             **metadata,
-        },
-        model_path,
-    )
+        }
+        checkpoint.update(build_model_binding(checkpoint))
+        torch.save(checkpoint, tmp)
+        tmp.replace(model_path)
+    finally:
+        if tmp.exists():
+            tmp.unlink()
     return model_path
+
+
+def _save_external_mlp_checkpoint(
+    user_id: str,
+    model_id: str,
+    model: PixelMLPHead,
+    metadata: Dict[str, Any],
+) -> Path:
+    record = get_model_registry(user_id).get_model(model_id)
+    if record is None:
+        raise ValueError(f"Model {model_id} not found in registry")
+    path = Path(record["model_path"])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    checkpoint = {
+        "__format__": EXTERNAL_MLP_CHECKPOINT_FORMAT,
+        "head_type": "pixel_mlp",
+        "state_dict": model.state_dict(),
+        "embed_dim": metadata["embed_dim"],
+        "hidden_dim": 128,
+        **metadata,
+    }
+    checkpoint.update(build_model_binding(checkpoint))
+    tmp = path.with_suffix(f".tmp.{uuid.uuid4().hex}")
+    try:
+        torch.save(checkpoint, tmp)
+        tmp.replace(path)
+    finally:
+        if tmp.exists():
+            tmp.unlink()
+    return path
 
 
 def _classification_polygon_samples(
@@ -388,6 +483,8 @@ class ClassificationTrainingEngine:
                 "model_path": str(model_path),
                 "accuracy": retrieval_data["training_f05"],
                 "n_samples": polygon_count,
+                "resolved_training_method": "pu_query_retrieval",
+                "feature_source": "xuannv_embedding",
             }
 
         records, _ = parse_annotations_for_training(
@@ -431,6 +528,177 @@ class ClassificationTrainingEngine:
             "model_path": str(model_path),
             "accuracy": f1,
             "n_samples": polygon_count,
+            "resolved_training_method": "binary_conv3x3",
+            "feature_source": "xuannv_embedding",
+        }
+
+
+class TraditionalS2TrainingEngine:
+    """Train a Random Forest from Sentinel-2 optical pixels only."""
+
+    def __init__(self, user_id: str = "default") -> None:
+        self._user_id = user_id
+
+    def train(
+        self,
+        model_id: str,
+        region_id: str,
+        task_type: str,
+        annotations: GeoJSONFeatureCollection,
+        classes: List[ModelClass],
+        class_ids: List[str],
+    ) -> Dict[str, Any]:
+        if len(set(class_ids)) != 1:
+            raise ValueError("Traditional Sentinel-2 training supports one target class")
+        polygon_records, class_map = parse_polygon_annotations_for_training(
+            annotations=annotations,
+            classes=classes,
+            class_ids=class_ids,
+            model_type="classification",
+        )
+        cache: Dict[Tuple[str, str], Tuple[np.ndarray, np.ndarray, str]] = {}
+        samples: List[Tuple[np.ndarray, np.ndarray, np.ndarray]] = []
+        source_files = set()
+        for record in polygon_records:
+            key = (record["patch_id"], record["month"])
+            if key not in cache:
+                cache[key] = load_s2_features(region_id, key[0], key[1])
+            feature, valid, source_path = cache[key]
+            mask = _resize_mask(record["mask"], feature.shape[1], feature.shape[2]) > 0
+            if np.any(mask & valid):
+                samples.append((feature, mask, valid))
+                source_files.add(source_path)
+        if not samples:
+            raise ValueError("No valid training polygons overlap available Sentinel-2 pixels")
+        model, threshold, metrics = train_random_forest(samples)
+        class_records = [c.model_dump() for c in classes if c.id in class_ids]
+        metadata = {
+            "training_strategy": "random_forest",
+            "training_method": "traditional_ml",
+            "feature_type": "sentinel2_l2a",
+            "feature_source": "sentinel2_l2a",
+            "feature_names": ["B02", "B03", "B04", "B08", "B11", "B12", "NDVI", "NDWI", "MNDWI", "NDBI"],
+            "task_type": task_type,
+            "region_id": region_id,
+            "threshold": threshold,
+            "classes": class_records,
+            "class_ids": class_ids,
+            "class_map": class_map,
+            "positive_class_id": class_ids[0],
+            "polygon_count": len(samples),
+            "metrics": metrics,
+            "source_scene_count": len(source_files),
+            "trained_at": datetime.now().isoformat(),
+        }
+        model_path = save_random_forest_checkpoint(
+            self._user_id, model_id, model, metadata
+        )
+        return {
+            "model_id": model_id,
+            "model_path": str(model_path),
+            "accuracy": metrics["oob_score"],
+            "metric_name": "oob_score",
+            "n_samples": len(samples),
+            "resolved_training_method": "random_forest",
+            "feature_source": "sentinel2_l2a",
+        }
+
+
+class ExternalEmbeddingMLPTrainingEngine:
+    """Train a plain pixel MLP on frozen AEF or DINOv3 embeddings."""
+
+    def __init__(self, method: str, user_id: str = "default") -> None:
+        if method not in {"aef", "dinov3_sat493m"}:
+            raise ValueError(f"Unsupported external method: {method}")
+        self._method = method
+        self._user_id = user_id
+
+    def train(
+        self,
+        model_id: str,
+        region_id: str,
+        task_type: str,
+        model_type: str,
+        annotations: GeoJSONFeatureCollection,
+        classes: List[ModelClass],
+        class_ids: List[str],
+        epochs: int = 100,
+    ) -> Dict[str, Any]:
+        if len(set(class_ids)) != 1:
+            raise ValueError("AEF/DINOv3 MLP training requires exactly one positive class_id")
+        annotation_type = "change_detection" if model_type == "change_detection" else "classification"
+        records, class_map = parse_annotations_for_training(
+            annotations=annotations,
+            classes=classes,
+            class_ids=class_ids,
+            model_type=annotation_type,
+        )
+        samples: List[Tuple[np.ndarray, np.ndarray]] = []
+        if len(records) > 16:
+            raise ValueError("External embedding MLP training supports at most 16 patch/time samples per job")
+        cache: Dict[Tuple[str, str], np.ndarray] = {}
+        for record in records:
+            patch_id = record["patch_id"]
+            if model_type == "change_detection":
+                before_key = (patch_id, record["before_month"])
+                after_key = (patch_id, record["after_month"])
+                if before_key not in cache:
+                    cache[before_key] = load_external_embedding(
+                        self._method, region_id, *before_key
+                    )
+                if after_key not in cache:
+                    cache[after_key] = load_external_embedding(
+                        self._method, region_id, *after_key
+                    )
+                feature = _external_temporal_feature(cache[before_key], cache[after_key])
+            else:
+                key = (patch_id, record["month"])
+                if key not in cache:
+                    cache[key] = load_external_embedding(
+                        self._method, region_id, *key
+                    )
+                feature = cache[key]
+            mask = _resize_mask(record["mask"], feature.shape[1], feature.shape[2])
+            if np.any(mask):
+                samples.append((feature, _build_binary_target(feature, mask)))
+        if not samples:
+            raise ValueError(f"No valid {self._method} embedding samples")
+        expected_channels = samples[0][0].shape[0]
+        if any(feature.shape[0] != expected_channels for feature, _ in samples):
+            raise ValueError("External embedding channel count differs between samples")
+        model, threshold, f1, effective_epochs, norm_mean, norm_std = _train_pixel_mlp(samples, epochs)
+        metadata = {
+            "training_method": self._method,
+            "training_strategy": "pixel_mlp",
+            "feature_type": (
+                f"{self._method}_diff" if model_type == "change_detection" else self._method
+            ),
+            "feature_source": self._method,
+            "task_type": task_type,
+            "model_type": model_type,
+            "region_id": region_id,
+            "embed_dim": samples[0][0].shape[0],
+            "threshold": threshold,
+            "normalization_mean": norm_mean,
+            "normalization_std": norm_std,
+            "epochs": effective_epochs,
+            "classes": [c.model_dump() for c in classes if c.id in class_ids],
+            "class_ids": class_ids,
+            "class_map": class_map,
+            "positive_class_id": class_ids[0],
+            "trained_at": datetime.now().isoformat(),
+        }
+        path = _save_external_mlp_checkpoint(
+            self._user_id, model_id, model, metadata
+        )
+        return {
+            "model_id": model_id,
+            "model_path": str(path),
+            "accuracy": f1,
+            "metric_name": "training_f1",
+            "n_samples": len(samples),
+            "resolved_training_method": "pixel_mlp",
+            "feature_source": self._method,
         }
 
 
@@ -514,6 +782,8 @@ class ChangeDetectionTrainingEngine:
                 "model_path": str(model_path),
                 "accuracy": retrieval_data["training_f05"],
                 "n_samples": polygon_count,
+                "resolved_training_method": "pu_query_retrieval",
+                "feature_source": "xuannv_embedding",
             }
 
         records, _ = parse_annotations_for_training(
@@ -570,4 +840,6 @@ class ChangeDetectionTrainingEngine:
             "model_path": str(model_path),
             "accuracy": f1,
             "n_samples": polygon_count,
+            "resolved_training_method": "binary_conv3x3",
+            "feature_source": "xuannv_embedding",
         }

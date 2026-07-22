@@ -11,6 +11,7 @@ from app.services.model_registry import get_model_registry
 from app.services.training_engine import (
     ChangeDetectionTrainingEngine,
     ClassificationTrainingEngine,
+    ExternalEmbeddingMLPTrainingEngine,
 )
 from app.services.pu_query import CHECKPOINT_FORMAT as PU_QUERY_CHECKPOINT_FORMAT
 
@@ -170,6 +171,54 @@ def test_classification_inference_color_matches_class_map(
     # At least some pixels should be colored with the class color (#FF0000).
     red_pixels = np.all(img == [255, 0, 0], axis=-1)
     assert red_pixels.sum() > 0, "Expected some red pixels from class color encoding"
+
+
+def test_external_embedding_mlp_training_and_inference(
+    user_id, classification_annotation, classes, monkeypatch
+):
+    feature = np.zeros((12, 128, 128), dtype=np.float32)
+    feature[:, 20:70, 20:70] = 2.0
+    monkeypatch.setattr(
+        "app.services.training_engine.load_external_embedding",
+        lambda *args: feature.copy(),
+    )
+    monkeypatch.setattr(
+        "app.services.inference_engine.load_external_embedding",
+        lambda *args: feature.copy(),
+    )
+    registry = get_model_registry(user_id)
+    model_id = registry.create_model(
+        name="test-aef-mlp",
+        model_type="single_time_detection",
+        classes=[c.model_dump() for c in classes],
+        task_type="building_extraction",
+        region_id="harbin",
+        requested_training_method="aef",
+        feature_source="aef",
+    )
+    result = ExternalEmbeddingMLPTrainingEngine("aef", user_id).train(
+        model_id=model_id,
+        region_id="harbin",
+        task_type="building_extraction",
+        model_type="single_time_detection",
+        annotations=classification_annotation,
+        classes=classes,
+        class_ids=["cls_001"],
+        epochs=1,
+    )
+    checkpoint = torch.load(result["model_path"], map_location="cpu", weights_only=False)
+    assert checkpoint["__format__"] == "external_embedding_mlp_v1"
+    assert checkpoint["head_type"] == "pixel_mlp"
+    assert checkpoint["training_method"] == "aef"
+    assert checkpoint["foundation_model_id"] == "aef"
+    assert checkpoint["foundation_model_version"] == "aef_embedding_v1"
+    assert checkpoint["feature_dimension"] == 12
+    assert checkpoint["preprocessing_version"] == "aef_precomputed_v1"
+    assert checkpoint["compatible_regions"] == ["harbin"]
+    path = InferenceEngine(user_id).infer(
+        model_id, "harbin", "patch_000000", month="2025-04"
+    )
+    assert Image.open(path).size == (128, 128)
 
 
 @pytest.fixture

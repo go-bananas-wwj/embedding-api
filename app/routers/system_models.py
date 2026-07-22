@@ -21,9 +21,10 @@ from app.services.user_paths import get_user_dir
 router = APIRouter(prefix="/system-models", tags=["system-models"])
 
 _SYSTEM_TASK_OPENAPI_EXAMPLES = {
-    "building_extraction": {"summary": "Building extraction", "value": "building_extraction"},
-    "land_cover_classification": {"summary": "Land cover classification", "value": "land_cover_classification"},
-    "water_extraction": {"summary": "Water extraction", "value": "water_extraction"},
+    "building_extraction": {"summary": "建筑物提取", "value": "building_extraction"},
+    "road_extraction": {"summary": "道路提取", "value": "road_extraction"},
+    "water_extraction": {"summary": "水体提取", "value": "water_extraction"},
+    "land_cover_classification": {"summary": "土地覆盖分类", "value": "land_cover_classification"},
 }
 
 
@@ -41,8 +42,8 @@ def _validate_result_filename(filename: str) -> None:
 async def get_system_models(
     region_id: str = Query(
         ...,
-        description="Region identifier. Use 'harbin' or 'haidian'.",
-        examples=["harbin"],
+        description="区域 ID。可填 `harbin`（哈尔滨）或 `haidian`（海淀）；海淀当前提供建筑物、道路和水体提取。",
+        examples=["haidian"],
     ),
     user: dict = Depends(get_current_user),
 ) -> List[dict]:
@@ -58,19 +59,19 @@ async def get_system_models(
 async def get_classes(
     task_id: str = PathParam(
         ...,
-        description="System model task identifier.",
+        description="系统模型任务 ID。海淀可填 `building_extraction`、`road_extraction` 或 `water_extraction`。",
         examples=["building_extraction"],
         openapi_examples=_SYSTEM_TASK_OPENAPI_EXAMPLES,
     ),
     region_id: str = Query(
         ...,
-        description="Region identifier. Use 'harbin' or 'haidian'.",
-        examples=["harbin"],
+        description="区域 ID。可填 `harbin` 或 `haidian`。",
+        examples=["haidian"],
     ),
     version: Optional[str] = Query(
         None,
-        description="Model checkpoint version. Omit to use the best available version for the region.",
-        examples=["v2"],
+        description="模型版本。可省略；后端自动选择该区域可用的最新版本。海淀当前使用 `v1`。",
+        examples=["v1"],
         openapi_examples={
             "v1": {"summary": "V4-based checkpoint", "value": "v1"},
             "v2": {"summary": "V5-based checkpoint", "value": "v2"},
@@ -103,29 +104,29 @@ async def get_classes(
 async def infer(
     task_id: str = PathParam(
         ...,
-        description="System model task identifier.",
+        description="系统模型任务 ID。海淀可填 `building_extraction`、`road_extraction` 或 `water_extraction`。",
         examples=["building_extraction"],
         openapi_examples=_SYSTEM_TASK_OPENAPI_EXAMPLES,
     ),
     region_id: str = Query(
         ...,
-        description="Region identifier. Use 'harbin' or 'haidian'.",
-        examples=["harbin"],
+        description="区域 ID。可填 `harbin` 或 `haidian`；填写值必须与 Patch 所属区域一致。",
+        examples=["haidian"],
     ),
     patch_id: str = Query(
         ...,
-        description="Patch identifier in the form patch_000000.",
+        description="待推理的 Patch ID，格式为 `patch_` 加 6 位数字，例如 `patch_000000`。",
         examples=["patch_000000"],
     ),
     month: str = Query(
         ...,
-        description="Month for the source embedding, e.g. 2025-04.",
-        examples=["2025-04"],
+        description="P10C embedding 月份，格式为 `YYYYMM`。海淀可用范围为 `202512` 至 `202605`。",
+        examples=["202604"],
     ),
     version: Optional[str] = Query(
         None,
-        description="Model checkpoint version. Omit to use the best available version for the region.",
-        examples=["v2"],
+        description="模型版本。可省略；后端自动选择该区域可用的最新版本。海淀当前使用 `v1`。",
+        examples=["v1"],
         openapi_examples={
             "v1": {"summary": "V4-based checkpoint", "value": "v1"},
             "v2": {"summary": "V5-based checkpoint", "value": "v2"},
@@ -135,8 +136,9 @@ async def infer(
 ) -> dict:
     """调用系统预训练模型对单个 Patch 进行推理。
 
-    用于快速获取建筑物提取、水体提取、土地覆盖分类等官方结果。
-    返回结果图片的访问 URL。
+    海淀的建筑物、道路和水体任务使用最新 P10C 64 维 embedding，交由
+    Binary Conv 3×3 二分类头推理；不包含变化检测。返回值中的 `result_url`
+    是预测 PNG 的下载地址：黑色为背景，彩色像素为目标类别。
     """
     results_dir = get_user_dir(user["user_id"]) / "system_model_results"
     try:

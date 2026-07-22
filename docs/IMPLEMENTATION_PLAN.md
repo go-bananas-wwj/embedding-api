@@ -27,8 +27,8 @@ service operation.
   `data/haidian/embeddings/v1/{month}/{patch_id}.npy|png|json`.
 - Install the latest embedding checkpoint at:
   `models/haidian/v1/embedding/haidian_embedding_v1_p10c_epoch800.pt`.
-- Install latest task heads at:
-  `models/haidian/v1/task_heads/{building,road,water}_mlp_fold0_best.pt`.
+- Install the retrained Binary Conv 3x3 task heads at:
+  `models/haidian/v1/task_heads/{building,road,water}_conv3x3_best.pt`.
 - Remove old Haidian patch-subdirectory embedding layout so the API cannot
   accidentally serve stale assets.
 - Update `config.yaml` and Haidian pipeline scripts to make the new ModelScope
@@ -71,7 +71,7 @@ service operation.
 - Batch inference validates `patch_ids`, limits each request to 100 patches,
   and returns batch-level metadata:
   `total`, `success_count`, `error_count`, and `results`.
-- System model inference supports the latest Haidian MLP task heads.
+- System model inference supports the latest Haidian P10C Binary Conv 3x3 task heads.
 
 ### Security and Robustness
 

@@ -11,11 +11,14 @@ from PIL import Image
 import torch
 
 from app.services.data_service import DataService
-from app.services.fewshot_heads import BinaryConv3x3ProbeHead
+from app.services.fewshot_heads import BinaryConv3x3ProbeHead, PixelMLPHead
+from app.services.external_embeddings import EXTERNAL_MLP_CHECKPOINT_FORMAT, load_external_embedding
+from app.services.model_binding import validate_model_binding
 from app.services.model_registry import get_model_registry
 from app.services.pu_query import CHECKPOINT_FORMAT as PU_QUERY_CHECKPOINT_FORMAT
 from app.services.pu_query import score_pu_query
 from app.services.user_paths import get_user_dir
+from app.services.s2_ml import CHECKPOINT_FORMAT as S2_RF_CHECKPOINT_FORMAT, load_s2_features
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +86,22 @@ class InferenceEngine:
     ) -> str:
         """Run single-patch inference. Returns path to result PNG."""
         model_data = self._load_model(model_id)
+        record = get_model_registry(self._user_id).get_model(model_id) or {}
+        validate_model_binding(record, model_data, requested_region=region_id)
+        if model_data.get("__format__") == S2_RF_CHECKPOINT_FORMAT:
+            return self._infer_s2_random_forest(
+                model_data, model_id, region_id, patch_id, month=month
+            )
+        if model_data.get("__format__") == EXTERNAL_MLP_CHECKPOINT_FORMAT:
+            return self._infer_external_mlp(
+                model_data,
+                model_id,
+                region_id,
+                patch_id,
+                month=month,
+                before_month=before_month,
+                after_month=after_month,
+            )
         if model_data.get("__format__") == PU_QUERY_CHECKPOINT_FORMAT:
             return self._infer_pu_query(
                 model_data,
@@ -170,6 +189,96 @@ class InferenceEngine:
         )
         result_path = self.results_dir / result_filename
         img.save(result_path)
+        return str(result_path)
+
+    def _infer_s2_random_forest(
+        self,
+        model_data: Dict[str, Any],
+        model_id: str,
+        region_id: str,
+        patch_id: str,
+        month: Optional[str],
+    ) -> str:
+        if not month:
+            raise ValueError("Traditional Sentinel-2 inference requires month")
+        trained_region = model_data.get("region_id")
+        if trained_region and trained_region != region_id:
+            raise ValueError(
+                f"Model was trained for region '{trained_region}', not '{region_id}'"
+            )
+        feature, valid, _source_path = load_s2_features(region_id, patch_id, month)
+        flat = feature.reshape(feature.shape[0], -1).T
+        probability = model_data["model"].predict_proba(flat)[:, 1]
+        prediction = (
+            probability.reshape(valid.shape) >= float(model_data.get("threshold", 0.5))
+        ).astype(np.uint8)
+        prediction[~valid] = 0
+        rendered = self._color_encode_binary_fewshot(prediction, model_data)
+        result_path = self.results_dir / (
+            f"infer_{model_id}_{region_id}_{patch_id}_{month}.png"
+        )
+        Image.fromarray(rendered).resize(
+            (128, 128), Image.Resampling.NEAREST
+        ).save(result_path)
+        return str(result_path)
+
+    def _infer_external_mlp(
+        self,
+        model_data: Dict[str, Any],
+        model_id: str,
+        region_id: str,
+        patch_id: str,
+        month: Optional[str],
+        before_month: Optional[str],
+        after_month: Optional[str],
+    ) -> str:
+        trained_region = model_data.get("region_id")
+        if trained_region and trained_region != region_id:
+            raise ValueError(
+                f"Model was trained for region '{trained_region}', not '{region_id}'"
+            )
+        method = model_data["training_method"]
+        is_change = model_data.get("model_type") == "change_detection"
+        if is_change:
+            if not before_month or not after_month:
+                raise ValueError("Change-detection inference requires before_month and after_month")
+            before = load_external_embedding(method, region_id, patch_id, before_month)
+            after = load_external_embedding(method, region_id, patch_id, after_month)
+            if before.shape != after.shape:
+                raise ValueError(
+                    f"External embedding grids do not match: before={before.shape}, after={after.shape}"
+                )
+            feature = np.concatenate(
+                [before, after, np.abs(after - before), before * after], axis=0
+            )
+            suffix = f"{before_month}_vs_{after_month}"
+        else:
+            if not month:
+                raise ValueError("Single-time inference requires month")
+            feature = load_external_embedding(method, region_id, patch_id, month)
+            suffix = month
+        head = PixelMLPHead(
+            int(model_data["embed_dim"]), int(model_data.get("hidden_dim", 128)), dropout=0.0
+        )
+        head.load_state_dict(model_data["state_dict"])
+        head.eval()
+        mean = np.asarray(model_data["normalization_mean"], dtype=np.float32)
+        std = np.asarray(model_data["normalization_std"], dtype=np.float32)
+        if feature.shape[0] != len(mean) or len(mean) != len(std):
+            raise ValueError("External embedding does not match the trained MLP normalization")
+        normalized = (feature - mean[:, None, None]) / std[:, None, None]
+        with torch.inference_mode():
+            probability = torch.sigmoid(
+                head(torch.from_numpy(normalized).float().unsqueeze(0))
+            ).squeeze().numpy()
+        prediction = (probability >= float(model_data.get("threshold", 0.5))).astype(np.uint8)
+        rendered = (
+            self._color_encode_cd(prediction)
+            if is_change
+            else self._color_encode_binary_fewshot(prediction, model_data)
+        )
+        result_path = self.results_dir / f"infer_{model_id}_{region_id}_{patch_id}_{suffix}.png"
+        Image.fromarray(rendered).resize((128, 128), Image.Resampling.NEAREST).save(result_path)
         return str(result_path)
 
     def _infer_pu_query(
@@ -335,6 +444,9 @@ class InferenceEngine:
         after_month: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Run inference for a list of patches."""
+        model_data = self._load_model(model_id)
+        record = get_model_registry(self._user_id).get_model(model_id) or {}
+        validate_model_binding(record, model_data, requested_region=region_id)
         results = []
         for patch_id in patch_ids:
             try:

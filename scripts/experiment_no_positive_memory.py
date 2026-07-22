@@ -21,8 +21,14 @@ MONTH = "202604"
 COUNTS = (1, 3, 5, 9)
 FONT_PATH = ROOT / "assets/fonts/NotoSansCJKsc-Regular.otf"
 CATEGORIES = {
-    "building_extraction": {"name": "建筑", "source": "OSM 建筑标签"},
-    "road_extraction": {"name": "道路", "source": "OSM 道路标签"},
+    "building_extraction": {
+        "name": "建筑",
+        "source": "OSM 已收录建筑（稀疏参考，不是完整真值）",
+    },
+    "road_extraction": {
+        "name": "道路",
+        "source": "OSM 已收录道路（开放地图参考，不是完整真值）",
+    },
     **EXTRA_CATEGORIES,
 }
 
@@ -259,10 +265,18 @@ def save_panel(
     overlay = optical.copy(); overlay[label] = (.5*overlay[label]+.5*np.array([35,210,95])).astype(np.uint8); overlay[adapt] = (.45*overlay[adapt]+.55*np.array([235,45,50])).astype(np.uint8)
     fig,axes=plt.subplots(1,6,figsize=(19.2,3.5),constrained_layout=True)
     model_visible, support_pid = model_visible_label_view(training_polygons)
+    reference_title = {
+        "building_extraction": "OSM 已收录建筑\n非完整真值",
+        "road_extraction": "OSM 已收录道路\n非完整真值",
+        "water": "WorldCover 水体粗标签\n仅用于离线对照",
+        "tree_cover": "WorldCover 树木粗标签\n仅用于离线对照",
+        "cropland": "WorldCover 耕地粗标签\n仅用于离线对照",
+        "construction": "项目参考标签\n仅用于离线对照",
+    }[task]
     items=[
         (optical, "新的 Sentinel-2 光学影像"),
         (pca, "P10C 64 维嵌入\nPCA 三通道投影"),
-        (true_label_view(label), "完整真实标签\n仅用于离线评估"),
+        (true_label_view(label), reference_title),
         (
             model_visible,
             f"模型可见标签 · {support_pid}\n大图中紫红色为 {polygon_count} 个训练 Polygon",
@@ -289,7 +303,7 @@ def write_html(output, results):
             cross_html=(
                 "<div class='cross-result'><h3>跨片区检索精选结果</h3>"
                 f"<p>该 Patch 距最近支持区域 <strong>{cross['distance_km']:.1f} km</strong>；"
-                "按独立参考标签从合格候选中精选，仅用于展示，不参与训练、阈值选择或上方整体指标。</p>"
+                "按现有参考标签从合格候选中精选，仅用于展示，不参与训练、阈值选择或上方一致性指标。</p>"
                 f"<figure><img src='{task}_{cross['patch_id']}.png'>"
                 f"<figcaption>{cross['patch_id']} · Precision {cross['precision']:.3f} · "
                 f"Recall {cross['recall']:.3f} · F1 {cross['f1']:.3f} · IoU {cross['iou']:.3f}</figcaption>"
@@ -297,8 +311,8 @@ def write_html(output, results):
             )
         support=', '.join(data['support_patches'])
         test=', '.join(data['test_patches'])
-        sections.append(f"<section><h2>{data['name']}</h2><p>{data['source']}</p><p><strong>向量提取 Patch：</strong>{support}<br><strong>独立测试 Patch：</strong>{test}</p><table><thead><tr><th>Polygon 数</th><th>方法</th><th>Precision</th><th>Recall</th><th>F1</th><th>IoU</th></tr></thead><tbody>{rows}</tbody></table><div class='grid'>{imgs}</div>{cross_html}</section>")
-    html=f"""<!doctype html><html lang='zh-CN'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>PU + Query 跨图检索实验</title><style>body{{margin:0;background:#f3f5f7;color:#17202a;font:15px/1.55 system-ui,sans-serif}}main{{max-width:1980px;margin:auto;padding:24px}}.intro,section{{background:#fff;border:1px solid #dce2e6;border-radius:8px;padding:20px;margin:18px 0}}table{{border-collapse:collapse;width:100%;max-width:760px}}th,td{{padding:8px 11px;border-bottom:1px solid #e4e8eb;text-align:right}}th:nth-child(2),td:nth-child(2){{text-align:left}}.grid{{display:grid;grid-template-columns:1fr;gap:18px;margin-top:20px}}.cross-result{{margin-top:26px;padding-top:20px;border-top:2px solid #dce2e6}}.cross-result h3{{margin:0 0 6px}}figure{{margin:0}}figure img{{width:100%;display:block;border:1px solid #d7dde1;cursor:zoom-in}}figcaption{{color:#59636c;margin-top:5px}}dialog{{border:0;padding:0;background:transparent;max-width:97vw;max-height:97vh}}dialog img{{max-width:97vw;max-height:93vh}}dialog::backdrop{{background:rgba(8,12,16,.9)}}</style></head><body><main><div class='intro'><h1>PU + Query 跨图向量检索</h1><p>每个案例横向依次展示：新光学影像、P10C 64 维嵌入 PCA 投影、完整真实标签、模型可见的 5 个稀疏训练 Polygon、PU + Query 预测和结果叠加。</p><p>完整真实标签只用于离线评估，不参与训练或阈值选择；模型训练时仅能看到紫红色稀疏标签。PCA 颜色只表示 P10C 嵌入的相对结构。点击图片可放大。</p></div>{''.join(sections)}</main><dialog id='v'><img></dialog><script>const d=document.querySelector('#v'),v=d.querySelector('img');document.querySelectorAll('figure img').forEach(i=>i.onclick=()=>{{v.src=i.src;d.showModal()}});d.onclick=()=>d.close();</script></body></html>"""
+        sections.append(f"<section><h2>{data['name']}</h2><p>{data['source']}</p><p><strong>向量提取 Patch：</strong>{support}<br><strong>独立测试 Patch：</strong>{test}</p><p><strong>指标说明：</strong>Precision、Recall、F1、IoU 仅衡量预测与现有参考标签的一致性。</p><table><thead><tr><th>Polygon 数</th><th>方法</th><th>Precision</th><th>Recall</th><th>F1</th><th>IoU</th></tr></thead><tbody>{rows}</tbody></table><div class='grid'>{imgs}</div>{cross_html}</section>")
+    html=f"""<!doctype html><html lang='zh-CN'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>PU + Query 跨图检索实验</title><style>body{{margin:0;background:#f3f5f7;color:#17202a;font:15px/1.55 system-ui,sans-serif}}main{{max-width:1980px;margin:auto;padding:24px}}.intro,section{{background:#fff;border:1px solid #dce2e6;border-radius:8px;padding:20px;margin:18px 0}}.warning{{border-left:4px solid #d97706;background:#fff7ed;padding:10px 14px}}table{{border-collapse:collapse;width:100%;max-width:760px}}th,td{{padding:8px 11px;border-bottom:1px solid #e4e8eb;text-align:right}}th:nth-child(2),td:nth-child(2){{text-align:left}}.grid{{display:grid;grid-template-columns:1fr;gap:18px;margin-top:20px}}.cross-result{{margin-top:26px;padding-top:20px;border-top:2px solid #dce2e6}}.cross-result h3{{margin:0 0 6px}}figure{{margin:0}}figure img{{width:100%;display:block;border:1px solid #d7dde1;cursor:zoom-in}}figcaption{{color:#59636c;margin-top:5px}}dialog{{border:0;padding:0;background:transparent;max-width:97vw;max-height:97vh}}dialog img{{max-width:97vw;max-height:93vh}}dialog::backdrop{{background:rgba(8,12,16,.9)}}</style></head><body><main><div class='intro'><h1>PU + Query 跨图向量检索</h1><p>每个案例横向依次展示：新光学影像、P10C 64 维嵌入 PCA 投影、来源明确的参考标签、模型可见的 5 个稀疏训练 Polygon、PU + Query 预测和结果叠加。</p><p class='warning'><strong>标签质量提示：</strong>建筑和道路使用 OSM 已收录要素，并非完整真值；WorldCover 也是 10 米级粗标签。绿色未覆盖的真实目标不能直接算作检索误报。</p><p>参考标签不参与向量提取或阈值选择；模型只看到紫红色稀疏标签。PCA 颜色只表示 P10C 嵌入的相对结构。点击图片可放大。</p></div>{''.join(sections)}</main><dialog id='v'><img></dialog><script>const d=document.querySelector('#v'),v=d.querySelector('img');document.querySelectorAll('figure img').forEach(i=>i.onclick=()=>{{v.src=i.src;d.showModal()}});d.onclick=()=>d.close();</script></body></html>"""
     (output/'index.html').write_text(html,encoding='utf-8')
 
 

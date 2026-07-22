@@ -62,6 +62,17 @@ def _model_payload(name="test-model", model_type="single_time_detection", task_t
 
 
 class TestModels:
+    def test_training_capabilities_are_machine_readable(self):
+        response = client.get("/models/capabilities?region_id=haidian")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["default_training_method"] == "xuannv_earth"
+        methods = {item["id"]: item for item in data["methods"]}
+        assert methods["traditional_ml"]["required_sensor"] == "s2"
+        assert methods["traditional_ml"]["trainer"] == "random_forest"
+        assert methods["aef"]["trainer"] == "pixel_mlp"
+        assert methods["dinov3_sat493m"]["trainer"] == "pixel_mlp"
+
     def test_list_models(self):
         response = client.get("/models")
         assert response.status_code == 200
@@ -87,6 +98,26 @@ class TestModels:
         assert data["status"] in {"training", "completed"}
         assert data["job_id"].startswith("job_")
         assert data["description"] == "test description"
+        assert data["requested_training_method"] == "xuannv_earth"
+        assert data["feature_source"] == "xuannv_embedding"
+
+    def test_missing_aef_assets_are_rejected_before_job_creation(self, monkeypatch):
+        monkeypatch.setattr(
+            "app.routers.models.aef_assets_available_for_region", lambda _region: False
+        )
+        payload = _model_payload("test-aef-unavailable")
+        payload["training_method"] = "aef"
+        response = client.post("/models", json=payload)
+        assert response.status_code == 409
+        assert "AEF" in response.text
+
+    def test_traditional_ml_rejects_change_detection(self):
+        payload = _model_payload("test-traditional-change")
+        payload["training_method"] = "traditional_ml"
+        payload["model_type"] = "change_detection"
+        response = client.post("/models", json=payload)
+        assert response.status_code == 422
+        assert "single_time_detection" in response.text
 
     def test_create_model_infers_missing_feature_task_type(self):
         payload = _model_payload("test-infer-task")

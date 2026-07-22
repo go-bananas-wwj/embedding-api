@@ -14,6 +14,8 @@ from app.services.data_service import DataService
 
 logger = logging.getLogger(__name__)
 
+SYSTEM_HEAD_CHECKPOINT_FORMAT = "embedding-api.system-head.v1"
+
 
 HAIDIAN_LAND_COVER_CLASSES = [
     {"id": "sys_land_cover_classification_1", "name": "树木覆盖", "color": "#006400"},
@@ -105,10 +107,35 @@ def list_system_models(region_id: Optional[str] = None) -> List[Dict[str, Any]]:
                 "name": _task_display_name(task_id),
                 "description": _task_description(task_id),
                 "versions": versions,
+                **_system_model_runtime_metadata(region_id, task_id, versions),
             }
         )
 
     return result
+
+
+def _system_model_runtime_metadata(
+    region_id: Optional[str], task_id: str, versions: List[str]
+) -> Dict[str, str]:
+    """Return additive frontend metadata for configured task heads."""
+    if not region_id or not versions:
+        return {}
+    cfg = get_config().get("models", default={})
+    for version in reversed(versions):
+        task_cfg = (
+            cfg.get(region_id, {})
+            .get(version, {})
+            .get("task_heads", {})
+            .get("tasks", {})
+            .get(task_id)
+        )
+        if task_cfg:
+            head_type = task_cfg.get("head", "pytorch")
+            return {
+                "head_type": head_type,
+                "feature_source": task_cfg.get("feature_source", "embedding"),
+            }
+    return {}
 
 
 def _task_display_name(task_id: str) -> str:
@@ -194,6 +221,7 @@ def get_system_model_info(region_id: str, task_id: str, version: str = "v2") -> 
         "completed_at": "1970-01-01T00:00:00",
         "classes": classes,
         "accuracy": None,
+        "metric_name": None,
         "n_samples": None,
         "model_path": None,
         "description": _task_description(task_id),
@@ -306,11 +334,10 @@ def _binary_task_classes(task_id: str) -> List[Dict[str, Any]]:
     ]
 
 
-def _infer_torch_mlp(model_path: Path, emb: np.ndarray) -> np.ndarray:
+def _infer_legacy_torch_mlp(state: Dict[str, Any], emb: np.ndarray) -> np.ndarray:
     """Run a small binary MLP state_dict over a [D,H,W] embedding map."""
     import torch
 
-    state = torch.load(model_path, map_location="cpu")
     in_dim = int(state["net.0.weight"].shape[1])
     hidden_dim = int(state["net.0.weight"].shape[0])
     model = torch.nn.Sequential(
@@ -337,6 +364,43 @@ def _infer_torch_mlp(model_path: Path, emb: np.ndarray) -> np.ndarray:
     return pred.reshape(H, W)
 
 
+def _infer_torch_head(model_path: Path, emb: np.ndarray) -> np.ndarray:
+    """Run a self-describing Conv3x3 head or a legacy MLP checkpoint."""
+    import torch
+
+    checkpoint = torch.load(model_path, map_location="cpu", weights_only=False)
+    if checkpoint.get("__format__") != SYSTEM_HEAD_CHECKPOINT_FORMAT:
+        return _infer_legacy_torch_mlp(checkpoint, emb)
+    if checkpoint.get("head_type") != "binary_conv3x3":
+        raise ValueError(
+            f"Unsupported system head type: {checkpoint.get('head_type')!r}"
+        )
+
+    from app.services.fewshot_heads import BinaryConv3x3ProbeHead
+
+    embed_dim = int(checkpoint["embed_dim"])
+    hidden_dim = int(checkpoint.get("hidden_dim", 128))
+    dropout = float(checkpoint.get("dropout", 0.1))
+    threshold = float(checkpoint.get("threshold", 0.5))
+    if not 0.0 <= threshold <= 1.0:
+        raise ValueError(f"Invalid system head threshold: {threshold}")
+
+    channels, height, width = emb.shape
+    if channels != embed_dim:
+        raise ValueError(
+            f"Embedding channel mismatch: model expects {embed_dim}, got {channels}"
+        )
+
+    model = BinaryConv3x3ProbeHead(embed_dim, hidden_dim, dropout)
+    model.load_state_dict(checkpoint["state_dict"])
+    model.eval()
+    tensor = torch.from_numpy(emb.astype(np.float32, copy=False)).unsqueeze(0)
+    with torch.no_grad():
+        logits = model(tensor).squeeze(0).squeeze(0)
+        prediction = (torch.sigmoid(logits) >= threshold).cpu().numpy()
+    return prediction.astype(np.uint8).reshape(height, width)
+
+
 def infer_system_model(
     region_id: str,
     task_id: str,
@@ -360,7 +424,7 @@ def infer_system_model(
         )
 
     if model_path.suffix == ".pt":
-        pred = _infer_torch_mlp(model_path, emb)
+        pred = _infer_torch_head(model_path, emb)
         _, H, W = emb.shape
         color = _hex_to_rgb(_binary_task_classes(task_id)[1]["color"])
         rgb = np.full((H, W, 3), 0, dtype=np.uint8)

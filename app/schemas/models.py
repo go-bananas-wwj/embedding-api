@@ -209,6 +209,18 @@ class ModelCreate(BaseModel):
         description="Embedding version used for training. Allowed values: v1, v2.",
         examples=["v2"],
     )
+    training_method: Literal[
+        "xuannv_earth", "traditional_ml", "aef", "dinov3_sat493m"
+    ] = Field(
+        "xuannv_earth",
+        description=(
+            "训练方式。默认 xuannv_earth：使用玄女 embedding，少于 10 个有效 "
+            "Polygon 时采用 PU + Query，否则采用 Binary Conv 3x3；traditional_ml "
+            "只读取 Sentinel-2 光学影像并训练 Random Forest；aef 和 "
+            "dinov3_sat493m 冻结各自 embedding，并训练普通两层像素 MLP。"
+        ),
+        examples=["xuannv_earth"],
+    )
     epochs: int = Field(
         100,
         ge=1,
@@ -257,6 +269,10 @@ class ModelCreate(BaseModel):
             "water_extraction",
         }
         task_type = self.resolved_task_type()
+        if self.training_method == "traditional_ml" and self.model_type != "single_time_detection":
+            raise ValueError(
+                "traditional_ml currently supports single_time_detection only"
+            )
         for feature in self.annotations.features:
             if feature.properties.task_type is None:
                 feature.properties.task_type = task_type
@@ -375,11 +391,44 @@ class ModelOut(BaseModel):
     name: str = Field(..., description="Model name.")
     type: str = Field(..., description="Model type ('single_time_detection' or 'change_detection').")
     task_type: Optional[str] = Field(None, description="Downstream task type.")
+    requested_training_method: Optional[str] = Field(
+        None, description="前端请求的训练方式；旧模型和系统模型可能为空。"
+    )
+    resolved_training_method: Optional[str] = Field(
+        None, description="后端实际执行的训练算法或模型族。"
+    )
+    feature_source: Optional[str] = Field(
+        None, description="训练输入来源，例如 xuannv_embedding 或 sentinel2_l2a。"
+    )
+    foundation_model_id: Optional[str] = Field(
+        None, description="与下游头绑定的基座模型 ID，例如 xuannv_earth、aef 或 dinov3_sat493m。"
+    )
+    foundation_model_version: Optional[str] = Field(
+        None, description="训练和推理必须一致的基座模型或 embedding 版本。"
+    )
+    feature_dimension: Optional[int] = Field(
+        None, description="下游头期望的输入特征维度。"
+    )
+    preprocessing_version: Optional[str] = Field(
+        None, description="生成输入特征时使用的预处理契约版本。"
+    )
+    head_type: Optional[str] = Field(
+        None, description="下游头类型，例如 pu_query_retrieval、binary_conv3x3、pixel_mlp。"
+    )
+    checkpoint_format: Optional[str] = Field(
+        None, description="用于后端自动分派推理流程的 checkpoint 格式。"
+    )
+    compatible_regions: List[str] = Field(
+        default_factory=list, description="该模型允许推理的区域 ID。"
+    )
     status: str = Field(..., description="Training status: running, completed, failed, or ready (system models).")
     created_at: str = Field(..., description="ISO timestamp when the model was created.")
     completed_at: Optional[str] = Field(None, description="ISO timestamp when training completed.")
     classes: List[Dict[str, Any]] = Field(..., description="Classes used by the model.")
     accuracy: Optional[float] = Field(None, description="Training accuracy, if available.")
+    metric_name: Optional[str] = Field(
+        None, description="指标名称；例如 training_f1。训练集指标不等于泛化精度。"
+    )
     n_samples: Optional[int] = Field(
         None, description="实际参与训练的有效 Polygon 数量；MultiPolygon 按独立 Polygon 分别计数。"
     )
@@ -535,11 +584,42 @@ class JobStatusOut(BaseModel):
     status: str = Field(..., description="Job status: running, completed, or failed.")
     model_id: str = Field(..., description="Associated model identifier.")
     accuracy: Optional[float] = Field(None, description="Training accuracy, if available.")
+    metric_name: Optional[str] = None
     n_samples: Optional[int] = Field(
         None, description="实际参与训练的有效 Polygon 数量；MultiPolygon 按独立 Polygon 分别计数。"
     )
     model_path: Optional[str] = Field(None, description="Path to the saved model artifact.")
     message: Optional[str] = Field(None, description="Status or error message.")
+    requested_training_method: Optional[str] = None
+    resolved_training_method: Optional[str] = None
+    feature_source: Optional[str] = None
+    foundation_model_id: Optional[str] = None
+    foundation_model_version: Optional[str] = None
+    feature_dimension: Optional[int] = None
+    preprocessing_version: Optional[str] = None
+    head_type: Optional[str] = None
+    checkpoint_format: Optional[str] = None
+    compatible_regions: List[str] = Field(default_factory=list)
+
+
+class TrainingMethodCapability(BaseModel):
+    id: Literal["xuannv_earth", "traditional_ml", "aef", "dinov3_sat493m"]
+    name: str
+    available: bool
+    feature_source: str
+    supported_model_types: List[str]
+    trainer: Optional[str] = None
+    selection_rule: Optional[str] = None
+    required_sensor: Optional[str] = None
+    unavailable_reason: Optional[str] = None
+
+
+class TrainingCapabilitiesResponse(BaseModel):
+    schema_version: int
+    default_training_method: str
+    regions: List[str]
+    methods: List[TrainingMethodCapability]
+    task_contracts: Dict[str, Dict[str, Any]]
 
 
 class ErrorResponse(BaseModel):

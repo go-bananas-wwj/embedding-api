@@ -1,11 +1,61 @@
 """System pre-trained model route tests."""
 
+from pathlib import Path
+
+import numpy as np
+import torch
+
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.services.fewshot_heads import BinaryConv3x3ProbeHead
+from app.services.system_model_service import _infer_torch_head
 
 
 client = TestClient(app)
+
+
+def test_infer_self_describing_binary_conv3x3_checkpoint(tmp_path: Path):
+    model = BinaryConv3x3ProbeHead(embed_dim=2, hidden_dim=4, dropout=0.0)
+    with torch.no_grad():
+        for parameter in model.parameters():
+            parameter.zero_()
+        model.net[-1].bias.fill_(2.0)
+
+    checkpoint = tmp_path / "conv.pt"
+    torch.save(
+        {
+            "__format__": "embedding-api.system-head.v1",
+            "head_type": "binary_conv3x3",
+            "state_dict": model.state_dict(),
+            "embed_dim": 2,
+            "hidden_dim": 4,
+            "dropout": 0.0,
+            "threshold": 0.8,
+        },
+        checkpoint,
+    )
+
+    prediction = _infer_torch_head(checkpoint, np.zeros((2, 3, 5), dtype=np.float32))
+
+    assert prediction.shape == (3, 5)
+    assert np.all(prediction == 1)
+
+
+def test_infer_legacy_mlp_checkpoint(tmp_path: Path):
+    state = {
+        "net.0.weight": torch.zeros((3, 2)),
+        "net.0.bias": torch.zeros(3),
+        "net.2.weight": torch.zeros((1, 3)),
+        "net.2.bias": torch.tensor([-2.0]),
+    }
+    checkpoint = tmp_path / "legacy.pt"
+    torch.save(state, checkpoint)
+
+    prediction = _infer_torch_head(checkpoint, np.zeros((2, 2, 4), dtype=np.float32))
+
+    assert prediction.shape == (2, 4)
+    assert np.all(prediction == 0)
 
 
 class TestSystemModels:
@@ -30,6 +80,8 @@ class TestSystemModels:
             "road_extraction",
         }
         assert all(m["versions"] for m in data)
+        assert all(m["head_type"] == "binary_conv3x3" for m in data)
+        assert all(m["feature_source"] == "P10C 64D embedding" for m in data)
 
     def test_get_system_model_classes(self):
         response = client.get(

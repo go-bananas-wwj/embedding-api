@@ -14,6 +14,7 @@ from app.schemas.models import (
     BatchInferRequest,
     BatchInferResponse,
     BatchInferResult,
+    ErrorResponse,
     GeoJSONFeature,
     GeoJSONFeatureCollection,
     GeoJSONProperties,
@@ -24,11 +25,21 @@ from app.schemas.models import (
     ModelCreate,
     ModelOut,
     ModelRenameRequest,
+    TrainingCapabilitiesResponse,
 )
 from app.services.auth_service import get_current_user
 from app.services.data_service import DataValidationError
 from app.services.inference_engine import InferenceEngine
+from app.services.job_store import find_job, load_job, save_job, update_job
 from app.services.model_registry import get_model_registry
+from app.services.model_binding import load_model_binding
+from app.services.training_capabilities import get_training_capabilities
+from app.services.external_embeddings import (
+    aef_assets_available_for_region,
+    dino_assets_available,
+    load_aef_embedding,
+)
+from app.services.s2_ml import resolve_s2_path
 from app.services.system_model_service import (
     get_system_model_info,
     infer_system_model,
@@ -38,11 +49,13 @@ from app.services.system_model_service import (
 from app.services.training_engine import (
     ChangeDetectionTrainingEngine,
     ClassificationTrainingEngine,
+    TraditionalS2TrainingEngine,
+    ExternalEmbeddingMLPTrainingEngine,
 )
 
 router = APIRouter(prefix="/models", tags=["models"])
 
-# In-memory job tracking. Training jobs are ephemeral; restart clears them.
+# Hot cache only. The canonical job record is persisted under users/{id}/jobs.
 _training_jobs: dict[str, dict] = {}
 
 
@@ -114,6 +127,29 @@ async def list_models(
                 pass
 
     return models
+
+
+@router.get(
+    "/capabilities",
+    response_model=TrainingCapabilitiesResponse,
+    responses={404: {"model": ErrorResponse}},
+)
+async def training_capabilities(
+    region_id: Optional[str] = Query(
+        None,
+        description="区域 ID；不传时返回所有区域通用能力。可选 harbin 或 haidian。",
+        examples=["haidian"],
+    ),
+    user: dict = Depends(get_current_user),
+) -> dict:
+    """查询自定义训练方式和时间参数契约。
+
+    前端应先调用本接口决定训练方式是否可选，不要根据 Swagger 示例猜测。
+    `available=false` 的方法不可提交到 `POST /models`。
+    """
+    if region_id and not get_config().region_exists(region_id):
+        raise HTTPException(status_code=404, detail=f"Region '{region_id}' not found")
+    return get_training_capabilities(region_id)
 
 
 _CLASSIFICATION_EXAMPLE = {
@@ -206,7 +242,11 @@ _CHANGE_DETECTION_EXAMPLE = {
 }
 
 
-@router.post("", response_model=ModelOut)
+@router.post(
+    "",
+    response_model=ModelOut,
+    responses={409: {"model": ErrorResponse}},
+)
 async def create_model(
     background_tasks: BackgroundTasks = BackgroundTasks(),
     req: ModelCreate = Body(
@@ -233,9 +273,41 @@ async def create_model(
             detail="model_type must be 'single_time_detection' or 'change_detection'",
         )
     task_type = req.resolved_task_type()
-    embedding_version = _resolve_embedding_version(
-        req.region_id, req.embedding_version
+    if req.training_method == "aef" and not aef_assets_available_for_region(req.region_id):
+        raise HTTPException(
+            status_code=409,
+            detail="AEF training is configured to use an MLP, but no real AEF embeddings are installed; configure AEF_EMBEDDING_DIR",
+        )
+    if req.training_method == "dinov3_sat493m" and not dino_assets_available():
+        raise HTTPException(
+            status_code=409,
+            detail="DINOv3-SAT493M training is configured to use an MLP, but the ViT-L/16 weights are not installed",
+        )
+    embedding_version = (
+        _resolve_embedding_version(req.region_id, req.embedding_version)
+        if req.training_method == "xuannv_earth"
+        else "not_applicable"
     )
+
+    # Fail before creating a model/job when required external assets are absent.
+    for feature in req.annotations.features:
+        props = feature.properties
+        months = (
+            [props.before_month, props.after_month]
+            if req.model_type == "change_detection"
+            else [props.month]
+        )
+        for month in [value for value in months if value]:
+            if req.training_method in {"traditional_ml", "dinov3_sat493m"}:
+                try:
+                    resolve_s2_path(req.region_id, props.patch_id, month)
+                except (FileNotFoundError, ValueError) as exc:
+                    raise HTTPException(status_code=409, detail=str(exc))
+            elif req.training_method == "aef":
+                try:
+                    load_aef_embedding(req.region_id, props.patch_id, month)
+                except (FileNotFoundError, ValueError) as exc:
+                    raise HTTPException(status_code=409, detail=str(exc))
 
     active_class_ids = req.class_ids or list(
         {f.properties.class_id for f in req.annotations.features}
@@ -248,9 +320,13 @@ async def create_model(
         task_type=task_type,
         region_id=req.region_id,
         description=req.description,
+        requested_training_method=req.training_method,
+        feature_source=(
+            "sentinel2_l2a" if req.training_method == "traditional_ml" else req.training_method if req.training_method in {"aef", "dinov3_sat493m"} else "xuannv_embedding"
+        ),
     )
 
-    job_id = f"job_{uuid.uuid4().hex[:8]}"
+    job_id = f"job_{uuid.uuid4().hex[:16]}"
     _training_jobs[job_id] = {
         "job_id": job_id,
         "model_id": model_id,
@@ -258,7 +334,13 @@ async def create_model(
         "user_id": user["user_id"],
         "started_at": datetime.now().isoformat(),
         "message": "Training started",
+        "requested_training_method": req.training_method,
+        "resolved_training_method": None,
+        "feature_source": (
+            "sentinel2_l2a" if req.training_method == "traditional_ml" else req.training_method if req.training_method in {"aef", "dinov3_sat493m"} else "xuannv_embedding"
+        ),
     }
+    save_job(user["user_id"], _training_jobs[job_id])
 
     background_tasks.add_task(
         _do_training,
@@ -273,6 +355,7 @@ async def create_model(
         annotations=req.annotations,
         classes=req.classes,
         class_ids=active_class_ids,
+        training_method=req.training_method,
     )
     model = registry.get_model(model_id)
     model["job_id"] = job_id
@@ -661,6 +744,10 @@ async def get_job_status(
     """
     job = _training_jobs.get(job_id)
     if not job:
+        job = load_job(user["user_id"], job_id)
+    if not job and user.get("role") == "admin":
+        job = find_job(job_id)
+    if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     if user.get("role") != "admin" and job.get("user_id") != user["user_id"]:
         raise HTTPException(status_code=403, detail="Access denied")
@@ -669,9 +756,20 @@ async def get_job_status(
         "status": job["status"],
         "model_id": job["model_id"],
         "accuracy": job.get("accuracy"),
+        "metric_name": job.get("metric_name"),
         "n_samples": job.get("n_samples"),
         "model_path": job.get("model_path"),
         "message": job.get("message"),
+        "requested_training_method": job.get("requested_training_method"),
+        "resolved_training_method": job.get("resolved_training_method"),
+        "feature_source": job.get("feature_source"),
+        "foundation_model_id": job.get("foundation_model_id"),
+        "foundation_model_version": job.get("foundation_model_version"),
+        "feature_dimension": job.get("feature_dimension"),
+        "preprocessing_version": job.get("preprocessing_version"),
+        "head_type": job.get("head_type"),
+        "checkpoint_format": job.get("checkpoint_format"),
+        "compatible_regions": job.get("compatible_regions", []),
     }
 
 
@@ -718,9 +816,32 @@ def _do_training(
     annotations,
     classes,
     class_ids,
+    training_method: str = "xuannv_earth",
 ) -> None:
     try:
-        if model_type == "change_detection":
+        if training_method in {"aef", "dinov3_sat493m"}:
+            engine = ExternalEmbeddingMLPTrainingEngine(training_method, user_id)
+            result = engine.train(
+                model_id=model_id,
+                region_id=region_id,
+                task_type=task_type,
+                model_type=model_type,
+                annotations=annotations,
+                classes=classes,
+                class_ids=class_ids,
+                epochs=epochs,
+            )
+        elif training_method == "traditional_ml":
+            engine = TraditionalS2TrainingEngine(user_id)
+            result = engine.train(
+                model_id=model_id,
+                region_id=region_id,
+                task_type=task_type,
+                annotations=annotations,
+                classes=classes,
+                class_ids=class_ids,
+            )
+        elif model_type == "change_detection":
             engine = ChangeDetectionTrainingEngine(user_id)
             result = engine.train(
                 model_id=model_id,
@@ -746,24 +867,41 @@ def _do_training(
             )
 
         registry = get_model_registry(user_id)
+        binding = load_model_binding(Path(result["model_path"]))
         registry.update_model(
             model_id,
             status="completed",
             completed_at=datetime.now().isoformat(),
             accuracy=result["accuracy"],
+            metric_name=result.get("metric_name"),
             n_samples=result["n_samples"],
+            resolved_training_method=result.get(
+                "resolved_training_method",
+                "auto_embedding_head",
+            ),
+            feature_source=result.get("feature_source", "xuannv_embedding"),
+            **binding,
         )
         _training_jobs[job_id].update(
             {
                 "status": "completed",
                 "accuracy": result["accuracy"],
+                "metric_name": result.get("metric_name"),
                 "n_samples": result["n_samples"],
                 "model_path": result["model_path"],
+                "resolved_training_method": result.get(
+                    "resolved_training_method", "auto_embedding_head"
+                ),
+                "feature_source": result.get("feature_source", "xuannv_embedding"),
+                **binding,
+                "message": "Training completed",
             }
         )
+        save_job(user_id, _training_jobs[job_id])
     except Exception as e:
         registry = get_model_registry(user_id)
         registry.update_model(model_id, status="failed", message=str(e))
         _training_jobs[job_id].update(
             {"status": "failed", "message": str(e)}
         )
+        save_job(user_id, _training_jobs[job_id])

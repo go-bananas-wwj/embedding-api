@@ -47,9 +47,13 @@ python pipelines/haidian/download_modelscope_assets.py \
 |------|------|
 | Embedding | `data/haidian/embeddings/v1/{YYYYMM}/{patch_id}.npy|png|json` |
 | Embedding checkpoint | `models/haidian/v1/embedding/haidian_embedding_v1_p10c_epoch800.pt` |
-| 建筑物任务头 | `models/haidian/v1/task_heads/building_mlp_fold0_best.pt` |
-| 道路任务头 | `models/haidian/v1/task_heads/road_mlp_fold0_best.pt` |
-| 水体任务头 | `models/haidian/v1/task_heads/water_mlp_fold0_best.pt` |
+| 建筑物任务头 | `models/haidian/v1/task_heads/building_conv3x3_best.pt` |
+| 道路任务头 | `models/haidian/v1/task_heads/road_conv3x3_best.pt` |
+| 水体任务头 | `models/haidian/v1/task_heads/water_conv3x3_best.pt` |
+
+三个系统预设任务头均冻结最新 P10C 64 维 embedding，只训练 Binary Conv
+3×3 二分类头。checkpoint 自带模型结构、推理阈值、训练月份和测试指标，API
+根据元数据加载，不再把海淀任务头当作旧像素 MLP。
 
 当前可用月份：
 
