@@ -65,7 +65,7 @@ def test_build_mosaic_landsat(shared_cache):
 
 def test_build_mosaic_uses_cache(shared_cache):
     sample = _sample_patches()
-    cache_file = shared_cache / f"harbin_s2_2025Q2_{'_'.join(sorted(sample))}.png"
+    cache_file = shared_cache / f"harbin_s2_2025-04_{'_'.join(sorted(sample))}.png"
     assert cache_file.exists()
     data1 = cache_file.read_bytes()
     data2, _ = build_mosaic(
@@ -77,6 +77,21 @@ def test_build_mosaic_uses_cache(shared_cache):
         cache_dir=str(shared_cache),
     )
     assert data1 == data2
+
+
+def test_build_embedding_mosaic_returns_visible_png(shared_cache):
+    data, mime = build_mosaic(
+        region_id="haidian",
+        date="202512",
+        sensor_type="embedding",
+        fmt="png",
+        patch_ids=["patch_000000"],
+        cache_dir=str(shared_cache),
+    )
+
+    assert mime == "image/png"
+    image = Image.open(io.BytesIO(data))
+    assert image.width > 1 and image.height > 1
 
 
 def test_build_mosaic_unsupported_sensor():

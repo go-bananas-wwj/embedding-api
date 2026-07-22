@@ -499,6 +499,31 @@ class DataService:
         # Try labels directory first
         labels_base = ver.get("labels")
         period_candidates = normalize_period(period) if period else [None]
+
+        # Task-level summary.json is the authoritative aggregate. It may be a
+        # direct summary object or a legacy period/task mapping.
+        parent = Path(labels_base).parent if labels_base else None
+        if parent:
+            try:
+                summary_path_str = _resolve_path(str(parent), "summary.json")
+                if summary_path_str:
+                    with open(summary_path_str, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    if isinstance(data, dict):
+                        if data.get("task") == task_type:
+                            return data
+                        for p in period_candidates:
+                            if p and isinstance(data.get(p), dict):
+                                found = data[p].get(task_type)
+                                if isinstance(found, dict):
+                                    return found
+                        found = data.get(task_type)
+                        if isinstance(found, dict):
+                            return found
+            except (json.JSONDecodeError, OSError) as e:
+                logger.warning(f"Failed to load summary.json: {e}")
+
+        # Fall back to label metadata when no aggregate summary exists.
         if labels_base:
             for p in period_candidates:
                 if p:

@@ -5,7 +5,7 @@ import json
 import uuid
 import fcntl
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -145,7 +145,70 @@ class ModelRegistry:
                 pkl_path.unlink()
             self._data = [m for m in self._data if m.get("id") != model_id]
             self._save()
-            return True
+        return True
+
+    def cleanup_expired_models(
+        self, cutoff: datetime, dry_run: bool = False
+    ) -> Dict[str, Any]:
+        """Atomically remove terminal custom models created before ``cutoff``."""
+        candidates: List[Dict[str, Any]] = []
+        deleted: List[Dict[str, Any]] = []
+        errors: List[str] = []
+        freed_bytes = 0
+        with self._locked():
+            self._load()
+            for record in self._data:
+                if record.get("source") == "system":
+                    continue
+                if record.get("status") not in {"completed", "failed"}:
+                    continue
+                try:
+                    created = datetime.fromisoformat(str(record.get("created_at", "")))
+                    if created.tzinfo is None:
+                        created = created.replace(tzinfo=timezone.utc)
+                    else:
+                        created = created.astimezone(timezone.utc)
+                except (TypeError, ValueError):
+                    errors.append(f"{record.get('id', '<unknown>')}: invalid created_at")
+                    continue
+                if created >= cutoff:
+                    continue
+                candidates.append(dict(record))
+
+            if dry_run:
+                return {
+                    "candidates": candidates,
+                    "deleted": [],
+                    "freed_bytes": 0,
+                    "errors": errors,
+                }
+
+            deleted_ids = set()
+            for record in candidates:
+                model_path = Path(str(record.get("model_path", "")))
+                try:
+                    size = model_path.stat().st_size if model_path.is_file() else 0
+                    if model_path.is_file():
+                        model_path.unlink()
+                    freed_bytes += size
+                    deleted.append(record)
+                    deleted_ids.add(record.get("id"))
+                except OSError as exc:
+                    errors.append(f"{record.get('id', '<unknown>')}: {exc}")
+
+            if deleted_ids:
+                self._data = [
+                    record
+                    for record in self._data
+                    if record.get("id") not in deleted_ids
+                ]
+                self._save()
+        return {
+            "candidates": candidates,
+            "deleted": deleted,
+            "freed_bytes": freed_bytes,
+            "errors": errors,
+        }
 
 
 # Per-user singleton

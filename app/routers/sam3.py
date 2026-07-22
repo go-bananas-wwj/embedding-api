@@ -31,23 +31,9 @@ async def sam3_embed(
     ),
     req: EmbedRequest = Body(...),
 ):
-    """为指定 Patch 预计算 SAM3 图像嵌入。
+    """预计算并缓存指定 Patch 的 SAM3 图像嵌入，减少后续点选分割等待时间。
 
-    适用场景：前端希望先展示某个 patch 的遥感影像，并提前把 SAM3
-    embedding 缓存在后端，减少后续点选分割等待时间。
-
-    参数填写说明：
-
-    | 参数 | 默认值/范围 | 怎么填 |
-    | --- | --- | --- |
-    | `region_id` | `harbin` / `haidian` | 路径参数，选择区域 |
-    | `patch_id` | 格式 `patch_000000` | 要预加载的 patch 编号 |
-    | `month` | `YYYY-MM` / `YYYYMM` / `YYYYMMDD` | `YYYYMMDD` 精确到某一天；`YYYYMM`/`YYYY-MM` 为月度请求，同月多景时按日期倒序取最新一景 |
-    | `sensor_type` | 默认 `s2`；可选 `s2`、`s1`、`landsat`、`highres` | 高分辨率 RGB 光学 GeoTIFF 填 `highres` |
-
-    返回值包含 `embedding_id`、base64 PNG 影像，以及实际使用的
-    `source_scene` / `selected_image_date`；`/sam3/segment` 会自动复用缓存，
-    不要求前端手动传 `embedding_id`。
+    返回实际使用的影像日期；分割接口会自动复用缓存，无需前端传 `embedding_id`。
     """
     config = get_config()
     if not config.region_exists(region_id):
@@ -120,39 +106,10 @@ async def sam3_segment(
         },
     ),
 ):
-    """基于 WGS84 点提示进行 SAM3 实例分割。
+    """根据 WGS84 点击点完成实例分割，返回 WGS84 GeoJSON 多边形。
 
-    前端只需要传用户点击的 WGS84 经纬度点和影像日期；后端会自动定位
-    patch、加载对应传感器影像、计算或复用 SAM3 embedding，并返回 WGS84
-    GeoJSON 标注框。
-
-    参数填写说明：
-
-    | 参数 | 必填 | 默认值/范围 | 怎么填 |
-    | --- | --- | --- | --- |
-    | `region_id` | 是 | `harbin` / `haidian` | 路径参数，选择在哪个区域内分割 |
-    | `date` | 是 | `YYYY-MM` / `YYYYMM` / `YYYYMMDD` | `YYYYMMDD` 精确到某一天；`YYYYMM`/`YYYY-MM` 为月度请求，同月多景时按日期倒序取最新一景 |
-    | `sensor_type` | 否 | 默认 `s2`；可选 `s2`、`s1`、`landsat`、`highres` | 高分辨率 RGB 光学 GeoTIFF 填 `highres`；文件必须带 CRS 和仿射变换 |
-    | `point_coords` | 是 | 至少 1 个点；经度 `[-180,180]`，纬度 `[-90,90]` | WGS84 经纬度，格式 `[[经度, 纬度]]` |
-    | `point_labels` | 否 | 默认全部为 `1`；可选 `0` 或 `1` | 前端当前不用传；`1`=目标点，`0`=背景排除点 |
-    | `multimask_output` | 否 | 默认 `false` | `false` 返回最优候选；`true` 返回多个候选 |
-    | `include_masks` | 否 | 默认 `false` | `false` 只返回 GeoJSON 框；`true` 额外返回 base64 mask |
-
-    推荐请求体：
-
-    ```json
-    {
-      "date": "202512",
-      "sensor_type": "s2",
-      "point_coords": [[116.0954, 40.0628]],
-      "multimask_output": false,
-      "include_masks": false
-    }
-    ```
-
-    注意：本接口不再使用 `month` 字段；如果请求体里传入 `month`，会返回
-    `422` 参数校验错误。返回的 GeoJSON properties 会包含
-    `source_scene` 和 `selected_image_date`，用于前端展示“本次实际分割的是哪一景影像”。
+    后端会自动定位 Patch、选择当月最新影像并复用缓存；日期字段只使用 `date`，
+    不再接受 `month`。`highres` 影像必须带 CRS 和仿射变换。
     """
     config = get_config()
     if not config.region_exists(region_id):

@@ -688,6 +688,9 @@ class ExternalEmbeddingMLPTrainingEngine:
             "positive_class_id": class_ids[0],
             "trained_at": datetime.now().isoformat(),
         }
+        if self._method == "aef":
+            metadata["foundation_model_version"] = "aef_annual_2025"
+            metadata["preprocessing_version"] = "aef_annual_2025"
         path = _save_external_mlp_checkpoint(
             self._user_id, model_id, model, metadata
         )

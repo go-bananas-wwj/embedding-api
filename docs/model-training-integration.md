@@ -148,8 +148,10 @@ AEF 从 `AEF_EMBEDDING_DIR` 读取真实 `[C,H,W]` NPY。当前部署使用
 [Source Cooperative AlphaEarth Foundations](https://source.coop/tge-labs/aef) `v1/annual`
 2025 年 64 维年度 embedding：哈尔滨 424 个 Patch、海淀 320 个 Patch，均按 API
 Patch 边界裁成 `64x128x128`，并使用官方公式反量化。AEF 是年度产品，因此
-`2025-01` 到 `2025-12` 读取同一份 2025 年特征，不应解释为月度 embedding。
-未配置对应年份数据时，能力接口返回 `available=false`，创建模型返回 409。
+前端无论提交哪个月份，当前部署都读取同一份 2025 年特征，不应解释为月度
+embedding。训练完成后模型绑定中的 `foundation_model_version` 和
+`preprocessing_version` 均为 `aef_annual_2025`。只有区域内完全没有 AEF 年度
+资产时，能力接口才返回 `available=false`，创建模型返回 409。
 
 可用以下命令从公开 COG 重新安装，脚本会按配置中的 Patch 网格裁切并校验 nodata：
 

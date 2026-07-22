@@ -482,10 +482,30 @@ class SAM3Service:
                 meta = entry.get("meta", {})
             normalized_coords = self._wgs84_to_sam_pixels(meta, point_coords)
             pixel_coords = np.array(normalized_coords) * np.array([[img_w, img_h]])
+            sensor_type = str(meta.get("sensor_type", ""))
+            request_candidates = multimask_output or sensor_type == "highres"
             results = self._predict_state(
-                state, pixel_coords, point_labels, multimask_output
+                state, pixel_coords, point_labels, request_candidates
             )
+            if not multimask_output and sensor_type == "highres":
+                results = self._select_single_highres_prediction(results)
             return results, meta
+
+    @staticmethod
+    def _select_single_highres_prediction(
+        predictions: List[Tuple[np.ndarray, float, List[int]]],
+    ) -> List[Tuple[np.ndarray, float, List[int]]]:
+        """Choose one useful high-resolution mask instead of a near-full frame."""
+        if len(predictions) <= 1:
+            return predictions
+        ratios = {
+            id(item): float(np.count_nonzero(item[0])) / float(item[0].size)
+            for item in predictions
+        }
+        local = [item for item in predictions if 0 < ratios[id(item)] <= 0.10]
+        plausible = [item for item in predictions if 0 < ratios[id(item)] <= 0.80]
+        candidates = local or plausible or predictions
+        return [max(candidates, key=lambda item: float(item[1]))]
 
     def _predict_state(
         self,

@@ -18,7 +18,7 @@ from app.services.system_model_service import (
 )
 from app.services.user_paths import get_user_dir
 
-router = APIRouter(prefix="/system-models", tags=["system-models"])
+router = APIRouter(prefix="/system-models")
 
 _SYSTEM_TASK_OPENAPI_EXAMPLES = {
     "building_extraction": {"summary": "建筑物提取", "value": "building_extraction"},
@@ -84,12 +84,15 @@ async def get_classes(
     用于在结果可视化时生成图例，或在前端显示类别名称与颜色对应关系。
     返回类别 ID、名称和调色板等 JSON 列表。
 
-    海淀 `land_cover_classification` V1 使用预生成月度结果，没有在线推理
-    checkpoint；本接口仍会返回其 7 类静态图例。该例外只表示类别定义可用，
-    不表示 `/system-models/land_cover_classification/infer` 支持海淀实时推理。
+    海淀土地利用/土地覆盖 V1 使用预生成月度结果，没有在线推理 checkpoint；
+    本接口仍会返回对应静态图例。该例外只表示类别定义可用，不表示对应
+    `/system-models/{task_id}/infer` 支持海淀实时推理。
     """
     try:
-        if region_id == "haidian" and task_id == "land_cover_classification":
+        if region_id == "haidian" and task_id in {
+            "land_cover_classification",
+            "land_use_classification",
+        }:
             resolved_version = version or "v1"
         else:
             resolved_version = resolve_system_model_version(region_id, task_id, version)
@@ -157,7 +160,15 @@ async def infer(
     return {"result_url": f"/system-models/results/{filename}"}
 
 
-@router.get("/results/{filename}")
+@router.get(
+    "/results/{filename}",
+    response_class=FileResponse,
+    responses={
+        200: {"description": "PNG 推理结果", "content": {"image/png": {}}},
+        400: {"model": ErrorResponse},
+        404: {"model": ErrorResponse},
+    },
+)
 async def get_result(
     filename: str = PathParam(
         ...,

@@ -1,11 +1,170 @@
 """Basic API endpoint tests."""
 
+import io
+
+import numpy as np
 import pytest
+from PIL import Image
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.routers.embeddings import _default_embedding_version, _latest_available_month
 
 client = TestClient(app)
+
+
+def test_default_embedding_version_is_region_specific():
+    assert _default_embedding_version("haidian") == "v1"
+    assert _default_embedding_version("harbin") == "v2"
+
+
+def test_latest_available_embedding_month_uses_last_month():
+    assert _latest_available_month(["2025-10", "2026-01", "2026-05"]) == "2026-05"
+    assert _latest_available_month([]) is None
+
+
+def test_haidian_building_summary_ignores_legacy_change_period():
+    response = client.get(
+        "/regions/haidian/tasks/building_extraction/summary",
+        params={"version": "v1", "period": "2025-04_vs_2025-06"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["task"] == "building_extraction"
+    assert data["total_patches"] == 320
+    assert data["schema_version"] == "2.0"
+    assert data["status"] == "ready"
+    assert 30 <= len(data["summary_text"]) <= 400
+    assert data["data_coverage"]["prediction_patches"] == 320
+    assert data["data_coverage"]["coverage_rate"] == 1.0
+    assert "quality_metrics" not in data
+    assert data["color_legend"]
+    assert all({"color", "name", "meaning"} <= set(item) for item in data["color_legend"])
+    assert isinstance(data["insights"], list)
+    assert isinstance(data["warnings"], list)
+
+
+def test_summary_explains_partial_task_in_human_readable_text():
+    response = client.get(
+        "/regions/haidian/tasks/road_extraction/summary",
+        params={"version": "v1"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "partial"
+    assert data["data_coverage"]["label_patches"] == 320
+    assert data["data_coverage"]["prediction_patches"] == 0
+    assert "0 个已有结果" in data["summary_text"]
+    assert any(item["code"] == "PREDICTIONS_MISSING" for item in data["warnings"])
+
+
+def test_task_summary_can_filter_multiple_patches():
+    response = client.get(
+        "/regions/haidian/tasks/building_extraction/summary",
+        params=[
+            ("patch_ids", "patch_000000"),
+            ("patch_ids", "patch_000001"),
+            ("month", "202512"),
+        ],
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["data_coverage"]["configured_patches"] == 2
+    assert data["data_coverage"]["available_result_patches"] == 2
+    assert data["analysis_scope"]["patch_ids"] == ["patch_000000", "patch_000001"]
+    assert data["analysis_scope"]["month"] == "202512"
+
+
+def test_task_summary_generates_missing_selected_patch_results(monkeypatch, tmp_path):
+    generated = tmp_path / "road_extraction_haidian_patch_000010_202604.png"
+
+    def fake_infer(region_id, task_type, patch_id, month, version, results_dir):
+        assert (region_id, task_type, patch_id, month, version) == (
+            "haidian", "road_extraction", "patch_000010", "202604", "v1"
+        )
+        Image.new("RGB", (128, 128), "white").save(generated)
+        return generated
+
+    monkeypatch.setattr("app.routers.tasks.infer_system_model", fake_infer)
+    response = client.get(
+        "/regions/haidian/tasks/road_extraction/summary",
+        params={"version": "v1", "month": "202604", "patch_ids": "patch_000010"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "ready"
+    assert data["data_coverage"]["result_tiles"] >= 1
+    assert data["data_coverage"]["coverage_rate"] == 1.0
+    assert data["analysis_scope"]["generated_results"] == 1
+    assert "quality_metrics" not in data
+    assert data["color_legend"]
+    assert not any(item["code"] == "PREDICTIONS_MISSING" for item in data["warnings"])
+
+
+def test_task_summary_does_not_require_prebuilt_summary_file(monkeypatch, tmp_path):
+    generated = tmp_path / "water_extraction_haidian_patch_000010_202604.png"
+
+    def fake_infer(*args, **kwargs):
+        Image.new("RGB", (128, 128), "black").save(generated)
+        return generated
+
+    monkeypatch.setattr("app.routers.tasks.infer_system_model", fake_infer)
+    monkeypatch.setattr("app.routers.tasks.DataService.load_task_summary", lambda *args: None)
+    response = client.get(
+        "/regions/haidian/tasks/water_extraction/summary",
+        params={"version": "v1", "month": "202604", "patch_ids": "patch_000010"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["task"] == "water_extraction"
+    assert data["status"] == "ready"
+    assert data["data_coverage"]["result_tiles"] >= 1
+    assert data["prediction_statistics"]["mean_positive_pixel_ratio"] > 0
+    assert {item["name"] for item in data["color_legend"]} >= {"背景", "水体"}
+    assert "颜色说明" in data["summary_text"]
+    assert data["image_analysis"]["image_count"] == 1
+    assert data["image_analysis"]["total_pixels"] == 128 * 128
+    assert data["image_analysis"]["target_pixels"] == 5
+    assert data["result_images"][0]["cleanup_interval_seconds"] == 7200
+    image_url = data["result_images"][0]["image_url"]
+    assert image_url.startswith("http://60.31.21.42:22065/task-summary/results/")
+    assert client.get(image_url.removeprefix("http://60.31.21.42:22065")).status_code == 200
+
+
+def test_task_summary_default_version_falls_back_to_configured_task_assets():
+    response = client.get(
+        "/regions/harbin/tasks/road_extraction/summary",
+        params={"month": "202510", "patch_ids": "patch_000010"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["version"] == "v1"
+    assert data["status"] == "ready"
+    assert data["data_coverage"]["coverage_rate"] == 1.0
+
+
+def test_change_summary_default_version_uses_configured_result_assets():
+    response = client.get(
+        "/regions/harbin/change-detection/summary",
+        params=[
+            ("before_month", "202504"),
+            ("after_month", "202506"),
+            ("patch_ids", "patch_000404"),
+            ("patch_ids", "patch_000402"),
+        ],
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["version"] == "v1"
+    assert data["status"] == "ready"
+    assert data["data_coverage"]["coverage_rate"] == 1.0
 
 
 class TestHealth:
@@ -263,10 +422,50 @@ class TestTasks:
         )
         assert response.status_code == 422
 
+    def test_result_default_version_uses_harbin_road_assets(self):
+        response = client.get(
+            "/regions/harbin/patches/patch_000010/tasks/road_extraction/result",
+            params={"format": "png", "month": "202510"},
+        )
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "image/png"
+
+    def test_result_default_version_uses_change_detection_assets(self):
+        response = client.get(
+            "/regions/harbin/patches/patch_000404/tasks/change_detection/result",
+            params={"format": "png", "before_month": "202504", "after_month": "202506"},
+        )
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "image/png"
+
+    def test_result_can_generate_npy_for_binary_system_head(self):
+        response = client.get(
+            "/regions/haidian/patches/patch_000010/tasks/water_extraction/result",
+            params={"format": "npy", "month": "202604"},
+        )
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "application/octet-stream"
+        array = np.load(io.BytesIO(response.content), allow_pickle=False)
+        assert array.shape == (128, 128)
+        assert set(np.unique(array)).issubset({0, 1})
+        assert int(array.sum()) == 5
+
     def test_get_task_prediction(self):
         response = client.get("/regions/harbin/patches/patch_000000/tasks/building_extraction/prediction")
         # May be 200 or 404 depending on data availability
         assert response.status_code in (200, 404)
+
+    def test_haidian_road_prediction_is_reconstructed_from_monthly_result(self):
+        response = client.get(
+            "/regions/haidian/patches/patch_000000/tasks/road_extraction/prediction",
+            params={"version": "v1", "period": "202604"},
+        )
+
+        assert response.status_code == 200
+        prediction = np.load(io.BytesIO(response.content), allow_pickle=False)
+        assert prediction.shape == (128, 128)
+        assert prediction.dtype == np.uint8
+        assert set(np.unique(prediction)).issubset({0, 1})
 
     def test_get_task_label(self):
         response = client.get("/regions/harbin/patches/patch_000000/tasks/building_extraction/label")
@@ -276,6 +475,16 @@ class TestTasks:
     def test_get_tile_not_implemented(self):
         response = client.get("/regions/harbin/tasks/building_extraction/tiles/10/100/100.png")
         assert response.status_code == 501
+
+    def test_haidian_road_patch_tile_uses_on_demand_system_result(self):
+        response = client.get(
+            "/regions/haidian/tasks/road_extraction/tiles/patch_000000.png",
+            params={"version": "v1", "period": "202512"},
+        )
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "image/png"
+        with Image.open(io.BytesIO(response.content)) as image:
+            assert image.size == (128, 128)
 
 
 class TestPathTraversal:
@@ -308,7 +517,7 @@ class TestPathTraversal:
             assert data["tiles"] == []
 
     def test_tile_version_path_traversal_blocked(self):
-        """Invalid version values should return empty tiles safely."""
+        """Invalid version values should be rejected safely."""
         malicious_versions = [
             "../../../etc/passwd",
             "..\\..\\windows\\system32",
@@ -319,6 +528,4 @@ class TestPathTraversal:
             response = client.get(
                 f"/regions/harbin/tasks/building_extraction/tiles?version={version}"
             )
-            assert response.status_code == 200, f"Failed for version={version}"
-            data = response.json()
-            assert data["tiles"] == []
+            assert response.status_code == 422, f"Failed for version={version}"

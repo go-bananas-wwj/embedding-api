@@ -28,9 +28,7 @@ PATCH_ID = "patch_000000"
 PATCH_ID_2 = "patch_000001"
 MONTH = "202512"
 SAM3_POINT = [116.0954, 40.0628]
-EXPECTED_STUBS = {
-    "GET /regions/{region_id}/tasks/{task_type}/tiles/{z}/{x}/{y}.png"
-}
+EXPECTED_STUBS: set[str] = set()
 
 
 class AuditError(RuntimeError):
@@ -165,28 +163,6 @@ def _create_training_payload(name: str) -> Dict[str, Any]:
                 ]],
             },
         },
-        {
-            "type": "Feature",
-            "properties": {
-                "patch_id": PATCH_ID,
-                "region_id": REGION,
-                "class_id": "background",
-                "class_name": "背景",
-                "color": "#808080",
-                "task_type": "building_extraction",
-                "month": MONTH,
-            },
-            "geometry": {
-                "type": "Polygon",
-                "coordinates": [[
-                    [116.248, 39.892],
-                    [116.253, 39.892],
-                    [116.253, 39.896],
-                    [116.248, 39.896],
-                    [116.248, 39.892],
-                ]],
-            },
-        },
     ]
     return {
         "name": name,
@@ -195,12 +171,9 @@ def _create_training_payload(name: str) -> Dict[str, Any]:
         "region_id": REGION,
         "embedding_version": "v1",
         "epochs": 50,
-        "class_ids": ["background", "target"],
+        "class_ids": ["target"],
         "annotations": {"type": "FeatureCollection", "features": features},
-        "classes": [
-            {"id": "background", "name": "背景", "color": "#808080"},
-            {"id": "target", "name": "目标", "color": "#ff0000"},
-        ],
+        "classes": [{"id": "target", "name": "目标", "color": "#ff0000"}],
     }
 
 
@@ -334,6 +307,19 @@ def main() -> int:
         required_keys=["task", "version"],
     )
     call(
+        "change_detection_summary",
+        "GET /regions/{region_id}/change-detection/summary",
+        "GET",
+        "/regions/harbin/change-detection/summary",
+        params={
+            "version": "v1",
+            "before_month": "202504",
+            "after_month": "202506",
+            "patch_ids": "patch_000000",
+        },
+        required_keys=["task", "version", "analysis_scope"],
+    )
+    call(
         "task_result_png",
         "GET /regions/{region_id}/patches/{patch_id}/tasks/{task_type}/result",
         "GET",
@@ -374,15 +360,6 @@ def main() -> int:
         params={"version": "v1", "period": MONTH},
         binary=True,
     )
-    call(
-        "task_xyz_tile_stub",
-        "GET /regions/{region_id}/tasks/{task_type}/tiles/{z}/{x}/{y}.png",
-        "GET",
-        f"/regions/{REGION}/tasks/building_extraction/tiles/0/0/0.png",
-        params={"version": "v1", "period": MONTH},
-        expect_status=501,
-        required_keys=["detail"],
-    )
 
     # System model APIs and result download.
     system_models = call(
@@ -420,6 +397,14 @@ def main() -> int:
         )
 
     # Model APIs: list, create, job, get, patch, infer, batch, result, delete.
+    call(
+        "model_capabilities",
+        "GET /models/capabilities",
+        "GET",
+        "/models/capabilities",
+        params={"region_id": REGION},
+        required_keys=["schema_version", "methods", "task_contracts"],
+    )
     models_list = call("models_list", "GET /models", "GET", "/models", params={"region_id": REGION})
     if isinstance(models_list, list):
         empty_system = [
@@ -471,6 +456,14 @@ def main() -> int:
             json_body={"name": f"full_api_audit_renamed_{timestamp}"},
             required_keys=["status"],
         )
+        call(
+            "model_rename_put",
+            "PUT /models/{model_id}",
+            "PUT",
+            f"/models/{model_id}",
+            json_body={"name": f"full_api_audit_put_{timestamp}"},
+            required_keys=["status"],
+        )
         custom_infer = call(
             "model_infer",
             "POST /models/{model_id}/infer",
@@ -503,6 +496,30 @@ def main() -> int:
             timeout=180,
         )
         assert_batch_success("model_infer_batch", batch_data, 2)
+        analysis_data = call(
+            "model_analysis",
+            "POST /models/{model_id}/analysis",
+            "POST",
+            f"/models/{model_id}/analysis",
+            json_body={
+                "analysis_type": "single_time",
+                "region_id": REGION,
+                "patch_ids": [PATCH_ID, PATCH_ID_2],
+                "month": MONTH,
+            },
+            required_keys=[
+                "model_id",
+                "analysis_type",
+                "total",
+                "success_count",
+                "error_count",
+                "summary_text",
+                "aggregate",
+                "results",
+            ],
+            timeout=180,
+        )
+        assert_batch_success("model_analysis", analysis_data, 2)
         if isinstance(batch_data, dict):
             for idx, result in enumerate(batch_data.get("results", [])[:1]):
                 if result.get("result_url"):
@@ -595,7 +612,13 @@ def main() -> int:
     )
     if isinstance(sam3_embed, dict):
         image = sam3_embed.get("image") or {}
-        if image.get("width") != 256 or image.get("height") != 256 or not image.get("data"):
+        if (
+            not isinstance(image.get("width"), int)
+            or not isinstance(image.get("height"), int)
+            or image.get("width", 0) <= 0
+            or image.get("height", 0) <= 0
+            or not image.get("data")
+        ):
             failures.append(f"sam3_embed returned invalid image payload: {image}")
     sam3_segment = call(
         "sam3_segment",
@@ -619,8 +642,8 @@ def main() -> int:
         for feature in features:
             geometry = feature.get("geometry") or {}
             props = feature.get("properties") or {}
-            if geometry.get("type") != "Polygon":
-                failures.append(f"sam3_segment feature is not Polygon: {feature}")
+            if geometry.get("type") not in {"Polygon", "MultiPolygon"}:
+                failures.append(f"sam3_segment feature is not polygonal GeoJSON: {feature}")
             for key in ("score", "bbox", "bbox_wgs84", "patch_id", "sensor_type", "date"):
                 if key not in props:
                     failures.append(f"sam3_segment missing property {key}: {feature}")

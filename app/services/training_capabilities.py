@@ -48,6 +48,7 @@ def get_training_capabilities(region_id: Optional[str] = None) -> Dict[str, Any]
                 "feature_source": "aef",
                 "supported_model_types": ["single_time_detection", "change_detection"],
                 "trainer": "pixel_mlp",
+                "selection_rule": "AEF 为年度特征；当前任意前端月份均读取 2025 年年度 embedding",
                 "unavailable_reason": None if aef_available else "该区域未找到真实 AEF embedding；请配置 AEF_EMBEDDING_DIR/<region_id>",
             },
             {

@@ -28,6 +28,11 @@ def load_job(user_id: str, job_id: str) -> Optional[Dict[str, Any]]:
     path = _job_path(user_id, job_id)
     if not path.is_file():
         return None
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        return value if isinstance(value, dict) else None
+    except (OSError, json.JSONDecodeError):
+        return None
 
 
 def find_job(job_id: str) -> Optional[Dict[str, Any]]:
@@ -42,11 +47,6 @@ def find_job(job_id: str) -> Optional[Dict[str, Any]]:
         if job is not None:
             return job
     return None
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-        return value if isinstance(value, dict) else None
-    except (OSError, json.JSONDecodeError):
-        return None
 
 
 def update_job(user_id: str, job_id: str, **updates: Any) -> Optional[Dict[str, Any]]:

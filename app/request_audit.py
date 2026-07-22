@@ -147,12 +147,10 @@ async def request_audit_middleware(
         return await call_next(request)
 
     start = time.perf_counter()
+    # Starlette caches the body for downstream handlers. Replacing
+    # ``request._receive`` here used to replay ``http.request`` forever, which
+    # breaks StreamingResponse while it is waiting for ``http.disconnect``.
     body = await request.body()
-
-    async def receive() -> Dict[str, Any]:
-        return {"type": "http.request", "body": body, "more_body": False}
-
-    request._receive = receive  # type: ignore[attr-defined]
     status_code = 500
     error = None
 

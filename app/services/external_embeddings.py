@@ -21,6 +21,7 @@ from app.services.s2_ml import resolve_s2_path
 DINO_MODEL_DIR = Path(os.environ.get("DINOV3_SAT493M_MODEL_DIR", "models/dinov3_sat493m"))
 DINO_CACHE_DIR = Path(os.environ.get("DINOV3_SAT493M_CACHE_DIR", "data/feature_cache/dinov3_sat493m"))
 AEF_EMBEDDING_DIR = Path(os.environ.get("AEF_EMBEDDING_DIR", "data/external_embeddings/aef"))
+AEF_ANNUAL_FALLBACK_YEAR = os.environ.get("AEF_ANNUAL_FALLBACK_YEAR", "2025")
 EXTERNAL_MLP_CHECKPOINT_FORMAT = "external_embedding_mlp_v1"
 
 _dino_model = None
@@ -52,6 +53,9 @@ def load_aef_embedding(region_id: str, patch_id: str, month: str) -> np.ndarray:
     digits = re.sub(r"\D", "", month or "")
     if len(digits) >= 4:
         keys.append(digits[:4])
+    # AEF is an annual product. Keep the frontend month contract while using
+    # the installed 2025 annual feature when that exact year is unavailable.
+    keys.append(AEF_ANNUAL_FALLBACK_YEAR)
     for key in dict.fromkeys(keys):
         candidates = (
             AEF_EMBEDDING_DIR / region_id / key / f"{patch_id}.npy",

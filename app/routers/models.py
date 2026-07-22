@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Path as PathParam, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Path as PathParam, Query
 from fastapi.responses import FileResponse
 
 from app.config import get_config
@@ -53,10 +53,21 @@ from app.services.training_engine import (
     ExternalEmbeddingMLPTrainingEngine,
 )
 
-router = APIRouter(prefix="/models", tags=["models"])
+router = APIRouter(prefix="/models")
 
 # Hot cache only. The canonical job record is persisted under users/{id}/jobs.
 _training_jobs: dict[str, dict] = {}
+
+
+def _completion_metadata(result: dict, binding: dict) -> dict:
+    """Merge training metadata once, with checkpoint binding as authority."""
+    return {
+        "resolved_training_method": result.get(
+            "resolved_training_method", "auto_embedding_head"
+        ),
+        "feature_source": result.get("feature_source", "xuannv_embedding"),
+        **binding,
+    }
 
 
 def _validate_result_filename(filename: str) -> None:
@@ -381,9 +392,17 @@ async def get_model(
         examples=["harbin"],
     ),
     version: Optional[str] = Query(
-        "v2",
-        description="当 model_id 是系统预训练任务 ID 时，选择 checkpoint 版本。",
-        examples=["v2"],
+        None,
+        description=(
+            "当 model_id 是系统预训练任务 ID 时，选择 checkpoint 版本。"
+            "不填则自动使用该区域的默认版本；海淀当前为 v1，哈尔滨当前为 v2。"
+            "明确填写该区域不存在的版本时返回 404，不会静默切换版本。"
+        ),
+        examples=["v1"],
+        openapi_examples={
+            "haidian": {"summary": "海淀默认版本", "value": "v1"},
+            "harbin": {"summary": "哈尔滨默认版本", "value": "v2"},
+        },
     ),
     user: dict = Depends(get_current_user),
 ) -> dict:
@@ -396,6 +415,25 @@ async def get_model(
     model = registry.get_model(model_id)
     if model:
         model.setdefault("source", "custom")
+        model_path = model.get("model_path")
+        binding_fields = (
+            "foundation_model_id",
+            "foundation_model_version",
+            "feature_source",
+            "feature_dimension",
+            "preprocessing_version",
+            "head_type",
+            "checkpoint_format",
+            "compatible_regions",
+        )
+        if model_path and any(not model.get(field) for field in binding_fields):
+            try:
+                binding = load_model_binding(Path(model_path))
+            except (OSError, ValueError, RuntimeError):
+                binding = {}
+            for field, value in binding.items():
+                if not model.get(field) and value not in (None, [], ""):
+                    model[field] = value
         return model
 
     if is_system_task(model_id):
@@ -591,12 +629,15 @@ async def infer(
 
 _INFER_BATCH_EXAMPLES: Dict[str, Any] = {
     "single_time_detection": {
-        "summary": "自定义单时间检测模型批量推理",
-        "description": "单时间检测模型批量推理只需传入 month。",
+        "summary": "海淀自定义模型批量推理",
+        "description": (
+            "单时间检测模型只需传入 month。后端按 model_id 自动读取训练时绑定的 "
+            "P10C、传统 Sentinel-2、AEF 或 DINOv3 底座；AEF 当前固定使用 2025 年度特征。"
+        ),
         "value": {
-            "region_id": "harbin",
-            "patch_ids": ["patch_000000", "patch_000001"],
-            "month": "2025-04",
+            "region_id": "haidian",
+            "patch_ids": ["patch_000018", "patch_000019"],
+            "month": "202604",
         },
     },
     "change_detection": {
@@ -641,7 +682,9 @@ async def infer_batch(
     """对最多 100 个 Patch 批量运行模型推理（支持自定义模型和系统预训练模型）。
 
     用于一次性对多个 Patch 生成预测结果，提高处理效率。
-    返回每个 Patch 的推理状态及结果图片 URL。
+    返回每个 Patch 的推理状态及结果图片 URL。自定义模型会根据模型 ID 自动
+    复用训练时绑定的底座和预处理；AEF 模型接收统一的 month 字段，但当前
+    固定读取 2025 年度 AEF 特征。
 
     """
     registry = get_model_registry(user["user_id"])
@@ -751,6 +794,26 @@ async def get_job_status(
         raise HTTPException(status_code=404, detail="Job not found")
     if user.get("role") != "admin" and job.get("user_id") != user["user_id"]:
         raise HTTPException(status_code=403, detail="Access denied")
+    model_path = job.get("model_path")
+    if model_path and any(
+        not job.get(field)
+        for field in (
+            "foundation_model_id",
+            "foundation_model_version",
+            "feature_dimension",
+            "preprocessing_version",
+            "head_type",
+            "checkpoint_format",
+            "compatible_regions",
+        )
+    ):
+        try:
+            binding = load_model_binding(Path(model_path))
+        except (OSError, ValueError, RuntimeError):
+            binding = {}
+        for field, value in binding.items():
+            if not job.get(field) and value not in (None, [], ""):
+                job[field] = value
     return {
         "job_id": job["job_id"],
         "status": job["status"],
@@ -773,7 +836,15 @@ async def get_job_status(
     }
 
 
-@router.get("/results/{filename}")
+@router.get(
+    "/results/{filename}",
+    response_class=FileResponse,
+    responses={
+        200: {"description": "PNG 推理结果", "content": {"image/png": {}}},
+        400: {"model": ErrorResponse},
+        404: {"model": ErrorResponse},
+    },
+)
 async def get_result(
     filename: str = PathParam(
         ...,
@@ -868,6 +939,7 @@ def _do_training(
 
         registry = get_model_registry(user_id)
         binding = load_model_binding(Path(result["model_path"]))
+        completion_metadata = _completion_metadata(result, binding)
         registry.update_model(
             model_id,
             status="completed",
@@ -875,12 +947,7 @@ def _do_training(
             accuracy=result["accuracy"],
             metric_name=result.get("metric_name"),
             n_samples=result["n_samples"],
-            resolved_training_method=result.get(
-                "resolved_training_method",
-                "auto_embedding_head",
-            ),
-            feature_source=result.get("feature_source", "xuannv_embedding"),
-            **binding,
+            **completion_metadata,
         )
         _training_jobs[job_id].update(
             {
@@ -889,11 +956,7 @@ def _do_training(
                 "metric_name": result.get("metric_name"),
                 "n_samples": result["n_samples"],
                 "model_path": result["model_path"],
-                "resolved_training_method": result.get(
-                    "resolved_training_method", "auto_embedding_head"
-                ),
-                "feature_source": result.get("feature_source", "xuannv_embedding"),
-                **binding,
+                **completion_metadata,
                 "message": "Training completed",
             }
         )

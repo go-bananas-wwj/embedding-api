@@ -2,7 +2,21 @@
 
 import pytest
 
-from app.services.time_utils import normalize_month, normalize_period, normalize_quarter_date
+from app.services.time_utils import (
+    is_valid_month_or_date,
+    normalize_month,
+    normalize_period,
+    normalize_quarter_date,
+)
+
+
+def test_calendar_month_and_date_validation():
+    assert is_valid_month_or_date("202512")
+    assert is_valid_month_or_date("2025-12")
+    assert is_valid_month_or_date("20251231")
+    assert not is_valid_month_or_date("202513")
+    assert not is_valid_month_or_date("20250230")
+    assert not is_valid_month_or_date("2025/12")
 
 
 class TestNormalizeMonth:
@@ -46,19 +60,16 @@ class TestNormalizePeriod:
 
 
 class TestNormalizeQuarterDate:
-    def test_hyphen_maps_to_quarter(self):
+    def test_hyphen_maps_only_to_equivalent_month(self):
         variants = normalize_quarter_date("2025-04")
-        assert "2025Q2" in variants
-        assert "2025-04" in variants
-        assert "202504" in variants
+        assert variants == ["2025-04", "202504"]
 
-    def test_compact_maps_to_quarter(self):
+    def test_compact_maps_only_to_equivalent_month(self):
         variants = normalize_quarter_date("202510")
-        assert "2025Q4" in variants
-        assert "202510" in variants
+        assert variants == ["202510", "2025-10"]
 
     def test_ymd_preserved(self):
         assert "20251201" in normalize_quarter_date("20251201")
 
-    def test_quarter_preserved(self):
-        assert "2025Q2" in normalize_quarter_date("2025Q2")
+    def test_quarter_is_not_supported(self):
+        assert normalize_quarter_date("2025Q2") == []

@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import re
 import stat
 from pathlib import Path
 from typing import Optional
@@ -21,13 +22,20 @@ class TileService:
         """Validate period string to prevent path traversal."""
         if period is None:
             return True
-        import re
         return bool(re.match(r"^[\w\-]+$", period)) and len(period) <= 64
 
     @staticmethod
     def _validate_version(version: str) -> bool:
         """Validate version string."""
         return version in ("v1", "v2")
+
+    @staticmethod
+    def _parse_patch_tile(filename: str) -> Optional[tuple[str, Optional[str]]]:
+        """Parse patch ID and optional period without splitting `_vs_`."""
+        match = re.match(r"^(patch_\d+)(?:_(.+))?\.png$", filename)
+        if not match:
+            return None
+        return match.group(1), match.group(2)
 
     @staticmethod
     def _is_symlink(path: Path) -> bool:
@@ -97,6 +105,7 @@ class TileService:
 
         # Build list of tiles directories to scan
         tiles_dirs = []
+        period_variants = set(normalize_period(period)) if period else set()
         if period:
             for p in normalize_period(period):
                 tiles_dirs.append(Path(base) / p / "tiles")
@@ -117,29 +126,19 @@ class TileService:
                 if t.name in seen:
                     continue
                 seen.add(t.name)
-                parts = t.stem.split("_")
-                if len(parts) >= 3:
-                    # v1 format: patch_000000_2025-10.png
-                    patch_id = "_".join(parts[:-1])
-                    tile_period = parts[-1]
-                    result.append(
-                        {
-                            "patch_id": patch_id,
-                            "period": tile_period,
-                            "filename": t.name,
-                        }
-                    )
-                elif len(parts) == 2:
-                    # v2 format: patch_000000.png
-                    patch_id = "_".join(parts)
-                    tile_period = period
-                    result.append(
-                        {
-                            "patch_id": patch_id,
-                            "period": tile_period,
-                            "filename": t.name,
-                        }
-                    )
+                parsed = TileService._parse_patch_tile(t.name)
+                if not parsed:
+                    continue
+                patch_id, filename_period = parsed
+                if period_variants and filename_period and filename_period not in period_variants:
+                    continue
+                result.append(
+                    {
+                        "patch_id": patch_id,
+                        "period": filename_period or period,
+                        "filename": t.name,
+                    }
+                )
         return result
 
     @staticmethod

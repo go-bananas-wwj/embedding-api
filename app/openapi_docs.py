@@ -1,9 +1,8 @@
-"""OpenAPI documentation helpers.
+"""OpenAPI documentation helpers for the concise Swagger UI.
 
-The route handlers keep the source-of-truth API behavior. This module only
-enriches generated OpenAPI text so Swagger UI is easier for frontend engineers
-to read: every operation gets a parameter table, request-body summary, and
-response summary with defaults/ranges where the schema provides them.
+FastAPI and Swagger already render parameters, request bodies, responses and
+schemas. This module enriches those native panels with Chinese field help and
+runnable examples without repeating the same information as Markdown tables.
 """
 
 from typing import Any, Dict, Iterable, List, Optional
@@ -33,33 +32,9 @@ def _enhance_operation(
     if operation.get("x-docs-enhanced"):
         return
 
-    base_description = (operation.get("description") or "").strip()
-    sections = [base_description] if base_description else []
-
     parameters = operation.get("parameters", [])
     _apply_preferred_parameter_examples(parameters, path)
-
-    parameter_section = _parameter_section(parameters)
-    if "参数填写说明" in base_description:
-        parameter_section = ""
-    if parameter_section:
-        sections.append(parameter_section)
-    elif "参数填写说明" not in base_description:
-        sections.append("### 参数填写说明\n\n本接口不需要路径或查询参数。")
-
-    request_body_section = _request_body_section(operation.get("requestBody"), components)
-    if request_body_section:
-        sections.append(request_body_section)
-        _set_request_body_description(operation["requestBody"], request_body_section)
-    else:
-        sections.append("### Request Body 说明\n\n本接口不需要请求体。")
-
-    response_section = _response_section(operation.get("responses", {}), components)
-    if response_section:
-        sections.append(response_section)
-        _enhance_response_descriptions(operation.get("responses", {}), components)
-
-    operation["description"] = "\n\n".join(sections)
+    _enhance_response_descriptions(operation.get("responses", {}), components)
     operation["x-docs-enhanced"] = True
     operation.setdefault("operationId", _operation_id(method, path))
 
@@ -104,7 +79,6 @@ def _apply_preferred_parameter_examples(
         "region_id": "haidian",
         "patch_id": "patch_000000",
         "task_type": "building_extraction",
-        "version": "v1",
         "month": "202512",
         "date": "202512",
         "sensor_type": "s2",
@@ -113,14 +87,13 @@ def _apply_preferred_parameter_examples(
     }
     if "/sam3/" in path:
         preferred["region_id"] = "haidian"
+    if path.endswith("/embedding"):
+        # The two regions have different month ranges. Leaving this optional
+        # lets the endpoint select each region's latest available month.
+        preferred.pop("month", None)
     if "/tasks/" in path:
         preferred["region_id"] = "haidian"
         preferred["task_type"] = "building_extraction"
-    if path.endswith("/summary"):
-        preferred["period"] = None
-    elif "/tasks/" in path:
-        preferred["period"] = "202512"
-
     for param in parameters:
         name = param.get("name")
         if name not in preferred:
@@ -479,7 +452,7 @@ FIELD_DOCS = {
     "y": "XYZ 瓦片 Y 坐标。当前 XYZ 瓦片接口为预留接口。",
     "name": "名称。用于模型、类别或展示项的人类可读名称。",
     "model_type": "训练类型。可选 `single_time_detection`（单时间检测）或 `change_detection`（双时相变化检测）；旧值 `classification` 仍兼容。",
-    "training_method": "训练方式。默认 `xuannv_earth`；`traditional_ml` 仅使用 Sentinel-2 光学影像和 Random Forest；`aef`、`dinov3_sat493m` 冻结对应 embedding 并训练普通两层像素 MLP。实际资产可用性以 `GET /models/capabilities` 为准。",
+    "training_method": "训练方式。默认 `xuannv_earth`；`traditional_ml` 使用 Sentinel-2 与 Random Forest；`aef` 使用年度 embedding，当前任意月份固定回退到 2025 年；`dinov3_sat493m` 使用对应月份光学影像。实际资产可用性以 `GET /models/capabilities` 为准。",
     "requested_training_method": "前端请求的训练方式；旧模型和系统模型可能为空。",
     "resolved_training_method": "后端实际执行的算法，例如 `pu_query_retrieval`、`binary_conv3x3` 或 `random_forest`。",
     "feature_source": "训练特征来源，例如 `xuannv_embedding` 或 `sentinel2_l2a`。",

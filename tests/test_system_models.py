@@ -123,6 +123,29 @@ class TestSystemModels:
         assert response.status_code == 200
         assert response.json()[1]["name"] == "道路"
 
+    def test_haidian_system_model_rejects_unavailable_explicit_version(self):
+        response = client.get(
+            "/system-models/road_extraction/classes"
+            "?region_id=haidian&version=v2"
+        )
+
+        assert response.status_code == 404
+        assert "Available versions: v1" in response.json()["detail"]
+
+    def test_haidian_land_use_static_product_has_documented_nine_class_legend(self):
+        response = client.get(
+            "/system-models/land_use_classification/classes",
+            params={"region_id": "haidian", "version": "v1"},
+        )
+        assert response.status_code == 200
+        classes = response.json()
+        assert len(classes) == 9
+        assert classes[0] == {
+            "id": "sys_land_use_classification_0",
+            "name": "水体",
+            "color": "#286EE6",
+        }
+
     def test_haidian_system_model_infer_omitted_version_uses_v1(self):
         response = client.post(
             "/system-models/road_extraction/infer"

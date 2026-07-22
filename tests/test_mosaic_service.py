@@ -14,10 +14,10 @@ def test_candidate_period_prefixes_do_not_use_bare_year():
     assert "202512" not in prefixes
 
 
-def test_candidate_period_prefixes_expand_quarter_only_for_quarter():
+def test_candidate_period_prefixes_do_not_expose_quarter_as_months():
     prefixes = _candidate_period_prefixes(["2025Q4"])
 
-    assert prefixes == ["2025Q4", "202510", "202511", "202512"]
+    assert prefixes == []
 
 
 def test_get_raw_tiff_path_prefers_requested_month_over_same_year(tmp_path: Path):

@@ -211,9 +211,9 @@ def test_external_embedding_mlp_training_and_inference(
     assert checkpoint["head_type"] == "pixel_mlp"
     assert checkpoint["training_method"] == "aef"
     assert checkpoint["foundation_model_id"] == "aef"
-    assert checkpoint["foundation_model_version"] == "aef_embedding_v1"
+    assert checkpoint["foundation_model_version"] == "aef_annual_2025"
+    assert checkpoint["preprocessing_version"] == "aef_annual_2025"
     assert checkpoint["feature_dimension"] == 12
-    assert checkpoint["preprocessing_version"] == "aef_precomputed_v1"
     assert checkpoint["compatible_regions"] == ["harbin"]
     path = InferenceEngine(user_id).infer(
         model_id, "harbin", "patch_000000", month="2025-04"

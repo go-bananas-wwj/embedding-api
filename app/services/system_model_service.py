@@ -27,6 +27,18 @@ HAIDIAN_LAND_COVER_CLASSES = [
     {"id": "sys_land_cover_classification_8", "name": "永久性水体", "color": "#1E64DC"},
 ]
 
+HAIDIAN_LAND_USE_CLASSES = [
+    {"id": "sys_land_use_classification_0", "name": "水体", "color": "#286EE6"},
+    {"id": "sys_land_use_classification_1", "name": "树木", "color": "#46B450"},
+    {"id": "sys_land_use_classification_2", "name": "草地", "color": "#F5DC5A"},
+    {"id": "sys_land_use_classification_3", "name": "淹水植被", "color": "#DC50B4"},
+    {"id": "sys_land_use_classification_4", "name": "农作物", "color": "#FFB496"},
+    {"id": "sys_land_use_classification_5", "name": "灌木与矮林", "color": "#E63C28"},
+    {"id": "sys_land_use_classification_6", "name": "建成区", "color": "#6E6E6E"},
+    {"id": "sys_land_use_classification_7", "name": "裸地", "color": "#965A46"},
+    {"id": "sys_land_use_classification_8", "name": "冰雪", "color": "#EBEBEB"},
+]
+
 
 def _load_embedding(
     region_id: str, patch_id: str, month: str, version: str = "v2"
@@ -115,13 +127,19 @@ def list_system_models(region_id: Optional[str] = None) -> List[Dict[str, Any]]:
 
 
 def _system_model_runtime_metadata(
-    region_id: Optional[str], task_id: str, versions: List[str]
-) -> Dict[str, str]:
+    region_id: Optional[str],
+    task_id: str,
+    versions: List[str],
+    selected_version: Optional[str] = None,
+) -> Dict[str, Any]:
     """Return additive frontend metadata for configured task heads."""
     if not region_id or not versions:
         return {}
     cfg = get_config().get("models", default={})
-    for version in reversed(versions):
+    ordered_versions = [selected_version] if selected_version else list(reversed(versions))
+    for version in ordered_versions:
+        if not version:
+            continue
         task_cfg = (
             cfg.get(region_id, {})
             .get(version, {})
@@ -134,6 +152,34 @@ def _system_model_runtime_metadata(
             return {
                 "head_type": head_type,
                 "feature_source": task_cfg.get("feature_source", "embedding"),
+                "foundation_model_id": "p10c" if region_id == "haidian" else "xuannv_earth",
+                "foundation_model_version": version,
+                "feature_dimension": 64 if region_id == "haidian" else 128,
+                "preprocessing_version": f"{region_id}_embedding_{version}",
+                "checkpoint_format": SYSTEM_HEAD_CHECKPOINT_FORMAT,
+                "compatible_regions": [region_id],
+            }
+        version_cfg = cfg.get(region_id, {}).get(version, {})
+        classification = version_cfg.get("classification", {}).get("tasks", {})
+        convhead = version_cfg.get("classification_convhead", {}).get("tasks", {})
+        aliases = {
+            "land_cover_classification": ["worldcover", "dynamic_world"],
+            "land_use_classification": ["dynamic_world"],
+            "water_extraction": ["jrc_water"],
+            "building_extraction": ["osm_buildings"],
+            "road_extraction": ["road_extraction"],
+        }.get(task_id, [])
+        if any(alias in classification or alias in convhead for alias in aliases):
+            uses_convhead = any(alias in convhead for alias in aliases)
+            return {
+                "head_type": "convhead" if uses_convhead else "linear_probe",
+                "feature_source": "xuannv_embedding",
+                "foundation_model_id": "xuannv_earth",
+                "foundation_model_version": version,
+                "feature_dimension": 128 if region_id == "harbin" and version == "v2" else 64,
+                "preprocessing_version": f"{region_id}_embedding_{version}",
+                "checkpoint_format": SYSTEM_HEAD_CHECKPOINT_FORMAT,
+                "compatible_regions": [region_id],
             }
     return {}
 
@@ -185,8 +231,14 @@ def resolve_system_model_version(
 ) -> str:
     """Resolve a requested system-model version to one available in the region."""
     versions = get_system_model_versions(region_id, task_id)
-    if requested and requested in versions:
-        return requested
+    if requested is not None:
+        if requested in versions:
+            return requested
+        available = ", ".join(sorted(versions)) or "none"
+        raise FileNotFoundError(
+            f"System model '{task_id}' version '{requested}' is not available "
+            f"for region '{region_id}'. Available versions: {available}"
+        )
     if "v2" in versions:
         return "v2"
     if "v1" in versions:
@@ -196,7 +248,9 @@ def resolve_system_model_version(
     raise FileNotFoundError(f"System model not found: {task_id}")
 
 
-def get_system_model_info(region_id: str, task_id: str, version: str = "v2") -> Dict[str, Any]:
+def get_system_model_info(
+    region_id: str, task_id: str, version: Optional[str] = None
+) -> Dict[str, Any]:
     """Return ModelOut-compatible metadata for a system pre-trained model.
 
     Raises FileNotFoundError if the model is not available for the region/version.
@@ -229,6 +283,7 @@ def get_system_model_info(region_id: str, task_id: str, version: str = "v2") -> 
         "job_id": None,
         "source": "system",
         "versions": versions,
+        **_system_model_runtime_metadata(region_id, task_id, versions, version),
     }
 
 
@@ -283,12 +338,20 @@ def get_system_model_classes(
     # Haidian land-cover output is a pre-generated monthly product rather than
     # an online checkpoint. Its legend must remain queryable independently of
     # whether real-time inference is available.
-    if region_id == "haidian" and task_id == "land_cover_classification":
+    if region_id == "haidian" and task_id in {
+        "land_cover_classification",
+        "land_use_classification",
+    }:
         if version != "v1":
             raise FileNotFoundError(
                 f"System model classes not found: {task_id} ({version})"
             )
-        return [dict(item) for item in HAIDIAN_LAND_COVER_CLASSES]
+        classes = (
+            HAIDIAN_LAND_COVER_CLASSES
+            if task_id == "land_cover_classification"
+            else HAIDIAN_LAND_USE_CLASSES
+        )
+        return [dict(item) for item in classes]
 
     model_path = _resolve_model_path(region_id, task_id, version)
     if not model_path or not model_path.exists():
@@ -417,30 +480,16 @@ def infer_system_model(
     if not model_path or not model_path.exists():
         raise FileNotFoundError(f"System model not found: {task_id} ({version})")
 
-    emb = _load_embedding(region_id, patch_id, month, version=version)
-    if emb is None:
-        raise FileNotFoundError(
-            f"Embedding not found for {patch_id} {month}"
-        )
+    pred = infer_system_model_array(region_id, task_id, patch_id, month, version)
 
     if model_path.suffix == ".pt":
-        pred = _infer_torch_head(model_path, emb)
-        _, H, W = emb.shape
         color = _hex_to_rgb(_binary_task_classes(task_id)[1]["color"])
-        rgb = np.full((H, W, 3), 0, dtype=np.uint8)
+        rgb = np.full((*pred.shape, 3), 0, dtype=np.uint8)
         rgb[pred == 1] = color
     else:
         model_data = joblib.load(model_path)
-        scaler = model_data["scaler"]
-        clf = model_data["model"]
         colors = model_data.get("colors", [])
-
-        D, H, W = emb.shape
-        flat = emb.reshape(D, -1).T
-        flat_s = scaler.transform(flat)
-        pred = clf.predict(flat_s).reshape(H, W)
-
-        rgb = np.full((H, W, 3), 200, dtype=np.uint8)
+        rgb = np.full((*pred.shape, 3), 200, dtype=np.uint8)
         for idx, color in enumerate(colors):
             if isinstance(color, tuple):
                 rgb[pred == idx] = color
@@ -456,3 +505,35 @@ def infer_system_model(
     result_path = results_dir / f"{task_id}_{region_id}_{patch_id}_{month}.png"
     img.save(result_path)
     return result_path
+
+
+def infer_system_model_array(
+    region_id: str,
+    task_id: str,
+    patch_id: str,
+    month: str,
+    version: str = "v2",
+) -> np.ndarray:
+    """Run a system model and return its raw two-dimensional class array."""
+    model_path = _resolve_model_path(region_id, task_id, version)
+    if not model_path or not model_path.exists():
+        raise FileNotFoundError(f"System model not found: {task_id} ({version})")
+
+    emb = _load_embedding(region_id, patch_id, month, version=version)
+    if emb is None:
+        raise FileNotFoundError(
+            f"Embedding not found for {patch_id} {month}"
+        )
+
+    if model_path.suffix == ".pt":
+        pred = _infer_torch_head(model_path, emb)
+    else:
+        model_data = joblib.load(model_path)
+        scaler = model_data["scaler"]
+        clf = model_data["model"]
+        D, H, W = emb.shape
+        flat = emb.reshape(D, -1).T
+        flat_s = scaler.transform(flat)
+        pred = clf.predict(flat_s).reshape(H, W)
+
+    return np.asarray(pred)

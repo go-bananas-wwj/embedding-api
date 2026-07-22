@@ -26,6 +26,38 @@ class TestSAM3ServiceStatus:
         assert status["cache"]["size"] == 0
 
 
+class TestSAM3HighresCandidateSelection:
+    def test_rejects_near_full_frame_when_plausible_candidate_exists(self):
+        full = np.ones((10, 10), dtype=bool)
+        useful = np.zeros((10, 10), dtype=bool)
+        useful[3:6, 4:7] = True
+
+        selected = SAM3Service._select_single_highres_prediction(
+            [(full, 0.95, [0, 0, 10, 10]), (useful, 0.75, [4, 3, 3, 3])]
+        )
+
+        assert len(selected) == 1
+        assert selected[0][2] == [4, 3, 3, 3]
+
+    def test_uses_highest_score_among_plausible_candidates(self):
+        first = np.eye(10, dtype=bool)
+        second = np.fliplr(first)
+        selected = SAM3Service._select_single_highres_prediction(
+            [(first, 0.4, [0, 0, 10, 10]), (second, 0.8, [0, 0, 10, 10])]
+        )
+        assert selected[0][1] == 0.8
+
+    def test_prefers_local_instance_over_large_low_quality_region(self):
+        local = np.zeros((100, 100), dtype=bool)
+        local[48:53, 48:53] = True
+        broad = np.zeros((100, 100), dtype=bool)
+        broad[20:80, 20:80] = True
+        selected = SAM3Service._select_single_highres_prediction(
+            [(local, 0.03, [48, 48, 5, 5]), (broad, 0.11, [20, 20, 60, 60])]
+        )
+        assert selected[0][2] == [48, 48, 5, 5]
+
+
 class TestSAM3ServiceCache:
     @patch.object(SAM3Service, "_ensure_model")
     @patch.object(SAM3Service, "_load_geo_image")

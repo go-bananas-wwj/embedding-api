@@ -744,65 +744,83 @@ curl -s "http://60.31.21.42:22065/regions/harbin/tasks"
 
 ### 8. 任务统计摘要
 
-获取某个下游任务的整体统计信息。
+获取任务资产覆盖、模型来源、可用月份、结果颜色含义、目标占比、异常警告和简短中文分析。响应适合前端展示，也适合智能体直接读取。
 
 ```
-GET /regions/{region_id}/tasks/{task_type}/summary?version=v1&period=2025-04_vs_2025-06
+GET /regions/{region_id}/tasks/{task_type}/summary
 ```
 
-**什么时候用**: 前端仪表盘展示「该任务共发现多少个图斑、多少个 Patch 有异常」等统计数字。
+**什么时候用**: 判断任务结果是否齐全、覆盖哪些月份、结果图中每种颜色表示什么，以及目标区域大约占多少。
 
 **路径参数**:
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `region_id` | string | 是 | 区域 ID |
-| `task_type` | string | 是 | 任务类型，如 `change_detection` |
+| `task_type` | string | 是 | 单期任务类型，如 `building_extraction`、`road_extraction`、`water_extraction` |
 
 **查询参数**:
 
 | 参数 | 类型 | 必填 | 默认值 | 说明 |
 |------|------|------|--------|------|
-| `version` | string | 否 | `v1` | 版本号 |
-| `period` | string | 否 | - | 时间周期，V2 任务需要指定，如 `2025-04_vs_2025-06` |
+| `version` | string | 否 | 按区域选择 | 海淀默认 P10C (`v1`)，哈尔滨默认 V5 (`v2`) |
+| `month` | string | 否 | - | 单期影像月份，支持 `YYYYMM` 或 `YYYY-MM` |
+| `patch_ids` | string[] | 否 | 全部 Patch | 可重复传入；每个 Patch 独立统计后汇总，最多 100 个 |
 
 **curl 示例**:
 ```bash
-# V1 单期任务
-curl -s "http://60.31.21.42:22065/regions/harbin/tasks/building_extraction/summary?version=v1"
+# 海淀建筑任务，版本可省略
+curl -s "http://60.31.21.42:22065/regions/haidian/tasks/building_extraction/summary?month=202512&patch_ids=patch_000000&patch_ids=patch_000001"
 
-# V2 变化检测任务
-curl -s "http://60.31.21.42:22065/regions/harbin/tasks/change_detection/summary?version=v1&period=2025-04_vs_2025-06"
-curl -s "http://60.31.21.42:22065/regions/harbin/tasks/land_use_classification/summary?version=v1"
+# 哈尔滨变化检测：同一批 Patch 分别比较各自的前后月份，再汇总
+curl -s "http://60.31.21.42:22065/regions/harbin/change-detection/summary?before_month=202504&after_month=202506&patch_ids=patch_000000&patch_ids=patch_000001"
 ```
 
 **成功响应** (200):
 ```json
 {
-  "task": "change_detection",
-  "name": "变化检测",
-  "version": "v1",
-  "period": "2025-04_vs_2025-06",
-  "grid_size": 64,
-  "total_polygons": null,
-  "total_patches": 424,
-  "positive_patches": null,
-  "negative_patches": null
-}
-```
-
-或对于 `building_extraction` V1：
-```json
-{
+  "schema_version": "2.0",
   "task": "building_extraction",
   "name": "建筑物提取",
+  "region_id": "haidian",
   "version": "v1",
-  "period": null,
-  "grid_size": 64,
-  "total_polygons": 24,
-  "total_patches": 424,
-  "positive_patches": 31,
-  "negative_patches": 393
+  "status": "ready",
+  "analysis_scope": {
+    "mode": "single_time",
+    "patch_ids": ["patch_000000", "patch_000001"],
+    "patch_count": 2,
+    "month": "202512",
+    "aggregation": "每个 Patch 独立推理后汇总统计"
+  },
+  "summary_text": "海淀区建筑物提取分析：月份为 202604，共分析 1 个 Patch，其中 1 个已有结果，覆盖率 100.0%。颜色说明：#FFFFFF 表示背景，#E60000 表示建筑物。",
+  "model": {
+    "foundation_model": "P10C",
+    "feature_source": "P10C 64D embedding",
+    "head_type": "binary_conv3x3"
+  },
+  "data_coverage": {
+    "configured_patches": 320,
+    "prediction_patches": 320,
+    "result_tiles": 320,
+    "label_patches": 320,
+    "coverage_rate": 1.0
+  },
+  "color_legend": [
+    {"color": "#FFFFFF", "name": "背景", "meaning": "结果图中该颜色表示背景。", "ratio": 0.42},
+    {"color": "#E60000", "name": "建筑物", "meaning": "结果图中该颜色表示建筑物。", "ratio": 0.58}
+  ],
+  "image_analysis": {
+    "image_count": 1,
+    "total_pixels": 16384,
+    "target_pixels": 9500,
+    "target_ratio": 0.58,
+    "images": [{"patch_id": "patch_000010", "width": 128, "height": 128, "total_pixels": 16384, "target_pixels": 9500, "target_ratio": 0.58}]
+  },
+  "result_images": [
+    {"patch_id": "patch_000010", "image_url": "http://60.31.21.42:22065/task-summary/results/haidian_building_extraction_v1_patch_000010_202604.png", "cleanup_interval_seconds": 7200}
+  ],
+  "insights": [],
+  "warnings": []
 }
 ```
 
@@ -811,14 +829,22 @@ curl -s "http://60.31.21.42:22065/regions/harbin/tasks/land_use_classification/s
 | `task` | string | 任务英文名 |
 | `name` | string | 任务中文名 |
 | `version` | string | 版本号 |
-| `period` | string | 时间段（V2 特有） |
-| `grid_size` | int | 网格尺寸（像素） |
-| `total_polygons` | int | 总共发现的变化图斑数量 |
-| `total_patches` | int | 该区域 Patch 总数 |
-| `positive_patches` | int | 有异常的 Patch 数量 |
-| `negative_patches` | int | 无异常的 Patch 数量 |
+| `status` | string | `ready`、`partial` 或 `unavailable` |
+| `summary_text` | string | 面向智能体的简短中文结果介绍 |
+| `analysis_scope` | object | 本次月份、Patch 范围及“逐 Patch 独立处理后汇总”的口径 |
+| `model` | object | 基座模型、Embedding 和下游头信息 |
+| `temporal_coverage` | object | 可用月份和起止时间 |
+| `data_coverage` | object | 预测、标签、结果瓦片和缺失 Patch 统计 |
+| `prediction_statistics` | object | 阈值、目标像素占比、分位数或颜色分布 |
+| `color_legend` | array | 每种结果颜色对应的类别、中文含义、像素数和占比 |
+| `image_analysis` | object | 图片宽高、总像素、目标像素和目标占比，可包含逐 Patch 明细 |
+| `result_images` | array | 逐 Patch 公网临时图片完整 URL；后台每两小时清空一次临时目录 |
+| `insights` | array | 带证据的结构化分析结论 |
+| `warnings` | array | 缺失资产、覆盖不足或质量风险 |
 
-**业务含义**: `positive_patches` / `total_patches` 就是异常检出率。例如 31/424 ≈ 7.3% 的 Patch 发现了建筑工地。
+> 摘要关注结果内容和颜色语义，不输出 IoU、Precision、Recall 等评估指标。
+
+> 变化检测使用独立接口 `GET /regions/{region_id}/change-detection/summary`。多个 Patch 之间不会互相比较；每个 Patch 只比较它自己的 `before_month` 与 `after_month`，最后再汇总。
 
 > **注意**: 任务列表、预生成结果和实时系统模型是不同能力。前端应先读取 `GET /regions/{region_id}/tasks` 和 `GET /system-models?region_id=...`，不要根据旧的静态表推断可用性。海淀土地利用/覆盖分类 V1 已有 `2025-12` 至 `2026-05` 月度结果。
 
@@ -1748,7 +1774,7 @@ curl -s "http://60.31.21.42:22065/models/results/infer_model_ghi789_harbin_patch
 
 ### 23. 获取整区域马赛克大图
 
-将某个区域、某个日期/月份下所有 Patch 的原始卫星 TIFF 按地理范围拼接成一张大图返回，用于前端展示整区域遥感影像。
+将某个区域、某个月份下所有 Patch 按地理范围拼接成一张大图。既可以返回原始卫星影像，也可以返回 Embedding PCA 色彩可视化。
 
 ```
 GET /regions/{region_id}/mosaic?date=YYYY-MM&sensor_type=s2&format=png
@@ -1764,20 +1790,11 @@ GET /regions/{region_id}/mosaic?date=YYYY-MM&sensor_type=s2&format=png
 
 | 参数 | 类型 | 必填 | 可取值 | 默认值 | 说明 |
 |------|------|------|--------|--------|------|
-| `date` | string | 是 | `YYYY-MM` / `YYYYMM` / `YYYYMMDD` | - | 日期/月。`YYYYMMDD` 精确读取当天影像；`YYYY-MM`/`YYYYMM` 为月度请求，同月多景时按日期倒序取最新一景。若没有日级/月级文件，才回退兼容哈尔滨旧季度文件 |
-| `sensor_type` | string | 否 | `s2` / `s1` / `landsat` | `s2` | 传感器类型 |
-| `version` | string | 否 | 任意 / 可省略 | `None` | 保留字段，对原始传感器数据无效 |
+| `date` | string | 是 | `YYYY-MM` / `YYYYMM` / `YYYYMMDD` | - | 日期/月。两个区域均支持带横杠和不带横杠的月份；月度请求按日期倒序选择当月最新一景 |
+| `sensor_type` | string | 否 | `s2` / `s1` / `landsat` / `highres` / `embedding` | `s2` | 大图数据源；`embedding` 返回 PCA 色彩图 |
+| `version` | string | 否 | `v1` / `v2` | 按区域自动选择 | 仅 Embedding 大图使用；海淀默认 P10C (`v1`)，哈尔滨默认 V5 (`v2`) |
 | `format` | string | 否 | `png` / `tif` | `png` | 输出格式：`png` 可视化；`tif` GeoTIFF 原始数据 |
 | `patch_ids` | string[] | 否 | 如 `patch_000000`、`patch_000001` | 全区域 | 只拼接指定 Patch ID 列表，可多次传入 |
-
-**哈尔滨 `date` 与季度文件映射**：
-
-| 你传的 `date` | 实际读取的文件 | 说明 |
-|---------------|----------------|------|
-| `2025-01` / `2025-02` / `2025-03` | `2025Q1` | 第一季度 |
-| `2025-04` / `2025-05` / `2025-06` | `2025Q2` | 第二季度 |
-| `2025-07` / `2025-08` / `2025-09` | `2025Q3` | 第三季度 |
-| `2025-10` / `2025-11` / `2025-12` | `2025Q4` | 第四季度 |
 
 > **多景影像选择规则**：如果同一个 patch、同一个传感器、同一个月下有多张日级 TIFF，
 > 后端按文件名日期倒序排列，固定选择最新的一景。
@@ -1791,6 +1808,7 @@ GET /regions/{region_id}/mosaic?date=YYYY-MM&sensor_type=s2&format=png
 | `s2` | B4(R) / B3(G) / B2(B) | Sentinel-2 真彩色 |
 | `landsat` | B4(R) / B3(G) / B2(B) | Landsat 真彩色 |
 | `s1` | R=VV, G=VH, B=VH/VV | Sentinel-1 伪彩色合成 |
+| `embedding` | 全局 PCA 色彩投影 | 使用该区域默认 Embedding 版本的逐月 PNG |
 
 **完整请求示例**：
 
@@ -1806,6 +1824,9 @@ curl -s "http://60.31.21.42:22065/regions/harbin/mosaic?date=2025-04&sensor_type
 
 # 4. 本地调试地址（服务重启后默认端口 9061）
 curl -s "http://localhost:9061/regions/harbin/mosaic?date=2025-04&sensor_type=s2&format=png&patch_ids=patch_000000&patch_ids=patch_000001" -o /tmp/harbin_s2_preview.png
+
+# 5. 海淀 P10C Embedding PCA 大图（version 可省略）
+curl -s "http://localhost:9061/regions/haidian/mosaic?date=202512&sensor_type=embedding&format=png" -o /tmp/haidian_embedding_202512.png
 ```
 
 **成功响应** (200): 返回 PNG 或 GeoTIFF 图片。

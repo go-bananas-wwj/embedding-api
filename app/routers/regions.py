@@ -1,17 +1,17 @@
 """Region management router."""
 
-import io
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Path, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response
 
 from app.config import get_config
 from app.schemas.models import (
-    RegionsResponse, RegionInfo, HealthResponse, RegionDetail, RegionTaskMeta,
+    ErrorResponse, RegionsResponse, RegionInfo, HealthResponse, RegionDetail, RegionTaskMeta,
 )
 from app.services.data_service import DataNotFoundError, DataValidationError
 from app.services.mosaic_service import build_mosaic
+from app.services.time_utils import is_valid_month_or_date
 
 router = APIRouter()
 
@@ -95,7 +95,20 @@ async def get_region(
     )
 
 
-@router.get("/regions/{region_id}/mosaic")
+@router.get(
+    "/regions/{region_id}/mosaic",
+    response_class=Response,
+    responses={
+        200: {
+            "description": "区域影像或 Embedding 大图",
+            "content": {"image/png": {}, "image/tiff": {}},
+        },
+        400: {"model": ErrorResponse},
+        404: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+        500: {"model": ErrorResponse},
+    },
+)
 async def get_region_mosaic(
     region_id: str = Path(
         ...,
@@ -108,27 +121,38 @@ async def get_region_mosaic(
     ),
     date: str = Query(
         ...,
-        description="日期/月份，哈尔滨格式为 'YYYY-MM'，会自动映射到季度文件。例如 '2025-04' -> '2025Q2'。",
-        examples=["2025-04"],
+        description=(
+            "影像月份或精确日期。两个区域统一支持 `YYYYMM`、`YYYY-MM`；"
+            "需要精确到天时可使用 `YYYYMMDD`。月度请求会选择当月最新影像。"
+        ),
+        examples=["202512"],
         openapi_examples={
-            "2025-04": {"summary": "2025 年第 2 季度", "value": "2025-04"},
-            "2025-10": {"summary": "2025 年第 4 季度", "value": "2025-10"},
+            "haidian": {"summary": "海淀月份", "value": "202512"},
+            "harbin": {"summary": "哈尔滨月份", "value": "202510"},
+            "hyphen": {"summary": "带横杠写法", "value": "2025-10"},
         },
     ),
     sensor_type: str = Query(
         "s2",
-        description="传感器类型。可选：'s2'（Sentinel-2，默认）、's1'（Sentinel-1）、'landsat'。",
+        description=(
+            "大图数据源。可选 `s2`、`s1`、`landsat`、`highres` 或 `embedding`；"
+            "`embedding` 返回按 Patch 空间位置拼接的 PCA 色彩可视化。"
+        ),
         examples=["s2"],
         openapi_examples={
             "s2": {"summary": "Sentinel-2 真彩色", "value": "s2"},
             "s1": {"summary": "Sentinel-1 SAR 伪彩色", "value": "s1"},
             "landsat": {"summary": "Landsat 真彩色", "value": "landsat"},
+            "highres": {"summary": "高分辨率光学影像", "value": "highres"},
+            "embedding": {"summary": "Embedding PCA 色彩图", "value": "embedding"},
         },
     ),
     version: Optional[str] = Query(
         None,
-        description="保留字段，对原始卫星传感器数据无效，可留空。",
-        examples=[None],
+        description=(
+            "仅 `sensor_type=embedding` 时使用，通常留空。"
+            "海淀默认 P10C（API `v1`），哈尔滨默认 V5（API `v2`）。"
+        ),
     ),
     format: str = Query(
         "png",
@@ -157,10 +181,33 @@ async def get_region_mosaic(
 ):
     """获取指定日期、区域的整区域马赛克大图。
 
-    将区域内所有 Patch 的原始卫星 TIFF 按地理范围拼接成一张大图返回，
-    用于前端展示整区域遥感影像。支持 Sentinel-2（s2）、Sentinel-1（s1）、Landsat。
+    将区域内 Patch 按真实空间位置拼接成一张大图。支持原始光学/SAR 影像，
+    也支持 `sensor_type=embedding` 的 PCA 色彩可视化。
     首次生成后会缓存到 users/default/mosaic/，后续直接读取。
     """
+    config = get_config()
+    if not config.region_exists(region_id):
+        raise HTTPException(status_code=404, detail=f"Region '{region_id}' not found")
+    if not is_valid_month_or_date(date):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Invalid date '{date}'. Use a real calendar month/date in "
+                "YYYYMM, YYYY-MM, or YYYYMMDD format."
+            ),
+        )
+    if patch_ids:
+        configured = {
+            patch.get("patch_id")
+            for patch in config.get_patches(region_id)
+            if isinstance(patch, dict)
+        }
+        missing = [patch_id for patch_id in patch_ids if patch_id not in configured]
+        if missing:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Patch '{missing[0]}' not found in region '{region_id}'",
+            )
     try:
         data, mime = build_mosaic(
             region_id=region_id,
@@ -177,4 +224,4 @@ async def get_region_mosaic(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to build mosaic: {e}")
 
-    return StreamingResponse(io.BytesIO(data), media_type=mime)
+    return Response(content=data, media_type=mime)

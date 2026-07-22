@@ -78,10 +78,38 @@ class TasksResponse(BaseModel):
 
 
 class TaskSummary(BaseModel):
+    schema_version: str = Field("2.0", description="摘要结构版本。")
     task: str = Field(..., description="Task identifier.")
     name: str = Field(..., description="Task display name.")
+    region_id: Optional[str] = Field(None, description="摘要所属区域。")
     version: str = Field(..., description="Result version.")
     period: Optional[str] = Field(None, description="Comparison period, if applicable.")
+    status: Optional[str] = Field(None, description="任务资产状态：ready、partial 或 unavailable。")
+    analysis_scope: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="本次分析的月份、Patch 范围和汇总方式。多个 Patch 会分别推理后汇总。",
+    )
+    summary_text: Optional[str] = Field(None, description="根据真实统计生成的中文综合分析。")
+    analysis_notes: List[str] = Field(default_factory=list, description="供智能体快速读取的分析要点。")
+    model: Dict[str, Any] = Field(default_factory=dict, description="基座模型、特征和下游头信息。")
+    temporal_coverage: Dict[str, Any] = Field(default_factory=dict, description="可用月份及时间覆盖范围。")
+    data_coverage: Dict[str, Any] = Field(default_factory=dict, description="预测、结果、标签和缺失 Patch 统计。")
+    prediction_statistics: Dict[str, Any] = Field(default_factory=dict, description="预测值、类别或目标密度统计。")
+    color_legend: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="结果图颜色说明；包含颜色、类别名称、中文含义及占比。",
+    )
+    image_analysis: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="结果图片尺寸、总像素数、目标像素数和目标占比。",
+    )
+    result_images: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="逐 Patch 公网临时图片完整 URL；图片目录每两小时自动清理。",
+    )
+    insights: List[Dict[str, Any]] = Field(default_factory=list, description="带证据的结构化分析结论。")
+    warnings: List[Dict[str, Any]] = Field(default_factory=list, description="数据缺失、覆盖不足或不可评估警告。")
+    generated_at: Optional[str] = Field(None, description="摘要生成时间，ISO 8601。")
     grid_size: Optional[int] = Field(None, description="Task grid size.")
     total_polygons: Optional[int] = Field(None, description="Total polygon count.")
     total_patches: Optional[int] = Field(None, description="Total patch count.")
@@ -216,8 +244,9 @@ class ModelCreate(BaseModel):
         description=(
             "训练方式。默认 xuannv_earth：使用玄女 embedding，少于 10 个有效 "
             "Polygon 时采用 PU + Query，否则采用 Binary Conv 3x3；traditional_ml "
-            "只读取 Sentinel-2 光学影像并训练 Random Forest；aef 和 "
-            "dinov3_sat493m 冻结各自 embedding，并训练普通两层像素 MLP。"
+            "只读取 Sentinel-2 光学影像并训练 Random Forest；aef 使用年度 "
+            "embedding（当前固定回退到 2025 年），dinov3_sat493m 使用月度光学影像，"
+            "两者均训练普通两层像素 MLP。"
         ),
         examples=["xuannv_earth"],
     )

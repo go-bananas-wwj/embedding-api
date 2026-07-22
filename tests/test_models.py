@@ -1,15 +1,68 @@
 """Custom model training and inference route tests."""
 
 import time
-
 import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.routers.models import _completion_metadata
 from app.routers.models import _resolve_embedding_version
+from app.services.model_registry import get_model_registry
 
 
 client = TestClient(app)
+
+
+def test_completion_metadata_does_not_duplicate_binding_fields():
+    metadata = _completion_metadata(
+        {
+            "accuracy": 0.8,
+            "n_samples": 4,
+            "feature_source": "xuannv_embedding",
+            "resolved_training_method": "prototype_pu_query",
+        },
+        {
+            "feature_source": "P10C 64D embedding",
+            "foundation_model_id": "p10c",
+            "head_type": "prototype_pu_query",
+        },
+    )
+
+    assert metadata["feature_source"] == "P10C 64D embedding"
+    assert metadata["foundation_model_id"] == "p10c"
+    assert metadata["resolved_training_method"] == "prototype_pu_query"
+
+
+def test_persisted_job_response_backfills_checkpoint_binding(monkeypatch):
+    monkeypatch.setattr("app.routers.models._training_jobs", {})
+    monkeypatch.setattr(
+        "app.routers.models.load_job",
+        lambda _user, _job: {
+            "job_id": "job_old",
+            "user_id": "default",
+            "status": "completed",
+            "model_id": "model_old",
+            "model_path": "users/default/models/model_old.pkl",
+        },
+    )
+    monkeypatch.setattr(
+        "app.routers.models.load_model_binding",
+        lambda _path: {
+            "foundation_model_id": "xuannv_earth",
+            "foundation_model_version": "v2",
+            "feature_dimension": 128,
+            "preprocessing_version": "p10c_embedding_v2",
+            "head_type": "pu_query_retrieval",
+            "checkpoint_format": "pu_query_retrieval_v1",
+            "compatible_regions": ["harbin"],
+        },
+    )
+
+    response = client.get("/models/jobs/job_old")
+
+    assert response.status_code == 200
+    assert response.json()["foundation_model_id"] == "xuannv_earth"
+    assert response.json()["compatible_regions"] == ["harbin"]
 
 
 def _geojson_annotation(
@@ -62,6 +115,19 @@ def _model_payload(name="test-model", model_type="single_time_detection", task_t
 
 
 class TestModels:
+    def test_analysis_endpoint_is_disabled(self):
+        response = client.post(
+            "/models/model_test/analysis",
+            json={
+                "analysis_type": "single_time",
+                "region_id": "haidian",
+                "patch_ids": ["patch_000018"],
+                "month": "202604",
+            },
+        )
+
+        assert response.status_code == 404
+
     def test_training_capabilities_are_machine_readable(self):
         response = client.get("/models/capabilities?region_id=haidian")
         assert response.status_code == 200
@@ -188,6 +254,48 @@ class TestModels:
         r = client.get(f"/models/{model_id}")
         assert r.status_code == 200
         assert r.json()["id"] == model_id
+
+    def test_get_legacy_model_backfills_checkpoint_binding(self, monkeypatch, tmp_path):
+        model_id = "model_legacy_binding"
+        registry = get_model_registry("default")
+        monkeypatch.setattr(
+            registry,
+            "get_model",
+            lambda requested: {
+                "id": model_id,
+                "name": "legacy",
+                "type": "single_time_detection",
+                "status": "completed",
+                "created_at": "2026-01-01T00:00:00",
+                "classes": [],
+                "model_path": str(tmp_path / "legacy.pkl"),
+                "compatible_regions": [],
+            }
+            if requested == model_id
+            else None,
+        )
+        monkeypatch.setattr(
+            "app.routers.models.get_model_registry", lambda _user_id: registry
+        )
+        monkeypatch.setattr(
+            "app.routers.models.load_model_binding",
+            lambda _path: {
+                "foundation_model_id": "xuannv_earth",
+                "foundation_model_version": "v2",
+                "feature_source": "xuannv_embedding",
+                "feature_dimension": 128,
+                "preprocessing_version": "p10c_embedding_v2",
+                "head_type": "pu_query_retrieval",
+                "checkpoint_format": "pu_query_retrieval_v1",
+                "compatible_regions": ["harbin"],
+            },
+        )
+
+        body = client.get(f"/models/{model_id}").json()
+
+        assert body["foundation_model_id"] == "xuannv_earth"
+        assert body["feature_dimension"] == 128
+        assert body["compatible_regions"] == ["harbin"]
 
     def test_rename_model_with_put(self):
         r = client.post("/models", json=_model_payload("test-rename-put"))
@@ -342,6 +450,21 @@ class TestModels:
         assert data["source"] == "system"
         assert data["status"] == "ready"
         assert len(data["classes"]) > 0
+
+    def test_get_haidian_system_model_omitted_version_uses_v1(self):
+        r = client.get("/models/building_extraction?region_id=haidian")
+
+        assert r.status_code == 200
+        assert r.json()["foundation_model_version"] == "v1"
+
+    def test_get_haidian_system_model_rejects_unavailable_explicit_version(self):
+        r = client.get(
+            "/models/building_extraction",
+            params={"region_id": "haidian", "version": "v2"},
+        )
+
+        assert r.status_code == 404
+        assert "Available versions: v1" in r.json()["detail"]
 
     def test_infer_system_model_via_models_endpoint(self):
         r = client.post(

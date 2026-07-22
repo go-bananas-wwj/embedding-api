@@ -15,6 +15,7 @@ from app.schemas.models import EmbeddingStats, ErrorResponse
 from app.services.data_service import (
     DataService, DataServiceError, DataValidationError, _check_file_size,
 )
+from app.services.time_utils import is_valid_month_or_date
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -28,6 +29,16 @@ MAX_NPY_ELEMENTS = 500_000_000  # ~4GB for float32, ~2GB for float64
 
 # Maximum decompressed image pixels to prevent PIL decompression bombs.
 MAX_IMAGE_PIXELS = 50_000_000  # ~50 MP
+
+
+def _default_embedding_version(region_id: str) -> str:
+    """Return the single frontend default embedding for each region."""
+    return "v1" if region_id == "haidian" else "v2"
+
+
+def _latest_available_month(months):
+    """Return the latest month from DataService's chronological list."""
+    return months[-1] if months else None
 
 
 def _load_image_array(path: str):
@@ -127,17 +138,28 @@ async def get_embedding(
     ),
     version: Optional[str] = Query(
         None,
-        description="Embedding version. Allowed values: v1 (V4 model), v2 (V5 model).",
-        examples=["v1"],
+        description=(
+            "Embedding 版本，通常不需要填写。省略时海淀自动使用 P10C（API `v1`），"
+            "哈尔滨自动使用 V5（API `v2`）。"
+        ),
         openapi_examples={
-            "v1": {"summary": "V4 embedding model", "value": "v1"},
-            "v2": {"summary": "V5 embedding model", "value": "v2"},
+            "haidian_p10c": {"summary": "海淀 P10C（API v1）", "value": "v1"},
+            "harbin_v5": {"summary": "哈尔滨 V5（API v2）", "value": "v2"},
         },
     ),
     month: Optional[str] = Query(
         None,
-        description="Month for time-series embeddings, e.g. 2025-04. Falls back to the first available month if omitted.",
-        examples=["2025-04"],
+        description=(
+            "Embedding 月份，可省略；省略时自动选择该区域最新可用月份。"
+            "哈尔滨 V5：`2025-04` 至 `2026-05`，其中 2025 年支持 04、06、08、09、10，"
+            "2026 年支持 01~05。海淀 P10C：`2025-12` 至 `2026-05`。"
+            "两个区域均兼容 `YYYYMM` 和 `YYYY-MM`。"
+        ),
+        openapi_examples={
+            "harbin_v5": {"summary": "哈尔滨 V5", "value": "202510"},
+            "haidian_p10c": {"summary": "海淀 P10C", "value": "202512"},
+            "hyphen": {"summary": "带横杠写法", "value": "2026-05"},
+        },
     ),
 ):
     """获取指定 Patch 的嵌入数据。
@@ -151,9 +173,13 @@ async def get_embedding(
             status_code=422, detail=f"Invalid format '{format}'. Use: png, npy, json, cache"
         )
 
-    if month is not None and not re.match(r"^[\w\-]{1,32}$", month):
+    if month is not None and not is_valid_month_or_date(month):
         raise HTTPException(
-            status_code=422, detail=f"Invalid month format: '{month}'"
+            status_code=422,
+            detail=(
+                f"Invalid month '{month}'. Use a real calendar month/date in "
+                "YYYYMM, YYYY-MM, or YYYYMMDD format."
+            ),
         )
 
     config = get_config()
@@ -167,25 +193,35 @@ async def get_embedding(
     if not patch:
         raise HTTPException(status_code=404, detail=f"Patch '{patch_id}' not found")
 
-    # If month not provided, try first available month (backward compat)
+    effective_version = version or _default_embedding_version(region_id)
+
+    # If omitted, use the latest month available for this region and patch.
     effective_month = month
     if not effective_month:
         available_months = DataService.get_available_months(region_id, patch_id)
-        if available_months:
-            effective_month = available_months[0]
+        effective_month = _latest_available_month(available_months)
 
     # Resolve embedding path
     try:
         emb_path = DataService.get_embedding_path(
-            region_id, patch_id, format, version=version, month=effective_month
+            region_id, patch_id, format, version=effective_version, month=effective_month
         )
         if not emb_path:
             # Try alternative formats for fallback
-            for alt_fmt in ("png", "npy", "cache"):
+            fallback_formats = (
+                ("npy", "png", "cache")
+                if format == "json"
+                else ("png", "npy", "cache")
+            )
+            for alt_fmt in fallback_formats:
                 if alt_fmt == format:
                     continue
                 alt_path = DataService.get_embedding_path(
-                    region_id, patch_id, alt_fmt, version=version, month=effective_month
+                    region_id,
+                    patch_id,
+                    alt_fmt,
+                    version=effective_version,
+                    month=effective_month,
                 )
                 if alt_path:
                     emb_path = alt_path
@@ -197,8 +233,7 @@ async def get_embedding(
         detail_msg = f"Embedding not found for patch '{patch_id}'"
         if month:
             detail_msg += f", month '{month}'"
-        if version:
-            detail_msg += f", version '{version}'"
+        detail_msg += f", version '{effective_version}'"
         raise HTTPException(status_code=404, detail=detail_msg)
 
     # Check file size before loading

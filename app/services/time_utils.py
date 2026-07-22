@@ -7,6 +7,7 @@ date handling logic.
 """
 
 import re
+from datetime import datetime
 from typing import List, Optional
 
 
@@ -16,6 +17,22 @@ _YYYYMM_RE = re.compile(r"^(\d{4})(\d{2})$")
 _YYYY_HYPHEN_MM_RE = re.compile(r"^(\d{4})-(\d{2})$")
 # 8-digit date: YYYYMMDD (used by some Haidian raw scenes / embeddings)
 _YYYYMMDD_RE = re.compile(r"^(\d{4})(\d{2})(\d{2})$")
+
+
+def is_valid_month_or_date(value: str) -> bool:
+    """Return whether value is a real YYYYMM, YYYY-MM, or YYYYMMDD date."""
+    for pattern, date_format in (
+        (_YYYYMM_RE, "%Y%m"),
+        (_YYYY_HYPHEN_MM_RE, "%Y-%m"),
+        (_YYYYMMDD_RE, "%Y%m%d"),
+    ):
+        if pattern.match(value):
+            try:
+                datetime.strptime(value, date_format)
+                return True
+            except ValueError:
+                return False
+    return False
 
 
 def normalize_month(month: Optional[str]) -> List[str]:
@@ -101,29 +118,18 @@ def normalize_period(period: Optional[str]) -> List[str]:
 
 
 def normalize_quarter_date(date: str) -> List[str]:
-    """Return candidate file stems for mosaic raw TIFF lookup.
-
-    Accepts ``YYYY-MM``, ``YYYYMM`` and exact ``YYYYMMDD`` strings and
-    returns all equivalent quarterly/compact forms that may match the
-    underlying raw scene filenames.
-    """
-    result = [date]
+    """Return equivalent monthly or exact-day scene keys for mosaic lookup."""
+    if _YYYYMMDD_RE.match(date):
+        return [date]
 
     m_hyphen = _YYYY_HYPHEN_MM_RE.match(date)
     if m_hyphen:
         year, month = m_hyphen.groups()
-        quarter = (int(month) - 1) // 3 + 1
-        result.append(f"{year}Q{quarter}")
-        compact = f"{year}{month}"
-        if compact not in result:
-            result.append(compact)
-        return result
+        return [date, f"{year}{month}"]
 
     m_compact = _YYYYMM_RE.match(date)
     if m_compact:
         year, month = m_compact.groups()
-        quarter = (int(month) - 1) // 3 + 1
-        result.append(f"{year}Q{quarter}")
-        return result
+        return [date, f"{year}-{month}"]
 
-    return result
+    return []

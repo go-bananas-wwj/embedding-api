@@ -148,6 +148,7 @@ tests/        pytest 测试
 - 当前公网服务是 HTTP；如果前端是 HTTPS，建议通过同一个 HTTPS 反向代理转发，避免浏览器拦截混合内容。
 - 请求审计日志会自动脱敏常见密钥字段，并过滤 `/logs`、`/docs`、`/openapi.json`、`/favicon.ico`、`/health` 等非业务请求。
 - 生产环境浏览器调用需要设置 `CORS_ORIGINS`。
+- 用户自定义模型默认保留 24 小时，后台每天自动清理一次；官方预设模型不受影响。可通过 `CUSTOM_MODEL_CLEANUP_ENABLED`、`CUSTOM_MODEL_TTL_HOURS` 和 `CUSTOM_MODEL_CLEANUP_INTERVAL_HOURS` 调整。
 - 如需关闭公网文档，可设置 `DOCS_URL=none` 和 `REDOC_URL=none`。
 
 ---

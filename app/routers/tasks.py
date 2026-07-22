@@ -1,21 +1,64 @@
 """Downstream task router."""
 
 import json
+import re
+import io
 from pathlib import Path
-from typing import Dict, Literal, Optional, Tuple
+from typing import Dict, List, Literal, Optional, Tuple
 from fastapi import APIRouter, HTTPException, Query, Path as PathParam
 from fastapi.responses import FileResponse
+from fastapi.responses import Response
+import numpy as np
+from PIL import Image
 
 from app.config import get_config
 from app.schemas.models import (
     TasksResponse, TaskInfo, TaskSummary, TilesResponse, TileInfo, ErrorResponse,
 )
 from app.services.data_service import DataService, DataServiceError, DataValidationError
-from app.services.system_model_service import infer_system_model, is_system_task
+from app.services.system_model_service import (
+    get_system_model_classes,
+    infer_system_model,
+    infer_system_model_array,
+    is_system_task,
+)
 from app.services.tile_service import TileService
+from app.services.task_summary_service import build_task_summary
+from app.services.summary_image_service import SUMMARY_IMAGE_DIR, publish_summary_images
 
 router = APIRouter()
 TASK_FORMATS = Literal["png", "npy"]
+TASK_VERSIONS = Literal["v1", "v2"]
+_BINARY_TASKS = {
+    "change_detection",
+    "building_extraction",
+    "road_extraction",
+    "water_extraction",
+    "construction",
+}
+
+
+def _resolve_task_version(region_id: str, task: dict, requested: Optional[str]) -> str:
+    """Resolve one version consistently for every task-result endpoint."""
+    configured = list((task.get("versions") or {}).keys())
+    if requested:
+        if requested not in ("v1", "v2"):
+            raise HTTPException(
+                status_code=422,
+                detail=f"Invalid task version '{requested}'. Use v1 or v2.",
+            )
+        if configured and requested not in configured:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Task version '{requested}' is not available for region '{region_id}'",
+            )
+        return requested
+    preferred = "v1" if region_id == "haidian" else "v2"
+    if preferred in configured or not configured:
+        return preferred
+    if "v1" in configured:
+        return "v1"
+    return configured[0]
 
 _TASK_OPENAPI_EXAMPLES = {
     "change_detection": {"summary": "Change detection", "value": "change_detection"},
@@ -28,8 +71,8 @@ _TASK_OPENAPI_EXAMPLES = {
 }
 
 _VERSION_OPENAPI_EXAMPLES = {
-    "v1": {"summary": "v1（海淀最新模型与哈尔滨 V4）", "value": "v1"},
-    "v2": {"summary": "v2（哈尔滨 V5 对比结果）", "value": "v2"},
+    "haidian_p10c": {"summary": "海淀 P10C（API v1）", "value": "v1"},
+    "harbin_v5": {"summary": "哈尔滨 V5（API v2）", "value": "v2"},
 }
 
 _MONTH_OPENAPI_EXAMPLES = {
@@ -43,8 +86,35 @@ _MONTH_OPENAPI_EXAMPLES = {
         "value": "2025-12",
     },
     "harbin_available": {
-        "summary": "哈尔滨可用月份",
+        "summary": "哈尔滨月份（紧凑写法）",
+        "value": "202510",
+    },
+    "harbin_available_hyphen": {
+        "summary": "哈尔滨月份（带横杠写法）",
         "value": "2025-10",
+    },
+}
+
+_BEFORE_MONTH_OPENAPI_EXAMPLES = {
+    "compact": {"summary": "紧凑写法", "value": "202504"},
+    "hyphen": {"summary": "带横杠写法", "value": "2025-04"},
+}
+
+_AFTER_MONTH_OPENAPI_EXAMPLES = {
+    "compact": {"summary": "紧凑写法", "value": "202506"},
+    "hyphen": {"summary": "带横杠写法", "value": "2025-06"},
+}
+
+_PATCH_IDS_OPENAPI_EXAMPLES = {
+    "single": {
+        "summary": "分析单个 Patch",
+        "description": "只分析 patch_000000。",
+        "value": ["patch_000000"],
+    },
+    "multiple": {
+        "summary": "分析多个 Patch",
+        "description": "两个 Patch 分别独立处理，最后汇总统计。",
+        "value": ["patch_000000", "patch_000001"],
     },
 }
 
@@ -94,12 +164,13 @@ def _task_not_found_detail(
     """Build an actionable not-found message for task result endpoints."""
     requested_time = month or period or "未填写"
     if region_id == "haidian":
+        time_parameter = "period" if kind in {"Prediction", "Label"} else "month"
         return (
             f"{kind} not found for patch '{patch_id}', task '{task_type}', "
             f"version '{version}', time '{requested_time}'. "
-            "海淀最新数据请使用 month=202512/202601/202602/202603/202604/202605；"
+            f"海淀最新数据请使用 {time_parameter}=202512/202601/202602/202603/202604/202605；"
             "例如：region_id=haidian, task_type=building_extraction, "
-            "version=v1, month=202512。"
+            f"version=v1, {time_parameter}=202512。"
         )
     if region_id == "harbin":
         return (
@@ -230,10 +301,163 @@ def _list_haidian_gt_tiles(region_id: str, task_type: str, version: str) -> list
     return result
 
 
+def _list_generated_system_tiles(
+    region_id: str, task_type: str, period: Optional[str]
+) -> List[Dict[str, Optional[str]]]:
+    """List on-demand system results using canonical patch tile filenames."""
+    if not period or not is_system_task(task_type):
+        return []
+    compact = period.replace("-", "")
+    directory = Path("system_models/task_results")
+    result: List[Dict[str, Optional[str]]] = []
+    for path in sorted(
+        directory.glob(f"{task_type}_{region_id}_patch_*_{compact}.png")
+    ):
+        match = re.search(r"patch_\d+", path.name)
+        if not match:
+            continue
+        patch_id = match.group(0)
+        result.append(
+            {
+                "patch_id": patch_id,
+                "period": period,
+                "filename": f"{patch_id}.png",
+            }
+        )
+    return result
+
+
 def _safe_filename(filename: str) -> bool:
     """Validate a tile filename to prevent path traversal."""
     import re
     return bool(re.match(r"^[\w\-\.]+\.png$", filename)) and ".." not in filename
+
+
+def _binary_mask_from_result_image(path: str) -> np.ndarray:
+    with Image.open(path) as image:
+        rgb = np.asarray(image.convert("RGB"))
+    white = np.all(rgb == 255, axis=-1)
+    black = np.all(rgb == 0, axis=-1)
+    if white.any():
+        return (~white).astype(np.uint8)
+    if black.any():
+        return (~black).astype(np.uint8)
+    colors, counts = np.unique(rgb.reshape(-1, 3), axis=0, return_counts=True)
+    background = colors[int(np.argmax(counts))]
+    return np.any(rgb != background, axis=-1).astype(np.uint8)
+
+
+def _class_ids_from_result_image(
+    path: str, region_id: str, task_type: str, version: str
+) -> np.ndarray:
+    """Decode a documented class-color PNG into integer class IDs."""
+    image = np.asarray(Image.open(path).convert("RGB"), dtype=np.uint8)
+    classes = get_system_model_classes(region_id, task_type, version)
+    result = np.zeros(image.shape[:2], dtype=np.uint16)
+    for index, item in enumerate(classes):
+        color = str(item.get("color", "#000000")).lstrip("#")
+        if len(color) != 6:
+            continue
+        rgb = np.array(
+            [int(color[offset : offset + 2], 16) for offset in (0, 2, 4)],
+            dtype=np.uint8,
+        )
+        result[np.all(image == rgb, axis=2)] = index
+    return result
+
+
+def _npy_result_response(prediction: np.ndarray, patch_id: str, task_type: str) -> Response:
+    buffer = io.BytesIO()
+    np.save(buffer, prediction, allow_pickle=False)
+    return Response(
+        content=buffer.getvalue(),
+        media_type="application/octet-stream",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{patch_id}_{task_type}_prediction.npy"'
+            )
+        },
+    )
+
+
+def _generate_summary_results(
+    region_id: str,
+    task_type: str,
+    version: str,
+    month: Optional[str],
+    patch_ids: Optional[List[str]],
+) -> tuple[Optional[list[Path]], list[Dict[str, str]]]:
+    """Generate or reuse selected single-time task results for summary analysis."""
+    if not month or not patch_ids or not is_system_task(task_type):
+        return None, []
+    results_dir = Path("system_models/task_results")
+    task_config = (((get_config().get_region(region_id) or {}).get("tasks") or {}).get(task_type) or {})
+    version_config = (task_config.get("versions") or {}).get(version) or {}
+    configured_results = Path(version_config["results"]) if version_config.get("results") else None
+    compact_month = month.replace("-", "")
+    hyphen_month = f"{compact_month[:4]}-{compact_month[4:]}" if len(compact_month) == 6 else month
+    generated: list[Path] = []
+    errors: list[Dict[str, str]] = []
+    for patch_id in patch_ids:
+        configured_candidates = []
+        if configured_results:
+            for month_value in dict.fromkeys((month, compact_month, hyphen_month)):
+                configured_candidates.extend([
+                    configured_results / month_value / "tiles" / f"{patch_id}.png",
+                    configured_results / "tiles" / f"{patch_id}_{month_value}.png",
+                ])
+            configured_candidates.append(configured_results / "tiles" / f"{patch_id}.png")
+        existing = next((path for path in configured_candidates if path.exists()), None)
+        if existing:
+            generated.append(existing)
+            continue
+        cached = results_dir / f"{task_type}_{region_id}_{patch_id}_{month}.png"
+        if cached.exists():
+            generated.append(cached)
+            continue
+        try:
+            generated.append(
+                Path(infer_system_model(
+                    region_id,
+                    task_type,
+                    patch_id,
+                    month,
+                    version=version,
+                    results_dir=results_dir,
+                ))
+            )
+        except Exception as exc:
+            errors.append({"patch_id": patch_id, "error": str(exc)})
+    return generated, errors
+
+
+def _validate_summary_scope(
+    region_id: str, month: Optional[str], patch_ids: Optional[List[str]]
+) -> Optional[List[str]]:
+    if month:
+        match = re.fullmatch(r"(\d{4})-?(\d{2})", month)
+        if not match or not 1 <= int(match.group(2)) <= 12:
+            raise HTTPException(status_code=422, detail="month 必须是有效的 YYYYMM 或 YYYY-MM，例如 202604。")
+    if not patch_ids:
+        return patch_ids
+    unique_patch_ids = list(dict.fromkeys(patch_ids))
+    if len(unique_patch_ids) > 100 or any(not re.fullmatch(r"patch_\d{6}", value) for value in unique_patch_ids):
+        raise HTTPException(status_code=422, detail="patch_ids 最多 100 个，格式应为 patch_000000。")
+    region_patch_ids = {item.get("patch_id") for item in get_config().get_patches(region_id)}
+    unknown = [value for value in unique_patch_ids if value not in region_patch_ids]
+    if unknown:
+        raise HTTPException(status_code=404, detail=f"以下 Patch 不属于区域 {region_id}：{', '.join(unknown)}")
+    return unique_patch_ids
+
+
+@router.get("/task-summary/results/{filename}", include_in_schema=False)
+async def get_summary_result_image(filename: str):
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+\.png", filename) or ".." in filename:
+        raise HTTPException(status_code=400, detail="Invalid summary image filename")
+    path = SUMMARY_IMAGE_DIR / filename
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Summary image expired or not found")
+    return FileResponse(path, media_type="image/png")
 
 
 def _resolve_classification_tile(
@@ -335,26 +559,39 @@ async def get_task_summary(
         examples=["building_extraction"],
         openapi_examples=_TASK_OPENAPI_EXAMPLES,
     ),
-    version: str = Query(
-        "v1",
-        description="Task result version. Allowed values: v1, v2.",
-        examples=["v1"],
+    version: Optional[str] = Query(
+        None,
+        description=(
+            "模型版本，通常不需要填写。省略时海淀自动使用 P10C（API `v1`），"
+            "哈尔滨自动使用 V5（API `v2`）。"
+        ),
         openapi_examples=_VERSION_OPENAPI_EXAMPLES,
     ),
     period: Optional[str] = Query(
         None,
+        include_in_schema=False,
+    ),
+    month: Optional[str] = Query(
+        None,
         description=(
-            "对比周期，仅变化检测或部分 v2 对比任务使用。"
-            "单期任务不要填这个字段，改填 `month`。"
+            "单期任务影像月份。支持 `YYYYMM` 和 `YYYY-MM`；不填时分析现有结果。"
         ),
-        examples=["2025-04_vs_2025-06"],
-        openapi_examples=_PERIOD_OPENAPI_EXAMPLES,
+        openapi_examples=_MONTH_OPENAPI_EXAMPLES,
+    ),
+    patch_ids: Optional[List[str]] = Query(
+        None,
+        description=(
+            "需要分析的 Patch ID，格式为 `patch_` 加六位数字，例如 `patch_000000`。"
+            "可重复传入多个；每个 Patch 独立推理/统计，最后汇总。不填表示分析全部 Patch。"
+            "URL 示例：`?patch_ids=patch_000000&patch_ids=patch_000001`。"
+        ),
+        openapi_examples=_PATCH_IDS_OPENAPI_EXAMPLES,
     ),
 ):
-    """获取某任务的全局统计摘要。
+    """获取任务资产、预测分布、质量指标和中文综合分析。
 
-    用于仪表板展示任务覆盖 Patch 数、正负样本数等概览信息。
-    返回包含任务名称、版本、统计指标及对比周期的 JSON。
+    摘要从真实预测、标签和结果瓦片生成，适合前端仪表盘和智能体分析。
+    没有参考标签时会说明指标不可用原因，不会用空值冒充模型质量。
     """
     config = get_config()
     if not config.region_exists(region_id):
@@ -364,8 +601,37 @@ async def get_task_summary(
     tasks = region.get("tasks", {})
     if task_type not in tasks:
         raise HTTPException(status_code=404, detail=f"Task '{task_type}' not found")
+    if task_type == "change_detection" and not period:
+        raise HTTPException(
+            status_code=400,
+            detail="变化检测请使用 /regions/{region_id}/change-detection/summary，并传 before_month、after_month。",
+        )
+    patch_ids = _validate_summary_scope(region_id, month, patch_ids)
 
     task = tasks[task_type]
+    version = _resolve_task_version(region_id, task, version)
+    effective_period = period if task_type == "change_detection" else None
+    legacy_before = legacy_after = None
+    if effective_period and "_vs_" in effective_period:
+        legacy_before, legacy_after = effective_period.split("_vs_", 1)
+    generated_tiles, inference_errors = _generate_summary_results(
+        region_id, task_type, version, month, patch_ids
+    )
+    if patch_ids and month and inference_errors and not generated_tiles:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "message": "请求的 Patch 均未能生成任务结果。",
+                "failures": inference_errors,
+            },
+        )
+    result_images = (
+        publish_summary_images(
+            region_id, task_type, version, month, generated_tiles
+        )
+        if month and generated_tiles is not None
+        else []
+    )
 
     # Haidian GT-overridden tasks use the curated manifest for summary stats.
     if region_id == "haidian" and version == "v1" and task_type in _HAIDIAN_GT_OVERRIDES:
@@ -374,39 +640,94 @@ async def get_task_summary(
         if manifest_path.exists():
             with open(manifest_path, "r", encoding="utf-8") as f:
                 manifest = json.load(f)
-            return TaskSummary(
-                task=task_type,
-                name=task.get("name", task_type),
+            return TaskSummary(**build_task_summary(
+                region_id=region_id,
+                task_type=task_type,
                 version=version,
-                period="20260701",
-                grid_size=None,
-                total_polygons=None,
-                total_patches=manifest.get("patch_count"),
-                positive_patches=manifest.get("labeled_patch_count"),
-                negative_patches=manifest.get("unlabeled_patch_count"),
-            )
+                task_name=task.get("name", task_type),
+                base_summary={
+                    "period": "20260701",
+                    "total_patches": manifest.get("patch_count"),
+                    "positive_patches": manifest.get("labeled_patch_count"),
+                    "negative_patches": manifest.get("unlabeled_patch_count"),
+                },
+                patch_ids=patch_ids,
+                month=month,
+                generated_tile_files=generated_tiles,
+                inference_errors=inference_errors,
+                result_images=result_images,
+            ))
 
     try:
-        summary = DataService.load_task_summary(region_id, task_type, version, period)
+        summary = DataService.load_task_summary(
+            region_id, task_type, version, effective_period
+        )
     except DataValidationError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
-    if not summary:
-        raise HTTPException(
-            status_code=404, detail=f"Summary not found for task '{task_type}'"
-        )
-
-    return TaskSummary(
-        task=task_type,
-        name=task.get("name", task_type),
+    # A prebuilt summary is optional. Configured tasks can generate selected
+    # Patch results on demand and derive their summary directly from assets.
+    summary = dict(summary or {})
+    summary.setdefault("period", effective_period)
+    return TaskSummary(**build_task_summary(
+        region_id=region_id,
+        task_type=task_type,
         version=version,
-        period=summary.get("period") or period,
-        grid_size=summary.get("grid_size"),
-        total_polygons=summary.get("total_polygons"),
-        total_patches=summary.get("total_patches"),
-        positive_patches=summary.get("positive_patches"),
-        negative_patches=summary.get("negative_patches"),
-    )
+        task_name=task.get("name", task_type),
+        base_summary=summary,
+        patch_ids=patch_ids,
+        month=month,
+        before_month=legacy_before,
+        after_month=legacy_after,
+        generated_tile_files=generated_tiles,
+        inference_errors=inference_errors,
+        result_images=result_images,
+    ))
+
+
+@router.get("/regions/{region_id}/change-detection/summary", response_model=TaskSummary)
+async def get_change_detection_summary(
+    region_id: str = PathParam(..., description="区域 ID，可选 harbin 或 haidian。", examples=["harbin"]),
+    before_month: str = Query(..., description="变化前月份，支持 YYYYMM 或 YYYY-MM。", openapi_examples=_BEFORE_MONTH_OPENAPI_EXAMPLES),
+    after_month: str = Query(..., description="变化后月份，支持 YYYYMM 或 YYYY-MM。", openapi_examples=_AFTER_MONTH_OPENAPI_EXAMPLES),
+    patch_ids: Optional[List[str]] = Query(
+        None,
+        description=(
+            "需要分析的 Patch ID，格式为 `patch_000000`。可重复传入多个；"
+            "每个 Patch 只比较自己的前后月份，最后汇总。"
+            "URL 示例：`?patch_ids=patch_000000&patch_ids=patch_000001`。"
+        ),
+        openapi_examples=_PATCH_IDS_OPENAPI_EXAMPLES,
+    ),
+    version: Optional[str] = Query(None, description="模型版本；不填时按区域自动选择。", openapi_examples=_VERSION_OPENAPI_EXAMPLES),
+):
+    """对一个或多个 Patch 分别执行双时相变化分析，再汇总结果。"""
+    config = get_config()
+    if not config.region_exists(region_id):
+        raise HTTPException(status_code=404, detail=f"Region '{region_id}' not found")
+    task = ((config.get_region(region_id) or {}).get("tasks") or {}).get("change_detection")
+    if not task:
+        raise HTTPException(status_code=404, detail="Change detection is not configured for this region")
+    patch_ids = _validate_summary_scope(region_id, before_month, patch_ids)
+    _validate_summary_scope(region_id, after_month, patch_ids)
+    resolved_version = _resolve_task_version(region_id, task, version)
+    period = f"{before_month}_vs_{after_month}"
+    try:
+        summary = DataService.load_task_summary(region_id, "change_detection", resolved_version, period) or {"period": period}
+    except DataValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return TaskSummary(**build_task_summary(
+        region_id=region_id,
+        task_type="change_detection",
+        version=resolved_version,
+        task_name=task.get("name", "变化检测"),
+        base_summary=dict(summary),
+        patch_ids=patch_ids,
+        before_month=before_month,
+        after_month=after_month,
+    ))
 
 
 @router.get(
@@ -441,12 +762,12 @@ async def get_task_result(
         ...,
         description=(
             "任务类型。推荐默认 `building_extraction`。"
-            "`change_detection` 是变化检测，需填写 `period` 或 `before_month` + `after_month`。"
+            "`change_detection` 是变化检测，需同时填写 `before_month` 和 `after_month`。"
         ),
         examples=["building_extraction"],
         openapi_examples=_TASK_OPENAPI_EXAMPLES,
     ),
-    format: str = Query(
+    format: TASK_FORMATS = Query(
         "png",
         description="Output format. Allowed values: png, npy.",
         examples=["png"],
@@ -455,99 +776,48 @@ async def get_task_result(
             "npy": {"summary": "NumPy array", "value": "npy"},
         },
     ),
-    version: str = Query(
-        "v1",
-        description="Task result version. Allowed values: v1, v2.",
-        examples=["v1"],
+    version: Optional[str] = Query(
+        None,
+        description=(
+            "模型版本，通常不需要填写。省略时海淀自动使用 P10C（API `v1`），"
+            "哈尔滨自动使用 V5（API `v2`）。"
+        ),
         openapi_examples=_VERSION_OPENAPI_EXAMPLES,
     ),
     period: Optional[str] = Query(
         None,
-        description=(
-            "对比周期。仅变化检测或部分 v2 对比任务填写；"
-            "例如 `2025-04_vs_2025-06`。"
-            "海淀 `building_extraction` 等单期任务不要填 period，填 `month=202512`。"
-        ),
-        examples=["2025-04_vs_2025-06"],
-        openapi_examples=_PERIOD_OPENAPI_EXAMPLES,
+        include_in_schema=False,
     ),
     month: Optional[str] = Query(
         None,
         description=(
-            "单期任务月份。海淀最新数据可填 `202512` ~ `202605`"
-            "（也兼容 `2025-12` ~ `2026-05`）；哈尔滨可填 `2025-04` ~ `2025-10`。"
+            "单期任务月份。海淀和哈尔滨统一支持 `YYYYMM` 与 `YYYY-MM` 两种写法。"
+            "海淀可用 `202512` ~ `202605`，哈尔滨可用 `202504` ~ `202510`。"
         ),
         examples=["202512"],
         openapi_examples=_MONTH_OPENAPI_EXAMPLES,
     ),
     before_month: Optional[str] = Query(
         None,
-        description="变化检测任务的起始月份。哈尔滨可用：2025-04、2025-06、2025-08、2025-09。",
-        examples=["2025-04"],
+        description=(
+            "仅变化检测填写：变化前月份。支持 `YYYYMM` 和 `YYYY-MM`，"
+            "例如 `202504` 或 `2025-04`。"
+        ),
+        openapi_examples=_BEFORE_MONTH_OPENAPI_EXAMPLES,
     ),
     after_month: Optional[str] = Query(
         None,
-        description="变化检测任务的结束月份。哈尔滨可用：2025-06、2025-08、2025-09、2025-10。",
-        examples=["2025-06"],
+        description=(
+            "仅变化检测填写：变化后月份。支持 `YYYYMM` 和 `YYYY-MM`，"
+            "例如 `202506` 或 `2025-06`。"
+        ),
+        openapi_examples=_AFTER_MONTH_OPENAPI_EXAMPLES,
     ),
 ):
-    """推荐可直接运行示例（海淀最新数据）：
+    """获取单个 Patch 的任务结果，支持 `png` 和 `npy`。
 
-    ```http
-    GET /regions/haidian/patches/patch_000000/tasks/building_extraction/result?format=png&version=v1&month=202512
-    ```
-
-    为什么 Swagger 里以前会 404：海淀最新数据的可用月份是
-    `202512`、`202601`、`202602`、`202603`、`202604`、`202605`。
-    如果 `region_id=haidian` 却填 `month=2025-04`，后端会按海淀数据查找，
-    这个月份不存在，所以返回 404 是合理的。
-
-    获取某个 Patch 在指定任务下的结果图。
-
-    支持 `png` 和 `npy` 两种格式。单期任务传 `month`；变化检测传
-    `before_month` + `after_month`（或直接用 `period`）。
-
-    单期任务（building_extraction、road_extraction、construction、
-    land_use_classification、land_cover_classification、water_extraction）
-    填写 month；变化检测 change_detection 填 period，或 before_month + after_month。
-
-    时间格式统一为 `YYYY-MM`（如 `2025-04`、`2025-12`、`2026-05`），
-    接口会自动兼容 `YYYYMM` 写法。
-
-    | 区域 | 任务 | 版本 | 时间参数 | 可用时间范围 |
-    |------|------|------|----------|--------------|
-    | 哈尔滨 | change_detection | v1/v2 | period / before+after | 2025-04_vs_2025-06、2025-04_vs_2025-10、2025-06_vs_2025-08、2025-06_vs_2025-10、2025-08_vs_2025-09、2025-08_vs_2025-10、2025-09_vs_2025-10 |
-    | 哈尔滨 | building_extraction | v1 | month | 2025-04 ~ 2025-10（仅 2025-10 预生成，其余实时推理） |
-    | 哈尔滨 | building_extraction | v2 | period / before+after | 2025-04_vs_2025-06、2025-08_vs_2025-09、2025-09_vs_2025-10 |
-    | 哈尔滨 | road_extraction | v1 | month | 2025-04 ~ 2025-10 |
-    | 哈尔滨 | land_use_classification | v1 | month | 2025-04 ~ 2025-10（仅 2025-10 预生成，其余实时推理） |
-    | 哈尔滨 | land_use_classification | v2 | period / before+after | 2025-04_vs_2025-06、2025-08_vs_2025-09、2025-09_vs_2025-10 |
-    | 哈尔滨 | land_cover_classification | v1/v2 | month | 2025-04 ~ 2025-10（实时推理） |
-    | 哈尔滨 | water_extraction | v1/v2 | month | 2025-04 ~ 2025-10（实时推理） |
-    | 海淀 | building_extraction | v1 | month | 2025-12 ~ 2026-05 |
-    | 海淀 | road_extraction | v1 | month（任意） | month 为 2025-12 ~ 2026-05 |
-    | 海淀 | construction | v1 | month（任意） | month 为 2025-12 ~ 2026-05 |
-    | 海淀 | land_use_classification | v1 | month | 2025-12 ~ 2026-05 |
-    | 海淀 | land_cover_classification | v1 | month | 2025-12 ~ 2026-05 |
-    | 海淀 | water_extraction | v1 | month | 2025-12 ~ 2026-05 |
-
-    海淀 land_cover_classification V1 图例（整个结果集共 7 色，单个 Patch
-    可能只出现其中一部分）：
-
-    | 类别值 | 颜色 | 含义 |
-    |----------|------|------|
-    | 1 | #006400 | 树木覆盖 |
-    | 2 | #B4D250 | 灌木地 |
-    | 3 | #F5DC5A | 草地 |
-    | 4 | #D23C3C | 耕地 |
-    | 5 | #BEAA82 | 建成区 |
-    | 6 | #A0DCDC | 裸地/稀疏植被 |
-    | 8 | #1E64DC | 永久性水体 |
-
-    注意：这是海淀项目当前 PNG 结果的实际调色板，不是 PCA 嵌入图
-    的颜色，也不是 ESA WorldCover 原始 11 类的完整调色板。
-
-    注意：Swagger UI 对二进制响应支持有限，建议在浏览器或 `<img>` 标签中查看图片。
+    单期任务只填写 `month`；变化检测同时填写 `before_month` 和 `after_month`。
+    `version` 省略时按区域自动选择当前默认模型。
     """
     if format not in ("png", "npy"):
         raise HTTPException(
@@ -571,6 +841,11 @@ async def get_task_result(
     config = get_config()
     if not config.region_exists(region_id):
         raise HTTPException(status_code=404, detail=f"Region '{region_id}' not found")
+    region = config.get_region(region_id) or {}
+    task = (region.get("tasks") or {}).get(task_type)
+    if not task:
+        raise HTTPException(status_code=404, detail=f"Task '{task_type}' not found")
+    version = _resolve_task_version(region_id, task, version)
 
     try:
         patch = DataService.get_patch(region_id, patch_id)
@@ -594,6 +869,43 @@ async def get_task_result(
             return FileResponse(override_path, media_type="image/png")
 
         if format == "npy":
+            matching_png = None
+            if class_month and region_id != "haidian" and task_type in _CLASS_TASK_TO_XUANNV_HEAD:
+                head = _CLASS_TASK_TO_XUANNV_HEAD[task_type]
+                candidate = _XUANNV_SHOW_SEG_TILE_DIR / head / class_month / f"{patch_id}.png"
+                if candidate.exists():
+                    matching_png = str(candidate)
+            if not matching_png:
+                matching_png = DataService.get_task_result_path(
+                    region_id, patch_id, task_type, "png", version, effective_period
+                ) or DataService.get_task_result_path(
+                    region_id, patch_id, task_type, "tile", version, effective_period
+                )
+            if matching_png and matching_png.lower().endswith(".png"):
+                if task_type in _BINARY_TASKS:
+                    return _npy_result_response(
+                        _binary_mask_from_result_image(matching_png), patch_id, task_type
+                    )
+                if task_type in {
+                    "land_use_classification",
+                    "land_cover_classification",
+                }:
+                    return _npy_result_response(
+                        _class_ids_from_result_image(
+                            matching_png, region_id, task_type, version
+                        ),
+                        patch_id,
+                        task_type,
+                    )
+            if class_month and is_system_task(task_type):
+                try:
+                    prediction = infer_system_model_array(
+                        region_id, task_type, patch_id, class_month, version
+                    )
+                except FileNotFoundError:
+                    prediction = None
+                if prediction is not None:
+                    return _npy_result_response(prediction, patch_id, task_type)
             path = DataService.get_task_result_path(
                 region_id, patch_id, task_type, "npy", version, effective_period
             )
@@ -635,6 +947,8 @@ async def get_task_result(
                     return FileResponse(tile_path, media_type="image/png")
     except DataValidationError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     raise HTTPException(
         status_code=404,
@@ -668,8 +982,8 @@ async def get_task_prediction(
         examples=["building_extraction"],
         openapi_examples=_TASK_OPENAPI_EXAMPLES,
     ),
-    version: str = Query(
-        "v1",
+    version: Optional[str] = Query(
+        None,
         description="Task result version. Allowed values: v1, v2.",
         examples=["v1"],
         openapi_examples=_VERSION_OPENAPI_EXAMPLES,
@@ -695,6 +1009,10 @@ async def get_task_prediction(
     config = get_config()
     if not config.region_exists(region_id):
         raise HTTPException(status_code=404, detail=f"Region '{region_id}' not found")
+    task = ((config.get_region(region_id) or {}).get("tasks") or {}).get(task_type)
+    if not task:
+        raise HTTPException(status_code=404, detail=f"Task '{task_type}' not found")
+    version = _resolve_task_version(region_id, task, version)
 
     try:
         patch = DataService.get_patch(region_id, patch_id)
@@ -727,6 +1045,37 @@ async def get_task_prediction(
             filename=f"{patch_id}_{task_type}_prediction.npy",
         )
 
+    # Some monthly products persist only a colorized PNG tile. Reconstruct
+    # the numeric prediction so this endpoint matches `result?format=npy`.
+    try:
+        png_path = DataService.get_task_result_path(
+            region_id, patch_id, task_type, "png", version, period
+        ) or DataService.get_task_result_path(
+            region_id, patch_id, task_type, "tile", version, period
+        )
+        if png_path and png_path.lower().endswith(".png"):
+            if task_type in _BINARY_TASKS:
+                prediction = _binary_mask_from_result_image(png_path)
+            elif task_type in {
+                "land_use_classification",
+                "land_cover_classification",
+            }:
+                prediction = _class_ids_from_result_image(
+                    png_path, region_id, task_type, version
+                )
+            else:
+                prediction = None
+            if prediction is not None:
+                return _npy_result_response(prediction, patch_id, task_type)
+
+        if period and is_system_task(task_type):
+            prediction = infer_system_model_array(
+                region_id, task_type, patch_id, period, version
+            )
+            return _npy_result_response(prediction, patch_id, task_type)
+    except (DataValidationError, FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
     raise HTTPException(
         status_code=404,
         detail=_task_not_found_detail(
@@ -758,8 +1107,8 @@ async def get_task_label(
         examples=["building_extraction"],
         openapi_examples=_TASK_OPENAPI_EXAMPLES,
     ),
-    version: str = Query(
-        "v1",
+    version: Optional[str] = Query(
+        None,
         description="Task result version. Allowed values: v1, v2.",
         examples=["v1"],
         openapi_examples=_VERSION_OPENAPI_EXAMPLES,
@@ -785,6 +1134,10 @@ async def get_task_label(
     config = get_config()
     if not config.region_exists(region_id):
         raise HTTPException(status_code=404, detail=f"Region '{region_id}' not found")
+    task = ((config.get_region(region_id) or {}).get("tasks") or {}).get(task_type)
+    if not task:
+        raise HTTPException(status_code=404, detail=f"Task '{task_type}' not found")
+    version = _resolve_task_version(region_id, task, version)
 
     try:
         patch = DataService.get_patch(region_id, patch_id)
@@ -836,8 +1189,8 @@ async def list_tiles(
         examples=["building_extraction"],
         openapi_examples=_TASK_OPENAPI_EXAMPLES,
     ),
-    version: str = Query(
-        "v1",
+    version: Optional[str] = Query(
+        None,
         description="Task result version. Allowed values: v1, v2.",
         examples=["v1"],
         openapi_examples=_VERSION_OPENAPI_EXAMPLES,
@@ -863,12 +1216,23 @@ async def list_tiles(
     config = get_config()
     if not config.region_exists(region_id):
         raise HTTPException(status_code=404, detail=f"Region '{region_id}' not found")
+    task = ((config.get_region(region_id) or {}).get("tasks") or {}).get(task_type)
+    if not task:
+        raise HTTPException(status_code=404, detail=f"Task '{task_type}' not found")
+    version = _resolve_task_version(region_id, task, version)
 
     raw_tiles = await TileService.list_available_tiles(region_id, task_type, version, period)
 
     # Include Haidian GT-overridden task tiles (construction, road_extraction)
     # whose PNGs live outside the standard results/tiles directory.
     raw_tiles.extend(_list_haidian_gt_tiles(region_id, task_type, version))
+    raw_tiles.extend(_list_generated_system_tiles(region_id, task_type, period))
+
+    deduplicated = {}
+    for tile in raw_tiles:
+        key = (tile.get("patch_id"), tile.get("period"), tile.get("filename"))
+        deduplicated[key] = tile
+    raw_tiles = list(deduplicated.values())
 
     tiles = [
         TileInfo(
@@ -906,8 +1270,8 @@ async def get_patch_tile_by_filename(
         description="Tile filename as returned by /regions/{region_id}/tasks/{task_type}/tiles.",
         examples=["patch_000000.png"],
     ),
-    version: str = Query(
-        "v1",
+    version: Optional[str] = Query(
+        None,
         description="Task result version. Allowed values: v1, v2.",
         examples=["v1"],
         openapi_examples=_VERSION_OPENAPI_EXAMPLES,
@@ -933,6 +1297,10 @@ async def get_patch_tile_by_filename(
     config = get_config()
     if not config.region_exists(region_id):
         raise HTTPException(status_code=404, detail=f"Region '{region_id}' not found")
+    task = ((config.get_region(region_id) or {}).get("tasks") or {}).get(task_type)
+    if not task:
+        raise HTTPException(status_code=404, detail=f"Task '{task_type}' not found")
+    version = _resolve_task_version(region_id, task, version)
 
     # Derive patch_id from filename. All tile filenames contain a
     # ``patch_NNNNNN`` token (e.g. patch_000000.png, patch_000000_2025-04.png,
@@ -958,6 +1326,13 @@ async def get_patch_tile_by_filename(
     if path and path.lower().endswith(".png"):
         return FileResponse(path, media_type="image/png")
 
+    if period and is_system_task(task_type):
+        path = _resolve_classification_tile(
+            region_id, task_type, patch_id, period, version
+        )
+        if path and path.lower().endswith(".png"):
+            return FileResponse(path, media_type="image/png")
+
     raise HTTPException(
         status_code=404,
         detail=f"Tile '{filename}' not found for task '{task_type}'",
@@ -966,6 +1341,7 @@ async def get_patch_tile_by_filename(
 
 @router.get(
     "/regions/{region_id}/tasks/{task_type}/tiles/{z}/{x}/{y}.png",
+    include_in_schema=False,
     responses={
         200: {"content": {"image/png": {}}},
         404: {"model": ErrorResponse},

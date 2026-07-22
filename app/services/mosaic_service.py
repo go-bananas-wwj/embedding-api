@@ -13,7 +13,7 @@ from PIL import Image
 from rasterio.merge import merge as rio_merge
 
 from app.config import get_config
-from app.services.data_service import DataNotFoundError, DataValidationError
+from app.services.data_service import DataNotFoundError, DataService, DataValidationError
 from app.services.time_utils import normalize_quarter_date
 
 logger = logging.getLogger(__name__)
@@ -42,7 +42,7 @@ _SENSOR_RGB = {
 
 
 def _candidate_period_prefixes(periods: List[str]) -> List[str]:
-    """Return month/quarter prefixes to use for fuzzy filename matching.
+    """Return month prefixes to use for fuzzy filename matching.
 
     Some raw scene archives store daily files (YYYYMMDD). When an exact
     quarterly/monthly filename is missing, we fall back to files inside the
@@ -76,17 +76,9 @@ def _candidate_period_prefixes(periods: List[str]) -> List[str]:
         add(first)
         return prefixes
 
-    m_quarter = _YYYY_QUARTER_RE.match(first)
-    if m_quarter:
-        year, q_str = m_quarter.groups()
-        q = int(q_str)
-        add(first)
-        for month in range((q - 1) * 3 + 1, q * 3 + 1):
-            add(f"{year}{month:02d}")
-        return prefixes
-
     for p in periods:
-        add(p)
+        if not _YYYY_QUARTER_RE.match(p):
+            add(p)
     return prefixes
 
 
@@ -143,7 +135,7 @@ def _get_raw_tiff_path(
     roots = roots or [RAW_ROOT]
     # Derive request-scoped prefixes once for exact and daily-scene matching.
     fuzzy_prefixes = _candidate_period_prefixes(periods)
-    fallback_exact_periods = [p for p in periods if p not in fuzzy_prefixes]
+    fallback_exact_periods = [p for p in periods if _YYYY_QUARTER_RE.match(p)]
 
     for root in roots:
         if not root:
@@ -151,6 +143,8 @@ def _get_raw_tiff_path(
         layouts = [
             Path(root) / region_id / sensor_type / patch_id,
             Path(root) / patch_id / sensor_type,
+            # A configured sensor root may already point at ``.../s2``.
+            Path(root) / patch_id,
         ]
         for layout_dir in layouts:
             # 1) Exact day/month/quarter match for the user-requested period.
@@ -175,8 +169,8 @@ def _get_raw_tiff_path(
                         [p.name for p in candidates if p.stem[:8].isdigit()],
                     )
                     return str(selected)
-            # 3) Backward-compatible fallback for legacy quarterly archives
-            # when the caller supplied a month but only a quarter file exists.
+            # Legacy quarterly archives remain a last-resort compatibility
+            # source. Monthly and daily files above always win.
             for period in fallback_exact_periods:
                 path = layout_dir / f"{period}.tif"
                 if path.exists() and path.is_file():
@@ -207,8 +201,6 @@ def build_mosaic(
     Returns:
         (image_bytes, mime_type)
     """
-    del version  # raw sensors do not use embedding versions
-
     config = get_config()
     if region_id not in config.list_regions():
         raise DataValidationError(f"Region '{region_id}' does not exist")
@@ -222,6 +214,14 @@ def build_mosaic(
         roots.append(s2_dir)
 
     sensor_type = sensor_type.lower()
+    if sensor_type == "embedding":
+        if fmt.lower() != "png":
+            raise DataValidationError("embedding mosaic only supports format='png'")
+        return _build_embedding_mosaic(
+            region_id, date, version, patch_ids, cache_dir, config.get_patches(region_id)
+        )
+
+    del version  # raw sensors do not use embedding versions
     if sensor_type not in _SENSOR_RGB:
         raise DataValidationError(
             f"sensor_type '{sensor_type}' is not supported; "
@@ -235,9 +235,10 @@ def build_mosaic(
     periods = normalize_quarter_date(date)
     if not periods:
         raise DataValidationError(f"Invalid date format: '{date}'")
-    # Use the quarterly form for cache naming when available, otherwise the
-    # first candidate, so cache keys remain deterministic.
-    cache_period = next((p for p in periods if "Q" in p), periods[0])
+    legacy_quarter = _legacy_quarter_key(date)
+    if legacy_quarter:
+        periods.append(legacy_quarter)
+    cache_period = periods[0]
 
     allowed_ids = set(patch_ids) if patch_ids else None
     cache_suffix = ""
@@ -287,6 +288,94 @@ def build_mosaic(
     buf = io.BytesIO()
     pil_img.save(buf, format="PNG")
     data = buf.getvalue()
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    cache_path.write_bytes(data)
+    return data, "image/png"
+
+
+def _legacy_quarter_key(date: str) -> Optional[str]:
+    """Map a month to an old archive key without changing public semantics."""
+    match = _YYYY_HYPHEN_MM_RE.match(date) or _YYYYMM_RE.match(date)
+    if not match:
+        return None
+    year, month = match.groups()
+    quarter = (int(month) - 1) // 3 + 1
+    return f"{year}Q{quarter}"
+
+
+def _build_embedding_mosaic(
+    region_id: str,
+    date: str,
+    version: Optional[str],
+    patch_ids: Optional[List[str]],
+    cache_dir: str,
+    patches: List[dict],
+) -> Tuple[bytes, str]:
+    """Compose globally normalized per-Patch embedding PNGs by map bounds."""
+    periods = normalize_quarter_date(date)
+    if not periods:
+        raise DataValidationError(f"Invalid date format: '{date}'")
+    effective_version = version or ("v1" if region_id == "haidian" else "v2")
+    allowed_ids = set(patch_ids) if patch_ids else None
+    suffix = ""
+    if allowed_ids:
+        suffix = "_" + "_".join(sorted(allowed_ids))[:64]
+    cache_path = (
+        Path(cache_dir)
+        / f"{region_id}_embedding_{effective_version}_{periods[0]}{suffix}.png"
+    )
+    if cache_path.exists():
+        return cache_path.read_bytes(), "image/png"
+
+    tiles = []
+    for patch in patches:
+        patch_id = patch.get("patch_id")
+        bounds = patch.get("bounds")
+        if not patch_id or not bounds or len(bounds) != 4:
+            continue
+        if allowed_ids is not None and patch_id not in allowed_ids:
+            continue
+        path = DataService.get_embedding_path(
+            region_id, patch_id, "png", version=effective_version, month=date
+        )
+        if path:
+            with Image.open(path) as image:
+                tiles.append((tuple(float(v) for v in bounds), image.convert("RGBA").copy()))
+
+    if not tiles:
+        raise DataNotFoundError(
+            f"No embedding PNGs found for {region_id}/{date}, version {effective_version}"
+        )
+
+    first_bounds, first_image = tiles[0]
+    tile_width = first_bounds[2] - first_bounds[0]
+    tile_height = first_bounds[3] - first_bounds[1]
+    if tile_width <= 0 or tile_height <= 0:
+        raise DataValidationError("Patch bounds must have positive width and height")
+    px_per_x = first_image.width / tile_width
+    px_per_y = first_image.height / tile_height
+    min_x = min(bounds[0] for bounds, _ in tiles)
+    min_y = min(bounds[1] for bounds, _ in tiles)
+    max_x = max(bounds[2] for bounds, _ in tiles)
+    max_y = max(bounds[3] for bounds, _ in tiles)
+    width = max(1, round((max_x - min_x) * px_per_x))
+    height = max(1, round((max_y - min_y) * px_per_y))
+    if width * height > 150_000_000:
+        raise DataValidationError("Embedding mosaic is too large; filter with patch_ids")
+
+    canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    for bounds, image in tiles:
+        expected_width = max(1, round((bounds[2] - bounds[0]) * px_per_x))
+        expected_height = max(1, round((bounds[3] - bounds[1]) * px_per_y))
+        if image.size != (expected_width, expected_height):
+            image = image.resize((expected_width, expected_height), Image.Resampling.BILINEAR)
+        x = round((bounds[0] - min_x) * px_per_x)
+        y = round((max_y - bounds[3]) * px_per_y)
+        canvas.alpha_composite(image, (x, y))
+
+    buffer = io.BytesIO()
+    canvas.save(buffer, format="PNG")
+    data = buffer.getvalue()
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     cache_path.write_bytes(data)
     return data, "image/png"
