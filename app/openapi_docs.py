@@ -484,7 +484,7 @@ FIELD_DOCS = {
     "month": "影像月份或日期。支持 `YYYY-MM`、`YYYYMM` 或部分接口的 `YYYYMMDD`；日级表示精确日期，月级请求会按日期倒序选择同月最新的一景。",
     "date": "影像日期或月份。支持 `YYYY-MM`、`YYYYMM` 或 `YYYYMMDD`；`YYYYMMDD` 精确命中，月级请求会按日期倒序选择同月最新的一景。",
     "sensor_type": "传感器类型。可选 `s2`、`s1`、`landsat`、`highres`；`highres` 用于带地理参考的高分辨率 RGB 光学 GeoTIFF。",
-    "patch_ids": "Patch 编号数组。每项格式为 `patch_000000`；批量推理最多 100 个。",
+    "patch_ids": "Patch 编号数组。每项格式为 `patch_000000`，批量推理最多 100 个。使用自定义多类别 model_id 时，后端会对每个 Patch 自动运行模型绑定的全部类别头，不需要再次传 class_ids、training_method 或 head_type。",
     "task_type": "任务类型，例如 `building_extraction`、`water_extraction`、`change_detection`。自定义训练的 GeoJSON Feature 中可不传；不传时后端按模型类型推导默认任务。",
     "task_id": "系统模型任务 ID，例如 `building_extraction`、`water_extraction`。",
     "model_id": "模型 ID。自定义模型形如 `model_xxxxxxxx`；系统模型可直接使用任务 ID。",
