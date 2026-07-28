@@ -115,6 +115,29 @@ def rasterize_patch_geometry(
     return rasterize_geometry(geometry, tuple(bbox), size=size)
 
 
+def rasterize_geometry_to_grid(
+    geometry: Dict[str, Any],
+    *,
+    crs: Any,
+    transform: Affine,
+    height: int,
+    width: int,
+) -> np.ndarray:
+    """Rasterize WGS84 geometry directly on an existing raster grid."""
+    geom = shape(geometry)
+    if crs:
+        transformer = Transformer.from_crs("EPSG:4326", crs, always_xy=True)
+        geom = shapely_transform(transformer.transform, geom)
+    return rasterio_features.rasterize(
+        [(geom, 1)],
+        out_shape=(height, width),
+        transform=transform,
+        fill=0,
+        default_value=1,
+        dtype=np.uint8,
+    )
+
+
 def group_features_by_patch(features: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
     """Group GeoJSON features by patch_id."""
     groups: Dict[str, List[Dict[str, Any]]] = {}
@@ -255,6 +278,7 @@ def parse_polygon_annotations_for_training(
                 "class_id": class_id,
                 "label_index": class_map[class_id],
                 "polygon_index": polygon_index,
+                "geometry": polygon,
                 "mask": mask,
             }
             if model_type == "classification":

@@ -242,11 +242,11 @@ class ModelCreate(BaseModel):
     ] = Field(
         "xuannv_earth",
         description=(
-            "训练方式。默认 xuannv_earth：使用玄女 embedding，少于 10 个有效 "
-            "Polygon 时采用 PU + Query，否则采用 Binary Conv 3x3；traditional_ml "
-            "只读取 Sentinel-2 光学影像并训练 Random Forest；aef 使用年度 "
+            "训练方式。默认 xuannv_earth：使用玄女 embedding，并按类别分别统计；"
+            "某类少于 10 个有效 Polygon 时采用 PU + Query，否则采用 Binary Conv 3x3；traditional_ml "
+            "读取 Sentinel-2 六波段和四个光谱指数，为每个有标注类别分别训练 Random Forest；aef 使用年度 "
             "embedding（当前固定回退到 2025 年），dinov3_sat493m 使用月度光学影像，"
-            "两者均训练普通两层像素 MLP。"
+            "并为每个有标注类别分别训练两层像素 MLP。多类别最终仍返回一个 model_id。"
         ),
         examples=["xuannv_earth"],
     )
@@ -255,16 +255,17 @@ class ModelCreate(BaseModel):
         ge=1,
         le=1000,
         description=(
-            "训练迭代次数。有效 Polygon 大于等于 10 个时使用 Binary Conv 3x3，"
-            "服务端最多执行 100 轮；少于 10 个时使用免迭代的 PU + Query 检索。"
+            "训练迭代次数。按类别统计：某类有效 Polygon 大于等于 10 个时使用 "
+            "Binary Conv 3x3，服务端最多执行 100 轮；少于 10 个时使用免迭代的 "
+            "PU + Query 检索。"
         ),
         examples=[100],
     )
     class_ids: Optional[List[str]] = Field(
         None,
         description=(
-            "二分类训练的目标类别 ID。当前每个自定义模型只能选择一个目标类别；"
-            "Polygon 数量只影响后端训练策略，不改变此字段的填写方式。"
+            "候选目标类别 ID，可省略。后端以 GeoJSON 中实际出现的 class_id 为准，"
+            "为每个有 Polygon 的类别分别训练二分类头；没有 Polygon 的类别自动跳过。"
         ),
         examples=[["cls_001"]],
     )
@@ -278,7 +279,8 @@ class ModelCreate(BaseModel):
         description=(
             "GeoJSON FeatureCollection 用户标注包。坐标必须是 WGS84。"
             "Polygon 内部作为目标正样本，Polygon 外是未标注样本而不是直接负样本。"
-            "有效 Polygon 少于 10 个时自动使用 PU + Query；达到 10 个时使用 Binary Conv 3x3。"
+            "后端按 class_id 独立训练；某类有效 Polygon 少于 10 个时使用 PU + Query，"
+            "达到 10 个时使用 Binary Conv 3x3。没有 Polygon 标注的类别自动跳过。"
         ),
     )
     classes: List[ModelClass] = Field(
@@ -320,17 +322,17 @@ class ModelCreate(BaseModel):
             for cid in self.class_ids:
                 if cid not in class_ids:
                     raise ValueError(f"class_id '{cid}' is not defined in classes")
-        active_class_ids = self.class_ids or sorted(
-            {
-                feature.properties.class_id
-                for feature in self.annotations.features
-                if feature.properties.class_id in class_ids
-            }
-        )
-        if len(set(active_class_ids)) != 1:
-            raise ValueError(
-                "自定义训练当前为二分类 few-shot 训练；每次只能选择一个目标 class_id"
-            )
+        annotated_class_ids = {
+            feature.properties.class_id for feature in self.annotations.features
+        }
+        unknown_annotation_ids = annotated_class_ids - class_ids
+        if unknown_annotation_ids:
+            unknown = sorted(unknown_annotation_ids)[0]
+            raise ValueError(f"feature class_id '{unknown}' is not defined in classes")
+        # GeoJSON annotations are authoritative. Frontend class selectors may
+        # include categories that were never annotated; those must not create
+        # empty heads or block valid training.
+        self.class_ids = sorted(annotated_class_ids)
 
         total_vertices = 0
         max_features = 10000
@@ -444,6 +446,13 @@ class ModelOut(BaseModel):
     head_type: Optional[str] = Field(
         None, description="下游头类型，例如 pu_query_retrieval、binary_conv3x3、pixel_mlp。"
     )
+    class_heads: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description=(
+            "按实际标注类别训练的下游头摘要。每项包含 class_id、训练策略和 Polygon 数量；"
+            "无标注类别不会出现在此列表。"
+        ),
+    )
     checkpoint_format: Optional[str] = Field(
         None, description="用于后端自动分派推理流程的 checkpoint 格式。"
     )
@@ -540,7 +549,10 @@ class BatchInferRequest(BaseModel):
         ...,
         min_length=1,
         max_length=100,
-        description="List of patch identifiers to infer (max 100).",
+        description=(
+            "需要批量推理的 Patch ID 列表，最多 100 个。自定义多类别模型会对每个 "
+            "Patch 自动运行 model_id 中绑定的全部类别头，不需要再次传类别或训练方式。"
+        ),
         examples=[["patch_000000", "patch_000001"]],
     )
     month: Optional[str] = Field(

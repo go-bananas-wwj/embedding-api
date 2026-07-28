@@ -3,8 +3,11 @@
 import numpy as np
 import pytest
 import torch
+import joblib
 from PIL import Image
+from types import SimpleNamespace
 
+from app.routers.models import _train_class_heads
 from app.schemas.models import GeoJSONFeature, GeoJSONFeatureCollection, ModelClass
 from app.services.inference_engine import InferenceEngine
 from app.services.model_registry import get_model_registry
@@ -12,6 +15,7 @@ from app.services.training_engine import (
     ChangeDetectionTrainingEngine,
     ClassificationTrainingEngine,
     ExternalEmbeddingMLPTrainingEngine,
+    _project_mask_to_feature_grid,
 )
 from app.services.pu_query import CHECKPOINT_FORMAT as PU_QUERY_CHECKPOINT_FORMAT
 
@@ -219,6 +223,165 @@ def test_external_embedding_mlp_training_and_inference(
         model_id, "harbin", "patch_000000", month="2025-04"
     )
     assert Image.open(path).size == (128, 128)
+
+
+def test_project_mask_to_dino_grid_preserves_small_polygon():
+    mask = np.zeros((128, 128), dtype=np.uint8)
+    mask[63:65, 63:65] = 1
+
+    projected = _project_mask_to_feature_grid(mask, 14, 14)
+
+    assert projected.shape == (14, 14)
+    assert projected.sum() >= 1
+
+
+def test_project_mask_to_feature_grid_does_not_expand_empty_mask():
+    mask = np.zeros((128, 128), dtype=np.uint8)
+
+    projected = _project_mask_to_feature_grid(mask, 14, 14)
+
+    assert projected.sum() == 0
+
+
+def _two_class_annotations():
+    features = []
+    for class_id, class_name, color, x0 in (
+        ("cls_001", "水体", "#20BEDA", 126.518),
+        ("cls_002", "建筑", "#DA9A20", 126.525),
+    ):
+        features.append(
+            GeoJSONFeature.model_validate(
+                {
+                    "type": "Feature",
+                    "properties": {
+                        "patch_id": "patch_000000",
+                        "region_id": "harbin",
+                        "class_id": class_id,
+                        "class_name": class_name,
+                        "color": color,
+                        "month": "2025-04",
+                    },
+                    "geometry": {
+                        "type": "Polygon",
+                        "coordinates": [[
+                            [x0, 45.746],
+                            [x0 + 0.004, 45.746],
+                            [x0 + 0.004, 45.750],
+                            [x0, 45.750],
+                            [x0, 45.746],
+                        ]],
+                    },
+                }
+            )
+        )
+    return GeoJSONFeatureCollection(type="FeatureCollection", features=features)
+
+
+def test_dinov3_multiclass_training_packages_two_heads(user_id, monkeypatch):
+    feature = np.random.default_rng(4).normal(size=(16, 14, 14)).astype(np.float32)
+    monkeypatch.setattr(
+        "app.services.training_engine.load_external_embedding",
+        lambda *args: feature.copy(),
+    )
+    classes = [
+        ModelClass(id="cls_001", name="水体", color="#20BEDA"),
+        ModelClass(id="cls_002", name="建筑", color="#DA9A20"),
+    ]
+    model_id = get_model_registry(user_id).create_model(
+        name="test-dino-multiclass",
+        model_type="single_time_detection",
+        classes=[item.model_dump() for item in classes],
+        task_type="building_extraction",
+        region_id="harbin",
+        requested_training_method="dinov3_sat493m",
+        feature_source="dinov3_sat493m",
+    )
+
+    result = _train_class_heads(
+        model_id=model_id,
+        user_id=user_id,
+        region_id="harbin",
+        task_type="building_extraction",
+        model_type="single_time_detection",
+        embedding_version="not_applicable",
+        epochs=1,
+        annotations=_two_class_annotations(),
+        classes=classes,
+        class_ids=["cls_001", "cls_002"],
+        training_method="dinov3_sat493m",
+    )
+
+    checkpoint = joblib.load(result["model_path"])
+    assert checkpoint["__format__"] == "multi_binary_heads_v1"
+    assert [head["class_id"] for head in checkpoint["heads"]] == [
+        "cls_001",
+        "cls_002",
+    ]
+
+
+def test_traditional_multiclass_training_packages_two_heads(user_id, monkeypatch):
+    feature = np.random.default_rng(5).normal(size=(10, 32, 32)).astype(np.float32)
+    valid = np.ones((32, 32), dtype=bool)
+    monkeypatch.setattr(
+        "app.services.training_engine.load_s2_features",
+        lambda *args: (feature.copy(), valid.copy(), "/tmp/mock-s2.tif"),
+    )
+    mask = np.zeros((32, 32), dtype=np.uint8)
+    mask[8:16, 8:16] = 1
+    monkeypatch.setattr(
+        "app.services.training_engine.rasterize_geometry_to_grid",
+        lambda *args, **kwargs: mask.copy(),
+    )
+
+    class RasterContext:
+        def __enter__(self):
+            return SimpleNamespace(
+                crs="EPSG:4326",
+                transform=None,
+                height=32,
+                width=32,
+            )
+
+        def __exit__(self, *args):
+            return False
+
+    monkeypatch.setattr(
+        "app.services.training_engine.rasterio.open", lambda *args: RasterContext()
+    )
+    classes = [
+        ModelClass(id="cls_001", name="水体", color="#20BEDA"),
+        ModelClass(id="cls_002", name="建筑", color="#DA9A20"),
+    ]
+    model_id = get_model_registry(user_id).create_model(
+        name="test-traditional-multiclass",
+        model_type="single_time_detection",
+        classes=[item.model_dump() for item in classes],
+        task_type="building_extraction",
+        region_id="harbin",
+        requested_training_method="traditional_ml",
+        feature_source="sentinel2_l2a",
+    )
+
+    result = _train_class_heads(
+        model_id=model_id,
+        user_id=user_id,
+        region_id="harbin",
+        task_type="building_extraction",
+        model_type="single_time_detection",
+        embedding_version="not_applicable",
+        epochs=1,
+        annotations=_two_class_annotations(),
+        classes=classes,
+        class_ids=["cls_001", "cls_002"],
+        training_method="traditional_ml",
+    )
+
+    checkpoint = joblib.load(result["model_path"])
+    assert checkpoint["__format__"] == "multi_binary_heads_v1"
+    assert [head["class_id"] for head in checkpoint["heads"]] == [
+        "cls_001",
+        "cls_002",
+    ]
 
 
 @pytest.fixture

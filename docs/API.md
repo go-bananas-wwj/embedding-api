@@ -559,6 +559,23 @@ curl -s "http://60.31.21.42:22065/regions/harbin/patches/patch_000000"
 
 获取某个 Patch 的 Embedding（嵌入向量）。支持四种返回格式。
 
+#### 海淀 AEF 2025 PCA 可视化
+
+```http
+GET /regions/haidian/patches/{patch_id}/embeddings/aef/pca
+```
+
+只需填写海淀 Patch ID，例如 `patch_000106`。接口固定读取本地 AEF
+2025 年年度 64 维 embedding，并返回 `image/png`。全部 Patch 使用同一套
+全海淀 PCA 主成分和统一的 2%~98% 显示范围，因此不同 Patch 的颜色可以横向比较。
+
+```bash
+curl -o aef_pca.png \
+  http://localhost:9061/regions/haidian/patches/patch_000106/embeddings/aef/pca
+```
+
+该接口不接收月份、年份、版本或输出格式参数，也不返回原始 `.npy`。
+
 ```
 GET /regions/{region_id}/patches/{patch_id}/embedding?format=png
 ```
@@ -911,13 +928,13 @@ GET /regions/{region_id}/patches/{patch_id}/tasks/{task_type}/result?format=png&
 
 | 项目类别值 | 颜色 | RGB | 中文含义 | 说明 |
 |--------------|------|-----|----------|------|
-| `1` | `#006400` | `0, 100, 0` | 树木覆盖 | 林地、公园或其他以乔木树冠为主的区域 |
+| `1` | `#1E64DC` | `30, 100, 220` | 永久性水体 | 湖泊、水库、河流等长期有水的区域 |
 | `2` | `#B4D250` | `180, 210, 80` | 灌木地 | 以灌木或低矮木本植被为主的区域 |
 | `3` | `#F5DC5A` | `245, 220, 90` | 草地 | 以草本植被为主的区域 |
 | `4` | `#D23C3C` | `210, 60, 60` | 耕地 | 农作物种植地、农田或周期性耕作区域 |
 | `5` | `#BEAA82` | `190, 170, 130` | 建成区 | 建筑、道路及其他人工不透水表面为主的区域 |
 | `6` | `#A0DCDC` | `160, 220, 220` | 裸地/稀疏植被 | 裸土、裸岩或植被覆盖度很低的区域 |
-| `8` | `#1E64DC` | `30, 100, 220` | 永久性水体 | 湖泊、水库、河流等长期有水的区域 |
+| `8` | `#006400` | `0, 100, 0` | 树木覆盖 | 林地、公园或其他以乔木树冠为主的区域 |
 
 > **注意**：上表是海淀项目当前 PNG 结果的实际调色板，类别值为项目内部
 > WorldCover 归一化值。它不是 ESA WorldCover 原始 11 类的完整调色板，前端不应
@@ -1281,7 +1298,9 @@ curl -s "http://60.31.21.42:22065/models?region_id=harbin"
 
 创建模型并启动异步训练任务。请求体中需要携带完整的 GeoJSON 标注包和类别定义，后端解析后提取训练样本。训练完成后才能调用推理接口。
 
-当前自定义训练根据有效 Polygon 数自动选择二分类策略：少于 10 个时使用 `PU + Query` 向量检索，大于等于 10 个时使用 `binary_conv3x3` few-shot 卷积头。每次训练只能选择一个目标 `class_id`，输出为“目标 / 非目标”。**Polygon 内部是目标正样本；Polygon 外部只是未标注区域，不会整体当作负样本**。PU 策略只从远离标注、且前景相似度最低的未标注像素中估计可靠背景，并在推理时使用带面积增长保护的一次 Query 自适应。训练策略由后端自动选择，前端请求和推理 API 不变。
+当前自定义训练按类别分别统计有效 Polygon，并为每个有标注的类别训练独立二分类头：某类少于 10 个时使用 `PU + Query`，大于等于 10 个时使用 `binary_conv3x3`。同一个模型可以同时包含两种头；声明但没有 Polygon 标注的类别会被跳过。**Polygon 内部是对应类别的正样本；Polygon 外部只是未标注区域，不会整体当作负样本**。推理仍使用同一个模型 ID，后端自动运行全部类别头并合并结果，前端 API 不变。
+
+选择 `traditional_ml` 时，后端使用 Sentinel-2 六个波段及四个光谱指数，并为每个有标注类别训练独立 Random Forest。选择 `dinov3_sat493m` 时，后端使用对应月份的 DINOv3-SAT493M 特征，并为每个有标注类别训练独立像素 MLP。两种方式都会将全部类别头绑定到同一个 `model_id`；后续单次或批量推理不需要再次提交训练方式和类别列表。
 
 ```
 POST /models
@@ -1299,7 +1318,7 @@ POST /models
 | `description` | string | 否 | 模型描述 |
 | `annotations` | object | 是 | GeoJSON FeatureCollection，坐标为 WGS84，几何类型支持 `Polygon`、`MultiPolygon` |
 | `classes` | object[] | 是 | 类别定义列表，每项包含 `id`、`name`、`color` |
-| `class_ids` | string[] | 否 | 可选，指定参与训练的目标类别 ID。当前自定义训练是二分类 few-shot，每次只能传 1 个目标类别；不传时要求标注包中只有 1 个类别 |
+| `class_ids` | string[] | 否 | 候选类别 ID。后端以标注包中实际出现的 `class_id` 为准，有标注的类别分别训练，无标注类别自动跳过 |
 
 **`annotations` 说明**：
 - `type` 固定为 `FeatureCollection`。
@@ -1310,7 +1329,7 @@ POST /models
 - `single_time_detection` 单时间检测需要 `month`；`change_detection` 双时相变化检测需要 `before_month` 和 `after_month`。
 - `geometry` 坐标使用 WGS84 `[lon, lat]`。
 - 所有 `Feature` 的 `region_id` 必须与请求体顶层 `region_id` 一致。
-- 所有 `Feature` 的 `class_id` 必须在 `classes` 中定义。若传入 `class_ids`，当前只能传 1 个目标类别；未选中的标注会被忽略。
+- 所有 `Feature` 的 `class_id` 必须在 `classes` 中定义。`class_ids` 是候选列表；实际训练以标注中出现的类别为准，没有 Polygon 标注的类别会被跳过。
 - 训练时只把 Polygon 覆盖区域作为该类别正样本；未覆盖区域不代表“不是这个类别”。因此前端不需要为了 few-shot 训练额外画满背景。
 - 限制：最多 `10000` 个 Feature，总顶点数不超过 `100000`。
 

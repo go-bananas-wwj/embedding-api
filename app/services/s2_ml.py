@@ -142,12 +142,16 @@ def train_random_forest(
 
 
 def save_random_forest_checkpoint(
-    user_id: str, model_id: str, model: RandomForestClassifier, metadata: Dict[str, Any]
+    user_id: str,
+    model_id: str,
+    model: RandomForestClassifier,
+    metadata: Dict[str, Any],
+    checkpoint_path: Optional[Path] = None,
 ) -> Path:
     record = get_model_registry(user_id).get_model(model_id)
     if record is None:
         raise ValueError(f"Model {model_id} not found in registry")
-    path = Path(record["model_path"])
+    path = checkpoint_path or Path(record["model_path"])
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(f".tmp.{uuid.uuid4().hex}")
     try:

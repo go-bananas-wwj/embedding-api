@@ -2,10 +2,13 @@
 """
 
 import uuid
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import joblib
+import torch
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Path as PathParam, Query
 from fastapi.responses import FileResponse
 
@@ -61,13 +64,16 @@ _training_jobs: dict[str, dict] = {}
 
 def _completion_metadata(result: dict, binding: dict) -> dict:
     """Merge training metadata once, with checkpoint binding as authority."""
-    return {
+    metadata = {
         "resolved_training_method": result.get(
             "resolved_training_method", "auto_embedding_head"
         ),
         "feature_source": result.get("feature_source", "xuannv_embedding"),
         **binding,
     }
+    if result.get("class_heads"):
+        metadata["class_heads"] = result["class_heads"]
+    return metadata
 
 
 def _validate_result_filename(filename: str) -> None:
@@ -320,14 +326,13 @@ async def create_model(
                 except (FileNotFoundError, ValueError) as exc:
                     raise HTTPException(status_code=409, detail=str(exc))
 
-    active_class_ids = req.class_ids or list(
-        {f.properties.class_id for f in req.annotations.features}
-    )
+    active_class_ids = req.class_ids or []
+    active_classes = [c for c in req.classes if c.id in active_class_ids]
 
     model_id = registry.create_model(
         name=req.name,
         model_type=req.model_type,
-        classes=[c.model_dump() for c in req.classes],
+        classes=[c.model_dump() for c in active_classes],
         task_type=task_type,
         region_id=req.region_id,
         description=req.description,
@@ -364,7 +369,7 @@ async def create_model(
         embedding_version=embedding_version,
         epochs=req.epochs,
         annotations=req.annotations,
-        classes=req.classes,
+        classes=active_classes,
         class_ids=active_class_ids,
         training_method=req.training_method,
     )
@@ -874,6 +879,206 @@ async def get_result(
     return FileResponse(file_path, media_type="image/png")
 
 
+def _run_training_head(
+    *,
+    model_id: str,
+    user_id: str,
+    region_id: str,
+    task_type: str,
+    model_type: str,
+    embedding_version: str,
+    epochs: int,
+    annotations,
+    classes,
+    class_ids,
+    training_method: str,
+    checkpoint_path: Optional[Path] = None,
+) -> dict:
+    if training_method in {"aef", "dinov3_sat493m"}:
+        return ExternalEmbeddingMLPTrainingEngine(training_method, user_id).train(
+            model_id=model_id,
+            region_id=region_id,
+            task_type=task_type,
+            model_type=model_type,
+            annotations=annotations,
+            classes=classes,
+            class_ids=class_ids,
+            epochs=epochs,
+            checkpoint_path=checkpoint_path,
+        )
+    if training_method == "traditional_ml":
+        return TraditionalS2TrainingEngine(user_id).train(
+            model_id=model_id,
+            region_id=region_id,
+            task_type=task_type,
+            annotations=annotations,
+            classes=classes,
+            class_ids=class_ids,
+            checkpoint_path=checkpoint_path,
+        )
+    if model_type == "change_detection":
+        return ChangeDetectionTrainingEngine(user_id).train(
+            model_id=model_id,
+            region_id=region_id,
+            task_type=task_type,
+            embedding_version=embedding_version,
+            annotations=annotations,
+            classes=classes,
+            class_ids=class_ids,
+            epochs=epochs,
+        )
+    return ClassificationTrainingEngine(user_id).train(
+        model_id=model_id,
+        region_id=region_id,
+        task_type=task_type,
+        embedding_version=embedding_version,
+        annotations=annotations,
+        classes=classes,
+        class_ids=class_ids,
+        epochs=epochs,
+    )
+
+
+def _load_training_checkpoint(path: Path) -> dict:
+    try:
+        checkpoint = joblib.load(path)
+    except Exception:
+        checkpoint = torch.load(path, map_location="cpu", weights_only=False)
+    if not isinstance(checkpoint, dict):
+        raise ValueError("Training checkpoint must be a metadata dictionary")
+    return checkpoint
+
+
+def _train_class_heads(
+    *,
+    model_id: str,
+    user_id: str,
+    region_id: str,
+    task_type: str,
+    model_type: str,
+    embedding_version: str,
+    epochs: int,
+    annotations,
+    classes,
+    class_ids,
+    training_method: str,
+) -> dict:
+    if len(class_ids) == 1:
+        return _run_training_head(
+            model_id=model_id,
+            user_id=user_id,
+            region_id=region_id,
+            task_type=task_type,
+            model_type=model_type,
+            embedding_version=embedding_version,
+            epochs=epochs,
+            annotations=annotations,
+            classes=classes,
+            class_ids=class_ids,
+            training_method=training_method,
+        )
+
+    class_lookup = {item.id: item for item in classes}
+    heads = []
+    summaries = []
+    registry_record = get_model_registry(user_id).get_model(model_id)
+    if registry_record is None:
+        raise ValueError(f"Model {model_id} not found in registry")
+    model_path = Path(registry_record["model_path"])
+    training_dir = model_path.parent / ".training" / model_id
+    training_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        for class_id in class_ids:
+            class_annotations = GeoJSONFeatureCollection(
+                type="FeatureCollection",
+                features=[
+                    feature
+                    for feature in annotations.features
+                    if feature.properties.class_id == class_id
+                ],
+            )
+            class_definition = class_lookup[class_id]
+            child_path = training_dir / f"{class_id}.pkl"
+            try:
+                result = _run_training_head(
+                    model_id=model_id,
+                    user_id=user_id,
+                    region_id=region_id,
+                    task_type=task_type,
+                    model_type=model_type,
+                    embedding_version=embedding_version,
+                    epochs=epochs,
+                    annotations=class_annotations,
+                    classes=[class_definition],
+                    class_ids=[class_id],
+                    training_method=training_method,
+                    checkpoint_path=child_path,
+                )
+            except Exception as exc:
+                raise ValueError(
+                    f"类别“{class_definition.name}”({class_id})训练失败: {exc}"
+                ) from exc
+            checkpoint = _load_training_checkpoint(Path(result["model_path"]))
+            heads.append(
+                {
+                    "class_id": class_id,
+                    "class": class_definition.model_dump(),
+                    "checkpoint": checkpoint,
+                }
+            )
+            summaries.append(
+                {
+                    "class_id": class_id,
+                    "class_name": class_definition.name,
+                    "training_strategy": checkpoint.get(
+                        "training_strategy", result.get("resolved_training_method")
+                    ),
+                    "polygon_count": int(
+                        checkpoint.get("polygon_count", result.get("n_samples", 0))
+                    ),
+                    "accuracy": float(result.get("accuracy", 0.0)),
+                }
+            )
+
+        first = heads[0]["checkpoint"]
+        manifest = {
+            "__format__": "multi_binary_heads_v1",
+            "head_type": "multi_binary_heads",
+            "training_method": training_method,
+            "model_type": model_type,
+            "task_type": task_type,
+            "region_id": region_id,
+            "embedding_version": embedding_version,
+            "feature_source": first.get("feature_source", training_method),
+            "embed_dim": first.get("embed_dim"),
+            "classes": [class_lookup[class_id].model_dump() for class_id in class_ids],
+            "class_heads": summaries,
+            "heads": heads,
+            "trained_at": datetime.now().isoformat(),
+        }
+        manifest.update(load_model_binding(Path(result["model_path"])))
+        manifest["checkpoint_format"] = "multi_binary_heads_v1"
+        manifest["head_type"] = "multi_binary_heads"
+        temporary = model_path.with_suffix(f".tmp.{uuid.uuid4().hex}")
+        joblib.dump(manifest, temporary)
+        temporary.replace(model_path)
+    finally:
+        shutil.rmtree(training_dir, ignore_errors=True)
+    total_samples = sum(item["polygon_count"] for item in summaries)
+    weighted_accuracy = sum(
+        item["accuracy"] * item["polygon_count"] for item in summaries
+    ) / max(total_samples, 1)
+    return {
+        "model_id": model_id,
+        "model_path": str(model_path),
+        "accuracy": weighted_accuracy,
+        "n_samples": total_samples,
+        "resolved_training_method": "multi_binary_heads",
+        "feature_source": manifest["feature_source"],
+        "class_heads": summaries,
+    }
+
+
 def _do_training(
     *,
     job_id: str,
@@ -890,52 +1095,19 @@ def _do_training(
     training_method: str = "xuannv_earth",
 ) -> None:
     try:
-        if training_method in {"aef", "dinov3_sat493m"}:
-            engine = ExternalEmbeddingMLPTrainingEngine(training_method, user_id)
-            result = engine.train(
-                model_id=model_id,
-                region_id=region_id,
-                task_type=task_type,
-                model_type=model_type,
-                annotations=annotations,
-                classes=classes,
-                class_ids=class_ids,
-                epochs=epochs,
-            )
-        elif training_method == "traditional_ml":
-            engine = TraditionalS2TrainingEngine(user_id)
-            result = engine.train(
-                model_id=model_id,
-                region_id=region_id,
-                task_type=task_type,
-                annotations=annotations,
-                classes=classes,
-                class_ids=class_ids,
-            )
-        elif model_type == "change_detection":
-            engine = ChangeDetectionTrainingEngine(user_id)
-            result = engine.train(
-                model_id=model_id,
-                region_id=region_id,
-                task_type=task_type,
-                embedding_version=embedding_version,
-                annotations=annotations,
-                classes=classes,
-                class_ids=class_ids,
-                epochs=epochs,
-            )
-        else:
-            engine = ClassificationTrainingEngine(user_id)
-            result = engine.train(
-                model_id=model_id,
-                region_id=region_id,
-                task_type=task_type,
-                embedding_version=embedding_version,
-                annotations=annotations,
-                classes=classes,
-                class_ids=class_ids,
-                epochs=epochs,
-            )
+        result = _train_class_heads(
+            model_id=model_id,
+            user_id=user_id,
+            region_id=region_id,
+            task_type=task_type,
+            model_type=model_type,
+            embedding_version=embedding_version,
+            epochs=epochs,
+            annotations=annotations,
+            classes=classes,
+            class_ids=class_ids,
+            training_method=training_method,
+        )
 
         registry = get_model_registry(user_id)
         binding = load_model_binding(Path(result["model_path"]))

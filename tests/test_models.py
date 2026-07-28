@@ -204,8 +204,8 @@ class TestModels:
         assert response.status_code == 200
         assert response.json()["type"] == "single_time_detection"
 
-    def test_create_model_rejects_multiple_target_classes(self):
-        payload = _model_payload("test-multi-class-rejected")
+    def test_create_model_trains_one_head_per_annotated_class(self):
+        payload = _model_payload("test-multi-class-heads")
         payload["classes"].append({"id": "cls_002", "name": "道路", "color": "#00FF00"})
         payload["annotations"]["features"].append(
             {
@@ -236,8 +236,89 @@ class TestModels:
 
         response = client.post("/models", json=payload)
 
-        assert response.status_code == 422
-        assert "二分类" in response.text
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] in {"training", "completed"}
+        assert {item["id"] for item in data["classes"]} == {"cls_001", "cls_002"}
+        model = client.get(f"/models/{data['id']}").json()
+        assert model["status"] == "completed"
+        assert model["head_type"] == "multi_binary_heads"
+        assert {item["class_id"] for item in model["class_heads"]} == {
+            "cls_001",
+            "cls_002",
+        }
+        assert {
+            item["training_strategy"] for item in model["class_heads"]
+        } == {"pu_query_retrieval"}
+
+        inference = client.post(
+            f"/models/{data['id']}/infer",
+            json={
+                "region_id": "harbin",
+                "patch_id": "patch_000000",
+                "month": "2025-04",
+            },
+        )
+        assert inference.status_code == 200
+
+    def test_create_model_skips_class_without_annotations(self):
+        payload = _model_payload("test-skip-unannotated-class")
+        payload["classes"].append(
+            {"id": "cls_002", "name": "道路", "color": "#00FF00"}
+        )
+        payload["class_ids"] = ["cls_001", "cls_002"]
+
+        response = client.post("/models", json=payload)
+
+        assert response.status_code == 200
+        assert [item["id"] for item in response.json()["classes"]] == ["cls_001"]
+
+    def test_create_model_selects_strategy_per_annotated_class(self):
+        payload = _model_payload("test-per-class-training-strategy")
+        payload["epochs"] = 1
+        payload["classes"].append(
+            {"id": "cls_002", "name": "道路", "color": "#00FF00"}
+        )
+        road_feature = {
+            "type": "Feature",
+            "properties": {
+                "patch_id": "patch_000000",
+                "region_id": "harbin",
+                "class_id": "cls_002",
+                "class_name": "道路",
+                "color": "#00FF00",
+                "task_type": "building_extraction",
+                "month": "2025-04",
+            },
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [
+                    [
+                        [126.50, 45.74],
+                        [126.52, 45.74],
+                        [126.52, 45.76],
+                        [126.50, 45.76],
+                        [126.50, 45.74],
+                    ]
+                ],
+            },
+        }
+        payload["annotations"]["features"].extend(
+            [road_feature for _ in range(10)]
+        )
+
+        response = client.post("/models", json=payload)
+
+        assert response.status_code == 200
+        model = client.get(f"/models/{response.json()['id']}").json()
+        strategies = {
+            item["class_id"]: item["training_strategy"]
+            for item in model["class_heads"]
+        }
+        assert strategies == {
+            "cls_001": "pu_query_retrieval",
+            "cls_002": "binary_conv3x3",
+        }
 
     def test_haidian_embedding_version_falls_back_to_available_v1(self):
         assert _resolve_embedding_version("haidian", "v2") == "v1"

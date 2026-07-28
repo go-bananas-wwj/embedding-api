@@ -34,9 +34,55 @@ def _enhance_operation(
 
     parameters = operation.get("parameters", [])
     _apply_preferred_parameter_examples(parameters, path)
+    _apply_region_task_options(parameters, path)
     _enhance_response_descriptions(operation.get("responses", {}), components)
     operation["x-docs-enhanced"] = True
     operation.setdefault("operationId", _operation_id(method, path))
+
+
+def _apply_region_task_options(
+    parameters: List[Dict[str, Any]],
+    path: str,
+) -> None:
+    """Document task choices from the same config used by the task-list API."""
+    if "{region_id}" not in path:
+        return
+    task_parameter = next(
+        (param for param in parameters if param.get("name") == "task_type"),
+        None,
+    )
+    if task_parameter is None:
+        return
+
+    # Import lazily to keep the OpenAPI helper independent during module import.
+    from app.config import get_config
+
+    config = get_config()
+    region_options: Dict[str, List[str]] = {}
+    examples: Dict[str, Dict[str, str]] = {}
+    for region_id in ("haidian", "harbin"):
+        region = config.get_region(region_id) or {}
+        region_name = region.get("name", region_id)
+        tasks = region.get("tasks") or {}
+        region_options[region_id] = list(tasks)
+        for task_id, task in tasks.items():
+            examples[f"{region_id}_{task_id}"] = {
+                "summary": f"{region_name}：{task.get('name', task_id)}",
+                "value": task_id,
+            }
+
+    task_parameter["x-region-task-options"] = region_options
+    task_parameter["examples"] = examples
+    base = (task_parameter.get("description") or "").strip()
+    guidance = (
+        "可选值按区域不同；请先调用 `GET /regions/{region_id}/tasks`，"
+        "并直接使用返回的 `tasks[].id`。下方示例名称已标明适用区域。"
+    )
+    if guidance not in base:
+        task_parameter["description"] = f"{base} {guidance}".strip()
+    schema = task_parameter.get("schema")
+    if isinstance(schema, dict):
+        schema["description"] = task_parameter["description"]
 
 
 def _parameter_section(parameters: List[Dict[str, Any]]) -> str:
@@ -452,15 +498,15 @@ FIELD_DOCS = {
     "y": "XYZ 瓦片 Y 坐标。当前 XYZ 瓦片接口为预留接口。",
     "name": "名称。用于模型、类别或展示项的人类可读名称。",
     "model_type": "训练类型。可选 `single_time_detection`（单时间检测）或 `change_detection`（双时相变化检测）；旧值 `classification` 仍兼容。",
-    "training_method": "训练方式。默认 `xuannv_earth`；`traditional_ml` 使用 Sentinel-2 与 Random Forest；`aef` 使用年度 embedding，当前任意月份固定回退到 2025 年；`dinov3_sat493m` 使用对应月份光学影像。实际资产可用性以 `GET /models/capabilities` 为准。",
+    "training_method": "训练方式。默认 `xuannv_earth`；`traditional_ml` 使用 Sentinel-2 六波段+四个光谱指数，每个有标注类别训练一个 Random Forest；`aef` 使用年度 embedding，当前任意月份固定回退到 2025 年；`dinov3_sat493m` 使用对应月份光学影像，每个有标注类别训练一个像素 MLP。多类别最终仍返回一个 model_id。实际资产可用性以 `GET /models/capabilities` 为准。",
     "requested_training_method": "前端请求的训练方式；旧模型和系统模型可能为空。",
     "resolved_training_method": "后端实际执行的算法，例如 `pu_query_retrieval`、`binary_conv3x3` 或 `random_forest`。",
     "feature_source": "训练特征来源，例如 `xuannv_embedding` 或 `sentinel2_l2a`。",
     "embedding_version": "训练/推理使用的 embedding 版本。按区域可选 `v1` 或 `v2`。",
-    "epochs": "训练迭代次数。默认 100，范围 1~1000；有效 Polygon 达到 10 个时使用 Binary Conv 3x3，服务端最多执行 100 轮。少于 10 个时使用免迭代的 PU + Query 检索，此值会被保留但不参与计算。",
-    "class_ids": "自定义训练目标类别 ID。当前自定义训练为二分类，每次只能选择 1 个目标类别；前端请求格式不随训练策略变化。",
+    "epochs": "训练迭代次数。默认 100，范围 1~1000。后端按类别分别统计有效 Polygon：某类达到 10 个时训练 Binary Conv 3x3，服务端最多执行 100 轮；某类少于 10 个时使用免迭代的 PU + Query，此参数对该类不参与计算。",
+    "class_ids": "候选类别 ID 列表。后端以 annotations 中实际出现的 class_id 为准：有标注的类别各自训练一个二分类头，没有 Polygon 标注的类别自动跳过；前端请求格式不随训练策略变化。",
     "description": "描述文本。用于补充说明模型、任务或配置用途。",
-    "annotations": "GeoJSON 标注包。坐标必须是 WGS84，经纬度顺序为 `[lon, lat]`；Polygon 内部是正样本，外部是未标注样本而不是直接负样本。有效 Polygon 少于 10 个时自动使用 PU + Query，大于等于 10 个时使用 Binary Conv 3x3；MultiPolygon 的每个独立 Polygon 分别计数。",
+    "annotations": "GeoJSON 标注包。坐标必须是 WGS84，经纬度顺序为 `[lon, lat]`；Polygon 内部是对应类别的正样本，外部是未标注样本而不是直接负样本。后端按 class_id 独立计数和训练：某类少于 10 个 Polygon 使用 PU + Query，大于等于 10 个使用 Binary Conv 3x3；MultiPolygon 的每个独立 Polygon 分别计数。",
     "classes": "类别定义列表。每个类别包含 `id`、`name`、`color`。",
     "id": "资源 ID。用于唯一标识区域、模型、任务或类别。",
     "color": "颜色值。建议使用十六进制格式，例如 `#FF0000`。",

@@ -76,6 +76,28 @@ def test_task_result_exposes_one_clear_time_contract():
     assert version_examples["harbin_v5"]["value"] == "v2"
 
 
+def test_task_result_documents_region_task_options_from_task_list():
+    schema = client.get("/openapi.json").json()
+    operation = schema["paths"][
+        "/regions/{region_id}/patches/{patch_id}/tasks/{task_type}/result"
+    ]["get"]
+    task_parameter = next(
+        item for item in operation["parameters"] if item["name"] == "task_type"
+    )
+    documented = task_parameter["x-region-task-options"]
+
+    for region_id in ("haidian", "harbin"):
+        response = client.get(f"/regions/{region_id}/tasks")
+        listed = [task["id"] for task in response.json()["tasks"]]
+        assert documented[region_id] == listed
+
+    assert "GET /regions/{region_id}/tasks" in task_parameter["description"]
+    assert "change_detection" in documented["haidian"]
+    assert "change_detection" in documented["harbin"]
+    assert "construction" in documented["haidian"]
+    assert "construction" not in documented["harbin"]
+
+
 def test_task_summary_uses_the_same_clear_time_contract():
     schema = client.get("/openapi.json").json()
     operation = schema["paths"][

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
+import rasterio
 from PIL import Image
 import torch
 import torch.nn.functional as F
@@ -23,6 +24,7 @@ from app.services.external_embeddings import EXTERNAL_MLP_CHECKPOINT_FORMAT, loa
 from app.services.geojson_adapter import (
     parse_annotations_for_training,
     parse_polygon_annotations_for_training,
+    rasterize_geometry_to_grid,
 )
 from app.services.model_registry import get_model_registry
 from app.services.model_binding import build_model_binding
@@ -76,6 +78,19 @@ def _resize_mask(mask: np.ndarray, height: int, width: int) -> np.ndarray:
             (width, height), Image.Resampling.NEAREST
         )
     )
+
+
+def _project_mask_to_feature_grid(
+    mask: np.ndarray, height: int, width: int
+) -> np.ndarray:
+    """Project sparse labels without dropping sub-token polygons."""
+    binary = (mask > 0).astype(np.float32, copy=False)
+    if binary.shape == (height, width):
+        return binary.astype(np.uint8)
+    pooled = torch.nn.functional.adaptive_max_pool2d(
+        torch.from_numpy(binary)[None, None], (height, width)
+    )
+    return (pooled[0, 0].numpy() > 0).astype(np.uint8)
 
 
 def _normalize_feature_map(feature: np.ndarray) -> np.ndarray:
@@ -338,11 +353,12 @@ def _save_external_mlp_checkpoint(
     model_id: str,
     model: PixelMLPHead,
     metadata: Dict[str, Any],
+    checkpoint_path: Optional[Path] = None,
 ) -> Path:
     record = get_model_registry(user_id).get_model(model_id)
     if record is None:
         raise ValueError(f"Model {model_id} not found in registry")
-    path = Path(record["model_path"])
+    path = checkpoint_path or Path(record["model_path"])
     path.parent.mkdir(parents=True, exist_ok=True)
     checkpoint = {
         "__format__": EXTERNAL_MLP_CHECKPOINT_FORMAT,
@@ -547,6 +563,7 @@ class TraditionalS2TrainingEngine:
         annotations: GeoJSONFeatureCollection,
         classes: List[ModelClass],
         class_ids: List[str],
+        checkpoint_path: Optional[Path] = None,
     ) -> Dict[str, Any]:
         if len(set(class_ids)) != 1:
             raise ValueError("Traditional Sentinel-2 training supports one target class")
@@ -559,17 +576,35 @@ class TraditionalS2TrainingEngine:
         cache: Dict[Tuple[str, str], Tuple[np.ndarray, np.ndarray, str]] = {}
         samples: List[Tuple[np.ndarray, np.ndarray, np.ndarray]] = []
         source_files = set()
+        diagnostics: List[str] = []
         for record in polygon_records:
             key = (record["patch_id"], record["month"])
             if key not in cache:
                 cache[key] = load_s2_features(region_id, key[0], key[1])
             feature, valid, source_path = cache[key]
-            mask = _resize_mask(record["mask"], feature.shape[1], feature.shape[2]) > 0
-            if np.any(mask & valid):
+            with rasterio.open(source_path) as source:
+                mask = rasterize_geometry_to_grid(
+                    record["geometry"],
+                    crs=source.crs,
+                    transform=source.transform,
+                    height=source.height,
+                    width=source.width,
+                ) > 0
+            overlap_pixels = int((mask & valid).sum())
+            if overlap_pixels:
                 samples.append((feature, mask, valid))
                 source_files.add(source_path)
+            else:
+                diagnostics.append(
+                    f"{record['patch_id']}/{record['month']}: "
+                    f"polygon_pixels={int(mask.sum())}, valid_overlap_pixels=0"
+                )
         if not samples:
-            raise ValueError("No valid training polygons overlap available Sentinel-2 pixels")
+            detail = "; ".join(diagnostics[:4])
+            raise ValueError(
+                "没有标注与 Sentinel-2 有效像素重叠"
+                + (f"（{detail}）" if detail else "")
+            )
         model, threshold, metrics = train_random_forest(samples)
         class_records = [c.model_dump() for c in classes if c.id in class_ids]
         metadata = {
@@ -591,7 +626,11 @@ class TraditionalS2TrainingEngine:
             "trained_at": datetime.now().isoformat(),
         }
         model_path = save_random_forest_checkpoint(
-            self._user_id, model_id, model, metadata
+            self._user_id,
+            model_id,
+            model,
+            metadata,
+            checkpoint_path=checkpoint_path,
         )
         return {
             "model_id": model_id,
@@ -623,6 +662,7 @@ class ExternalEmbeddingMLPTrainingEngine:
         classes: List[ModelClass],
         class_ids: List[str],
         epochs: int = 100,
+        checkpoint_path: Optional[Path] = None,
     ) -> Dict[str, Any]:
         if len(set(class_ids)) != 1:
             raise ValueError("AEF/DINOv3 MLP training requires exactly one positive class_id")
@@ -637,6 +677,7 @@ class ExternalEmbeddingMLPTrainingEngine:
         if len(records) > 16:
             raise ValueError("External embedding MLP training supports at most 16 patch/time samples per job")
         cache: Dict[Tuple[str, str], np.ndarray] = {}
+        diagnostics: List[str] = []
         for record in records:
             patch_id = record["patch_id"]
             if model_type == "change_detection":
@@ -658,11 +699,23 @@ class ExternalEmbeddingMLPTrainingEngine:
                         self._method, region_id, *key
                     )
                 feature = cache[key]
-            mask = _resize_mask(record["mask"], feature.shape[1], feature.shape[2])
+            mask = _project_mask_to_feature_grid(
+                record["mask"], feature.shape[1], feature.shape[2]
+            )
             if np.any(mask):
                 samples.append((feature, _build_binary_target(feature, mask)))
+            else:
+                diagnostics.append(
+                    f"{patch_id}/{record.get('month', 'change')}: "
+                    f"source_mask_pixels={int(np.count_nonzero(record['mask']))}, "
+                    "feature_mask_pixels=0"
+                )
         if not samples:
-            raise ValueError(f"No valid {self._method} embedding samples")
+            detail = "; ".join(diagnostics[:4])
+            raise ValueError(
+                f"没有可用的 {self._method} 标注特征"
+                + (f"（{detail}）" if detail else "")
+            )
         expected_channels = samples[0][0].shape[0]
         if any(feature.shape[0] != expected_channels for feature, _ in samples):
             raise ValueError("External embedding channel count differs between samples")
@@ -692,7 +745,11 @@ class ExternalEmbeddingMLPTrainingEngine:
             metadata["foundation_model_version"] = "aef_annual_2025"
             metadata["preprocessing_version"] = "aef_annual_2025"
         path = _save_external_mlp_checkpoint(
-            self._user_id, model_id, model, metadata
+            self._user_id,
+            model_id,
+            model,
+            metadata,
+            checkpoint_path=checkpoint_path,
         )
         return {
             "model_id": model_id,

@@ -88,6 +88,16 @@ class InferenceEngine:
         model_data = self._load_model(model_id)
         record = get_model_registry(self._user_id).get_model(model_id) or {}
         validate_model_binding(record, model_data, requested_region=region_id)
+        if model_data.get("__format__") == "multi_binary_heads_v1":
+            return self._infer_multi_binary_heads(
+                model_data,
+                model_id,
+                region_id,
+                patch_id,
+                month=month,
+                before_month=before_month,
+                after_month=after_month,
+            )
         if model_data.get("__format__") == S2_RF_CHECKPOINT_FORMAT:
             return self._infer_s2_random_forest(
                 model_data, model_id, region_id, patch_id, month=month
@@ -190,6 +200,154 @@ class InferenceEngine:
         result_path = self.results_dir / result_filename
         img.save(result_path)
         return str(result_path)
+
+    def _infer_multi_binary_heads(
+        self,
+        model_data: Dict[str, Any],
+        model_id: str,
+        region_id: str,
+        patch_id: str,
+        month: Optional[str],
+        before_month: Optional[str],
+        after_month: Optional[str],
+    ) -> str:
+        method = model_data.get("training_method", "xuannv_earth")
+        is_change = model_data.get("model_type") == "change_detection"
+        if method == "traditional_ml":
+            if not month:
+                raise ValueError("Traditional Sentinel-2 inference requires month")
+            feature, valid, _ = load_s2_features(region_id, patch_id, month)
+            suffix = month
+        elif method in {"aef", "dinov3_sat493m"}:
+            if is_change:
+                if not before_month or not after_month:
+                    raise ValueError(
+                        "Change-detection inference requires before_month and after_month"
+                    )
+                before = load_external_embedding(
+                    method, region_id, patch_id, before_month
+                )
+                after = load_external_embedding(
+                    method, region_id, patch_id, after_month
+                )
+                feature = np.concatenate(
+                    [before, after, np.abs(after - before), before * after], axis=0
+                )
+                suffix = f"{before_month}_vs_{after_month}"
+            else:
+                if not month:
+                    raise ValueError("Single-time inference requires month")
+                feature = load_external_embedding(method, region_id, patch_id, month)
+                suffix = month
+            valid = np.isfinite(feature).all(axis=0)
+        else:
+            embedding_version = model_data.get("embedding_version", "v2")
+            if is_change:
+                if not before_month or not after_month:
+                    raise ValueError(
+                        "Change-detection inference requires before_month and after_month"
+                    )
+                before = _load_embedding_for_inference(
+                    region_id, patch_id, before_month, version=embedding_version
+                )
+                after = _load_embedding_for_inference(
+                    region_id, patch_id, after_month, version=embedding_version
+                )
+                if before is None or after is None:
+                    raise FileNotFoundError(
+                        f"Embedding not found for {patch_id} "
+                        f"{before_month}/{after_month}"
+                    )
+                feature = after - before
+                suffix = f"{before_month}_vs_{after_month}"
+            else:
+                if not month:
+                    raise ValueError("Single-time inference requires month")
+                feature = _load_embedding_for_inference(
+                    region_id, patch_id, month, version=embedding_version
+                )
+                if feature is None:
+                    raise FileNotFoundError(
+                        f"Embedding not found for {patch_id} {month}"
+                    )
+                suffix = month
+            valid = np.isfinite(feature).all(axis=0)
+
+        prediction = np.zeros(feature.shape[1:], dtype=np.int32)
+        best_confidence = np.full(feature.shape[1:], -np.inf, dtype=np.float32)
+        class_map = {}
+        classes = []
+        for label, item in enumerate(model_data.get("heads", []), start=1):
+            checkpoint = item["checkpoint"]
+            score, threshold = self._score_binary_head(checkpoint, feature)
+            confidence = (score - threshold) / max(1.0 - threshold, 1e-6)
+            selected = (
+                valid
+                & (score >= threshold)
+                & (confidence > best_confidence)
+            )
+            prediction[selected] = label
+            best_confidence[selected] = confidence[selected]
+            class_info = item["class"]
+            classes.append(class_info)
+            class_map[class_info["id"]] = label
+
+        rendered = self._color_encode_classes(prediction, classes, class_map)
+        result_path = self.results_dir / (
+            f"infer_{model_id}_{region_id}_{patch_id}_{suffix}.png"
+        )
+        Image.fromarray(rendered).resize(
+            (128, 128), Image.Resampling.NEAREST
+        ).save(result_path)
+        return str(result_path)
+
+    def _score_binary_head(
+        self,
+        checkpoint: Dict[str, Any],
+        feature: np.ndarray,
+    ) -> Tuple[np.ndarray, float]:
+        checkpoint_format = checkpoint.get("__format__")
+        if checkpoint_format == PU_QUERY_CHECKPOINT_FORMAT:
+            score, _ = score_pu_query(feature, checkpoint)
+            return score.astype(np.float32), float(checkpoint["threshold"])
+        if checkpoint_format == "torch_fewshot_head":
+            normalized = self._normalize_feature_map(feature)
+            head = BinaryConv3x3ProbeHead(
+                embed_dim=int(checkpoint["embed_dim"]),
+                hidden_dim=int(checkpoint.get("hidden_dim", 128)),
+                dropout=0.0,
+            )
+            head.load_state_dict(checkpoint["state_dict"])
+            head.eval()
+            with torch.inference_mode():
+                score = torch.sigmoid(
+                    head(torch.from_numpy(normalized).float().unsqueeze(0))
+                ).squeeze().cpu().numpy()
+            return score.astype(np.float32), float(checkpoint.get("threshold", 0.5))
+        if checkpoint_format == EXTERNAL_MLP_CHECKPOINT_FORMAT:
+            mean = np.asarray(checkpoint["normalization_mean"], dtype=np.float32)
+            std = np.asarray(checkpoint["normalization_std"], dtype=np.float32)
+            normalized = (feature - mean[:, None, None]) / std[:, None, None]
+            head = PixelMLPHead(
+                int(checkpoint["embed_dim"]),
+                int(checkpoint.get("hidden_dim", 128)),
+                dropout=0.0,
+            )
+            head.load_state_dict(checkpoint["state_dict"])
+            head.eval()
+            with torch.inference_mode():
+                score = torch.sigmoid(
+                    head(torch.from_numpy(normalized).float().unsqueeze(0))
+                ).squeeze().cpu().numpy()
+            return score.astype(np.float32), float(checkpoint.get("threshold", 0.5))
+        if checkpoint_format == S2_RF_CHECKPOINT_FORMAT:
+            flat = feature.reshape(feature.shape[0], -1).T
+            score = checkpoint["model"].predict_proba(flat)[:, 1]
+            return (
+                score.reshape(feature.shape[1:]).astype(np.float32),
+                float(checkpoint.get("threshold", 0.5)),
+            )
+        raise ValueError(f"Unsupported child checkpoint format: {checkpoint_format}")
 
     def _infer_s2_random_forest(
         self,
