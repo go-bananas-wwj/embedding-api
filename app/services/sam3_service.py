@@ -18,7 +18,13 @@ from PIL import Image
 
 from app.config import get_config
 from app.services.data_service import DataNotFoundError, DataValidationError
-from app.services.mosaic_service import RAW_ROOT, _SENSOR_RGB, _get_raw_tiff_path, _to_rgb
+from app.services.mosaic_service import (
+    RAW_ROOT,
+    _SENSOR_RGB,
+    _configured_sensor_roots,
+    _get_raw_tiff_path,
+    _to_rgb,
+)
 from app.services.time_utils import normalize_quarter_date
 
 logger = logging.getLogger(__name__)
@@ -249,10 +255,7 @@ class SAM3Service:
             if flat_path:
                 return flat_path
 
-        roots = [RAW_ROOT]
-        s2_dir = region.get("s2_dir")
-        if s2_dir:
-            roots.append(s2_dir)
+        roots = _configured_sensor_roots(region, sensor_type, raw_root=RAW_ROOT)
 
         path = _get_raw_tiff_path(region_id, patch_id, sensor_type, periods, roots=roots)
         if not path:

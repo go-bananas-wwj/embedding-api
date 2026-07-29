@@ -124,6 +124,8 @@ async def get_region_mosaic(
         description=(
             "影像月份或精确日期。两个区域统一支持 `YYYYMM`、`YYYY-MM`；"
             "需要精确到天时可使用 `YYYYMMDD`。月度请求会选择当月最新影像。"
+            "具体可用月份取决于区域和 sensor_type，请查看本接口正文中的"
+            "“区域、数据源与月份”表格。"
         ),
         examples=["202512"],
         openapi_examples={
@@ -135,7 +137,9 @@ async def get_region_mosaic(
     sensor_type: str = Query(
         "s2",
         description=(
-            "大图数据源。可选 `s2`、`s1`、`landsat`、`highres` 或 `embedding`；"
+            "大图数据源。参数名称与前端数据库保持一致。常用值："
+            "`s2`、`s1`、`landsat`、`highres`、`highres_sar`、`s1_hr`、"
+            "`s2_hr`。不同区域支持的数据源不同，请查看本接口正文表格；"
             "`embedding` 返回按 Patch 空间位置拼接的 PCA 色彩可视化。"
         ),
         examples=["s2"],
@@ -144,6 +148,9 @@ async def get_region_mosaic(
             "s1": {"summary": "Sentinel-1 SAR 伪彩色", "value": "s1"},
             "landsat": {"summary": "Landsat 真彩色", "value": "landsat"},
             "highres": {"summary": "高分辨率光学影像", "value": "highres"},
+            "highres_sar": {"summary": "高分辨率 SAR", "value": "highres_sar"},
+            "s1_hr": {"summary": "天仪高分辨率 SAR", "value": "s1_hr"},
+            "s2_hr": {"summary": "天仪高分辨率光学", "value": "s2_hr"},
             "embedding": {"summary": "Embedding PCA 色彩图", "value": "embedding"},
         },
     ),
@@ -156,7 +163,10 @@ async def get_region_mosaic(
     ),
     format: str = Query(
         "png",
-        description="输出格式。'png'（默认，可视化 RGB）或 'tif'（GeoTIFF，保留原始多波段与坐标）。",
+        description=(
+            "输出格式。`png` 使用各传感器固定量程转换为 8 位图，不做逐图增强；"
+            "`tif` 原样保留多波段数值和地理坐标。"
+        ),
         examples=["png"],
         openapi_examples={
             "png": {"summary": "PNG 可视化", "value": "png"},
@@ -179,11 +189,56 @@ async def get_region_mosaic(
         },
     ),
 ):
-    """获取指定日期、区域的整区域马赛克大图。
+    """获取指定区域、月份和数据源的 Patch 拼接大图。
 
     将区域内 Patch 按真实空间位置拼接成一张大图。支持原始光学/SAR 影像，
     也支持 `sensor_type=embedding` 的 PCA 色彩可视化。
+    PNG 不进行按图百分位增强；需要完全保留原始数值时请选择 GeoTIFF。
     首次生成后会缓存到 users/default/mosaic/，后续直接读取。
+
+    ### 区域、数据源与月份
+
+    #### 哈尔滨新区（`region_id=harbin`）
+
+    | `sensor_type` | 数据内容 | 可用月份 |
+    |---|---|---|
+    | `s1` | Sentinel-1 SAR | `202301`～`202506`、`202508`～`202605`；没有 `202507` |
+    | `s2` | Sentinel-2 光学 | `202301`～`202310`、`202401`～`202411`、`202501`～`202510`、`202601`～`202605` |
+    | `landsat` | Landsat 光学 | `202301`～`202303`、`202305`、`202308`～`202405`、`202407`～`202605` |
+    | `s1_hr` | 天仪高分辨率 SAR | `202506`、`202508`、`202509`、`202510`；**不支持 `202504`** |
+    | `s2_hr` | 天仪高分辨率光学 | `202504`、`202506`、`202508`、`202509`、`202510` |
+    | `embedding` | Embedding PCA 色彩图 | `v1`：`202504/202506/202508/202509/202510`；`v2`：上述月份及 `202601`～`202605` |
+
+    哈尔滨不提供 `highres` 和 `highres_sar`，高分辨率数据请分别使用
+    `s2_hr` 和 `s1_hr`。
+
+    #### 海淀区（`region_id=haidian`）
+
+    | `sensor_type` | 数据内容 | 可用月份 |
+    |---|---|---|
+    | `s1` | Sentinel-1 SAR | `202512`～`202605` |
+    | `s2` | Sentinel-2 光学 | `202512`～`202605` |
+    | `landsat` | Landsat 光学 | `202512`～`202605` |
+    | `highres` | 高分辨率光学 | `202512`～`202604`；没有 `202605` |
+    | `highres_sar` | 高分辨率 SAR | `202512`～`202605` |
+    | `embedding` | P10C Embedding PCA 色彩图 | `202512`～`202605`，使用 `version=v1` 或留空 |
+
+    海淀不提供 `s1_hr` 和 `s2_hr`，高分辨率数据请分别使用
+    `highres_sar` 和 `highres`。
+
+    ### 参数组合示例
+
+    - 哈尔滨 2025 年 4 月高分辨率光学：
+      `region_id=harbin&date=202504&sensor_type=s2_hr`
+    - 哈尔滨 2025 年 6 月高分辨率 SAR：
+      `region_id=harbin&date=202506&sensor_type=s1_hr`
+    - 海淀 2026 年 3 月 Sentinel-1：
+      `region_id=haidian&date=202603&sensor_type=s1`
+    - 海淀 2026 年 4 月高分辨率光学：
+      `region_id=haidian&date=202604&sensor_type=highres`
+
+    > 月份可以写成 `YYYYMM` 或 `YYYY-MM`。如果同月存在多景影像，
+    > 接口按采集日期倒序选择当月最新的一景。
     """
     config = get_config()
     if not config.region_exists(region_id):

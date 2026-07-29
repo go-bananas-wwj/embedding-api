@@ -53,3 +53,17 @@ def test_mosaic_rejects_unknown_patch_explicitly():
     )
     assert response.status_code == 404
     assert "Patch 'patch_999999' not found" in response.text
+
+
+def test_mosaic_openapi_documents_region_sensor_month_coverage():
+    operation = client.get("/openapi.json").json()["paths"][
+        "/regions/{region_id}/mosaic"
+    ]["get"]
+    description = operation["description"]
+
+    assert "哈尔滨新区" in description
+    assert "`s1_hr`" in description
+    assert "`202506`、`202508`、`202509`、`202510`" in description
+    assert "海淀区" in description
+    assert "`highres_sar`" in description
+    assert "`202512`～`202605`" in description

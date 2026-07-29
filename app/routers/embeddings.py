@@ -15,6 +15,15 @@ from app.schemas.models import EmbeddingStats, ErrorResponse
 from app.services.data_service import (
     DataService, DataServiceError, DataValidationError, _check_file_size,
 )
+from app.services.aef_pca_service import (
+    AEF_YEAR,
+    PCA_VERSION,
+    AefEmbeddingNotFound,
+    AefPcaError,
+    InvalidPatchId,
+    get_or_create_pca_png,
+    response_etag,
+)
 from app.services.time_utils import is_valid_month_or_date
 
 router = APIRouter()
@@ -29,6 +38,66 @@ MAX_NPY_ELEMENTS = 500_000_000  # ~4GB for float32, ~2GB for float64
 
 # Maximum decompressed image pixels to prevent PIL decompression bombs.
 MAX_IMAGE_PIXELS = 50_000_000  # ~50 MP
+
+
+@router.get(
+    "/regions/haidian/patches/{patch_id}/embeddings/aef/pca",
+    summary="获取海淀 AEF 2025 PCA 可视化",
+    responses={
+        200: {
+            "description": "AEF 2025 年度 embedding 的全域统一 PCA 彩色图。",
+            "content": {"image/png": {}},
+        },
+        404: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+        500: {"model": ErrorResponse},
+    },
+)
+async def get_haidian_aef_pca(
+    patch_id: str = Path(
+        ...,
+        description=(
+            "海淀 Patch ID。格式必须为 `patch_` 加六位数字；"
+            "默认联调示例填写 `patch_000106`。"
+        ),
+        examples=["patch_000106"],
+    ),
+):
+    """返回海淀 AEF 2025 年度 embedding 的 PCA 彩色 PNG。
+
+    仅支持海淀区，数据固定为本地 AEF 2025 年年度 embedding。
+    调用方只需填写 `patch_id`，不需要月份、年份、版本或格式参数。
+
+    全部 Patch 使用同一个海淀全域 PCA 模型和统一的 2%~98% 显示范围，
+    因此不同 Patch 的颜色可以直接比较。响应为 `image/png`，浏览器和
+    前端 `<img>` 标签可以直接显示。
+    """
+    try:
+        png_path = await asyncio.to_thread(get_or_create_pca_png, patch_id)
+    except InvalidPatchId as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except AefEmbeddingNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except (OSError, ValueError, AefPcaError):
+        logger.exception("Failed to render Haidian AEF PCA")
+        raise HTTPException(
+            status_code=500,
+            detail="AEF embedding exists but could not be visualized",
+        )
+    return FileResponse(
+        png_path,
+        media_type="image/png",
+        filename=f"haidian_{patch_id}_aef_{AEF_YEAR}_pca.png",
+        content_disposition_type="inline",
+        headers={
+            "Cache-Control": "public, max-age=86400",
+            "ETag": response_etag(png_path),
+            "X-Embedding-Source": "AEF",
+            "X-Embedding-Year": AEF_YEAR,
+            "X-Patch-Id": patch_id,
+            "X-PCA-Version": PCA_VERSION,
+        },
+    )
 
 
 def _default_embedding_version(region_id: str) -> str:

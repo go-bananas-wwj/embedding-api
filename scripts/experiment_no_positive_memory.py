@@ -244,7 +244,7 @@ def model_visible_label_view(polygons):
     optical = true_color_composite(pid)
     view = optical.copy()
     view[sparse] = (
-        0.25 * view[sparse] + 0.75 * np.array([220, 35, 155])
+        0.25 * view[sparse] + 0.75 * np.array([35, 210, 95])
     ).astype(np.uint8)
     return view, pid
 
@@ -279,9 +279,9 @@ def save_panel(
         (true_label_view(label), reference_title),
         (
             model_visible,
-            f"模型可见标签 · {support_pid}\n大图中紫红色为 {polygon_count} 个训练 Polygon",
+            f"模型可见标签 · {support_pid}\n大图中绿色为 {polygon_count} 个训练 Polygon",
         ),
-        (mask_view(adapt), "PU + Query 预测结果"),
+        (mask_view(adapt), "玄女检测结果"),
         (overlay, "结果叠加\n红色预测 / 绿色标签"),
     ]
     for axis,(image,title) in zip(axes,items): axis.imshow(image);axis.set_title(title);axis.axis('off')

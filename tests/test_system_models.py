@@ -100,13 +100,13 @@ class TestSystemModels:
         assert len(classes) == 7
         assert classes[0] == {
             "id": "sys_land_cover_classification_1",
-            "name": "树木覆盖",
-            "color": "#006400",
+            "name": "永久性水体",
+            "color": "#1E64DC",
         }
         assert classes[-1] == {
             "id": "sys_land_cover_classification_8",
-            "name": "永久性水体",
-            "color": "#1E64DC",
+            "name": "树木覆盖",
+            "color": "#006400",
         }
 
     def test_haidian_land_cover_classes_reject_unknown_version(self):
@@ -115,6 +115,18 @@ class TestSystemModels:
             "?region_id=haidian&version=v2"
         )
         assert response.status_code == 404
+
+    def test_haidian_land_use_exposes_only_reliably_supervised_classes(self):
+        response = client.get(
+            "/system-models/land_use_classification/classes"
+            "?region_id=haidian&version=v1"
+        )
+        assert response.status_code == 200
+        classes = response.json()
+        assert len(classes) == 7
+        assert {item["name"] for item in classes} == {
+            "水体", "树木", "草地", "农作物", "灌木与矮林", "建成区", "裸地"
+        }
 
     def test_haidian_system_model_omitted_version_uses_v1(self):
         response = client.get(
@@ -132,14 +144,14 @@ class TestSystemModels:
         assert response.status_code == 404
         assert "Available versions: v1" in response.json()["detail"]
 
-    def test_haidian_land_use_static_product_has_documented_nine_class_legend(self):
+    def test_haidian_land_use_static_product_has_reliable_seven_class_legend(self):
         response = client.get(
             "/system-models/land_use_classification/classes",
             params={"region_id": "haidian", "version": "v1"},
         )
         assert response.status_code == 200
         classes = response.json()
-        assert len(classes) == 9
+        assert len(classes) == 7
         assert classes[0] == {
             "id": "sys_land_use_classification_0",
             "name": "水体",

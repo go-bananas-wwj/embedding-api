@@ -18,25 +18,23 @@ SYSTEM_HEAD_CHECKPOINT_FORMAT = "embedding-api.system-head.v1"
 
 
 HAIDIAN_LAND_COVER_CLASSES = [
-    {"id": "sys_land_cover_classification_1", "name": "树木覆盖", "color": "#006400"},
+    {"id": "sys_land_cover_classification_1", "name": "永久性水体", "color": "#1E64DC"},
     {"id": "sys_land_cover_classification_2", "name": "灌木地", "color": "#B4D250"},
     {"id": "sys_land_cover_classification_3", "name": "草地", "color": "#F5DC5A"},
     {"id": "sys_land_cover_classification_4", "name": "耕地", "color": "#D23C3C"},
     {"id": "sys_land_cover_classification_5", "name": "建成区", "color": "#BEAA82"},
     {"id": "sys_land_cover_classification_6", "name": "裸地/稀疏植被", "color": "#A0DCDC"},
-    {"id": "sys_land_cover_classification_8", "name": "永久性水体", "color": "#1E64DC"},
+    {"id": "sys_land_cover_classification_8", "name": "树木覆盖", "color": "#006400"},
 ]
 
 HAIDIAN_LAND_USE_CLASSES = [
     {"id": "sys_land_use_classification_0", "name": "水体", "color": "#286EE6"},
     {"id": "sys_land_use_classification_1", "name": "树木", "color": "#46B450"},
     {"id": "sys_land_use_classification_2", "name": "草地", "color": "#F5DC5A"},
-    {"id": "sys_land_use_classification_3", "name": "淹水植被", "color": "#DC50B4"},
     {"id": "sys_land_use_classification_4", "name": "农作物", "color": "#FFB496"},
     {"id": "sys_land_use_classification_5", "name": "灌木与矮林", "color": "#E63C28"},
     {"id": "sys_land_use_classification_6", "name": "建成区", "color": "#6E6E6E"},
     {"id": "sys_land_use_classification_7", "name": "裸地", "color": "#965A46"},
-    {"id": "sys_land_use_classification_8", "name": "冰雪", "color": "#EBEBEB"},
 ]
 
 

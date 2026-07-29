@@ -117,9 +117,9 @@ def save_comparison_panel(
         (experiment.true_label_view(label), "完整真实标签\n仅用于离线评估"),
         (
             model_visible,
-            f"模型可见标签 · {support_pid}\n大图中紫红色为 {count} 个 Polygon",
+            f"模型可见标签 · {support_pid}\n大图中绿色为 {count} 个 Polygon",
         ),
-        (experiment.mask_view(predicted), "PU + Query 预测结果"),
+        (experiment.mask_view(predicted), "玄女检测结果"),
         (overlay, "结果叠加\n红色预测 / 绿色标签"),
     ]
     figure, axes = plt.subplots(1, 6, figsize=(19.2, 3.5), constrained_layout=True)

@@ -2,7 +2,73 @@
 
 from pathlib import Path
 
-from app.services.mosaic_service import _candidate_period_prefixes, _get_raw_tiff_path
+from app.services.mosaic_service import (
+    _candidate_period_prefixes,
+    _available_sensor_months,
+    _configured_sensor_roots,
+    _get_raw_tiff_path,
+    _sensor_storage_key,
+)
+
+
+def test_configured_sensor_roots_use_the_requested_sensor_directory():
+    roots = _configured_sensor_roots(
+        {
+            "s2_dir": "/data/s2",
+            "highres_dir": "/data/highres_optical",
+        },
+        "highres",
+        raw_root="/data/raw",
+    )
+
+    assert roots == ["/data/raw", "/data/highres_optical"]
+
+
+def test_configured_sensor_roots_cover_frontend_optical_and_sar_values():
+    region = {
+        "s1_dir": "/data/s1",
+        "s2_dir": "/data/s2",
+        "landsat_dir": "/data/landsat",
+        "highres_dir": "/data/highres_optical",
+    }
+
+    assert _configured_sensor_roots(region, "s1", raw_root="/raw") == [
+        "/raw",
+        "/data/s1",
+    ]
+    assert _configured_sensor_roots(region, "s2", raw_root="/raw") == [
+        "/raw",
+        "/data/s2",
+    ]
+    assert _configured_sensor_roots(region, "landsat", raw_root="/raw") == [
+        "/raw",
+        "/data/landsat",
+    ]
+    assert _configured_sensor_roots(region, "highres", raw_root="/raw") == [
+        "/raw",
+        "/data/highres_optical",
+    ]
+
+
+def test_frontend_sensor_aliases_use_the_expected_storage_prefix():
+    assert _sensor_storage_key("highres") == "highres_optical"
+    assert _sensor_storage_key("highres_sar") == "highres_sar"
+    assert _sensor_storage_key("s1_hr") == "s1_hr"
+    assert _sensor_storage_key("s2_hr") == "s2_hr"
+
+
+def test_available_sensor_months_reads_patch_layout(tmp_path: Path):
+    sensor_root = tmp_path / "s1_hr"
+    patch = sensor_root / "patch_000000"
+    patch.mkdir(parents=True)
+    (patch / "20250627.tif").touch()
+    (patch / "20250810.tif").touch()
+
+    months = _available_sensor_months(
+        [str(sensor_root)], "harbin", "s1_hr"
+    )
+
+    assert months == ["202506", "202508"]
 
 
 def test_candidate_period_prefixes_do_not_use_bare_year():

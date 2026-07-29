@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from app.services.mosaic_service import _to_rgb, build_mosaic
+from app.services.mosaic_service import _to_mosaic_rgba, _to_rgb, build_mosaic
 from app.services.data_service import DataNotFoundError, DataValidationError
 
 
@@ -65,7 +65,10 @@ def test_build_mosaic_landsat(shared_cache):
 
 def test_build_mosaic_uses_cache(shared_cache):
     sample = _sample_patches()
-    cache_file = shared_cache / f"harbin_s2_2025-04_{'_'.join(sorted(sample))}.png"
+    cache_file = (
+        shared_cache
+        / f"harbin_s2_2025-04_raw-v3_{'_'.join(sorted(sample))}.png"
+    )
     assert cache_file.exists()
     data1 = cache_file.read_bytes()
     data2, _ = build_mosaic(
@@ -119,6 +122,46 @@ def test_highres_rgb_mapping_uses_first_three_bands():
 def test_highres_rgb_mapping_rejects_two_band_image():
     with pytest.raises(DataValidationError, match="requires at least 3"):
         _to_rgb(np.ones((2, 4, 4), dtype=np.float32), "highres")
+
+
+def test_mosaic_png_uses_fixed_sensor_scale_instead_of_percentile_stretch():
+    arr = np.zeros((12, 1, 2), dtype=np.float32)
+    arr[2, 0] = [1000, 2000]
+    arr[1, 0] = [2000, 3000]
+    arr[0, 0] = [3000, 4000]
+
+    rgba = _to_mosaic_rgba(arr, "s2")
+
+    assert rgba[0, 0].tolist() == [26, 51, 76, 255]
+    assert rgba[0, 1].tolist() == [51, 76, 102, 255]
+
+
+def test_mosaic_png_keeps_original_zero_pixels_opaque():
+    arr = np.zeros((7, 1, 2), dtype=np.float32)
+    arr[0:3, 0, 1] = [0.1, 0.2, 0.3]
+
+    rgba = _to_mosaic_rgba(arr, "landsat")
+
+    assert rgba[0, 0].tolist() == [0, 0, 0, 255]
+    assert rgba[0, 1, 3] == 255
+
+
+def test_mosaic_png_renders_non_finite_source_as_opaque_black():
+    arr = np.full((12, 1, 1), np.nan, dtype=np.float32)
+
+    rgba = _to_mosaic_rgba(arr, "s2")
+
+    assert rgba[0, 0].tolist() == [0, 0, 0, 255]
+
+
+def test_s1_hr_mosaic_accepts_single_band_source():
+    arr = np.array([[[-3.0, 0.0, 3.0]]], dtype=np.float32)
+
+    rgba = _to_mosaic_rgba(arr, "s1_hr")
+
+    assert rgba[0, 0].tolist() == [0, 0, 0, 255]
+    assert rgba[0, 1].tolist() == [128, 128, 128, 255]
+    assert rgba[0, 2].tolist() == [255, 255, 255, 255]
 
 
 def test_build_mosaic_unknown_region():

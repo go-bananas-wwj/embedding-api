@@ -38,7 +38,83 @@ _SENSOR_RGB = {
     # Files are discovered from a ``highres`` sensor directory, matching the
     # same per-region/per-patch layouts used by the other sensors.
     "highres": (0, 1, 2),
+    "highres_sar": (0, 0, 0),
+    "s1_hr": (0, 0, 0),
+    "s2_hr": (0, 1, 2),
 }
+
+# Public API values follow the frontend database. Storage keys may differ.
+_SENSOR_STORAGE_KEYS = {
+    "s1": "s1",
+    "s2": "s2",
+    "landsat": "landsat",
+    "highres": "highres_optical",
+    "highres_sar": "highres_sar",
+    "s1_hr": "s1_hr",
+    "s2_hr": "s2_hr",
+}
+
+# Fixed source-to-PNG display ranges. Unlike percentile stretching, these do
+# not change according to the pixels included in a request.
+_SENSOR_DISPLAY_RANGES = {
+    "s1": (0.0, 1.0),
+    "s2": (0.0, 10000.0),
+    "landsat": (0.0, 1.0),
+    "highres": (0.0, 4095.0),
+    "highres_sar": (0.0, 1.0),
+    "s1_hr": (-3.0, 3.0),
+    "s2_hr": (0.0, 255.0),
+}
+
+_MOSAIC_CACHE_VERSION = "raw-v3"
+
+
+def _sensor_storage_key(sensor_type: str) -> str:
+    """Map a public frontend sensor value to its on-disk filename prefix."""
+    return _SENSOR_STORAGE_KEYS.get(sensor_type, sensor_type)
+
+
+def _available_sensor_months(
+    roots: List[str], region_id: str, sensor_type: str
+) -> List[str]:
+    """Discover available YYYYMM values for a configured sensor root."""
+    storage_key = _sensor_storage_key(sensor_type)
+    months = set()
+    for root_value in reversed(roots):
+        root = Path(root_value)
+        candidates = (
+            root,
+            root / storage_key,
+            root / region_id / storage_key,
+        )
+        for candidate in candidates:
+            if not candidate.is_dir():
+                continue
+            try:
+                paths = candidate.rglob("*.tif")
+                for path in paths:
+                    match = re.search(r"(?<!\d)(\d{6})\d{2}(?!\d)", path.stem)
+                    if match:
+                        months.add(match.group(1))
+            except OSError:
+                continue
+        if months:
+            break
+    return sorted(months)
+
+
+def _configured_sensor_roots(
+    region_cfg: dict,
+    sensor_type: str,
+    *,
+    raw_root: str = RAW_ROOT,
+) -> List[str]:
+    """Return storage roots for the requested sensor, not just Sentinel-2."""
+    roots = [raw_root]
+    configured = region_cfg.get(f"{sensor_type}_dir")
+    if configured and configured not in roots:
+        roots.append(configured)
+    return roots
 
 
 def _candidate_period_prefixes(periods: List[str]) -> List[str]:
@@ -101,10 +177,11 @@ def _select_flat_patch_candidate(
     if not root.is_dir():
         return None
     matches = []
-    for candidate_dir in (root, root / sensor_type):
+    storage_key = _sensor_storage_key(sensor_type)
+    for candidate_dir in (root, root / storage_key):
         if not candidate_dir.is_dir():
             continue
-        for path in candidate_dir.glob(f"{sensor_type}_*_{patch_id}.tif"):
+        for path in candidate_dir.glob(f"{storage_key}_*_{patch_id}.tif"):
             date_match = re.search(r"(?<!\d)(\d{8})(?!\d)", path.stem)
             if date_match and any(date_match.group(1).startswith(p) for p in prefixes):
                 matches.append((date_match.group(1), path))
@@ -133,6 +210,7 @@ def _get_raw_tiff_path(
     compatibility filenames are used only after the monthly/day candidates.
     """
     roots = roots or [RAW_ROOT]
+    storage_key = _sensor_storage_key(sensor_type)
     # Derive request-scoped prefixes once for exact and daily-scene matching.
     fuzzy_prefixes = _candidate_period_prefixes(periods)
     fallback_exact_periods = [p for p in periods if _YYYY_QUARTER_RE.match(p)]
@@ -141,8 +219,8 @@ def _get_raw_tiff_path(
         if not root:
             continue
         layouts = [
-            Path(root) / region_id / sensor_type / patch_id,
-            Path(root) / patch_id / sensor_type,
+            Path(root) / region_id / storage_key / patch_id,
+            Path(root) / patch_id / storage_key,
             # A configured sensor root may already point at ``.../s2``.
             Path(root) / patch_id,
         ]
@@ -205,15 +283,11 @@ def build_mosaic(
     if region_id not in config.list_regions():
         raise DataValidationError(f"Region '{region_id}' does not exist")
 
-    # Allow per-region raw scene directory (e.g. Haidian scenes live under
-    # /workspace/projects/olmo/data/haidian/scenes, not /workspace/data/raw/haidian/s2).
-    region_cfg = config.get_region(region_id) or {}
-    s2_dir = region_cfg.get("s2_dir")
-    roots = [RAW_ROOT]
-    if s2_dir:
-        roots.append(s2_dir)
-
     sensor_type = sensor_type.lower()
+    # Allow each sensor to use its configured per-region scene directory.
+    region_cfg = config.get_region(region_id) or {}
+    roots = _configured_sensor_roots(region_cfg, sensor_type)
+
     if sensor_type == "embedding":
         if fmt.lower() != "png":
             raise DataValidationError("embedding mosaic only supports format='png'")
@@ -245,7 +319,10 @@ def build_mosaic(
     if allowed_ids:
         cache_suffix = "_" + "_".join(sorted(allowed_ids))[:64]
     ext = "tif" if fmt in ("tif", "tiff") else "png"
-    cache_path = Path(cache_dir) / f"{region_id}_{sensor_type}_{cache_period}{cache_suffix}.{ext}"
+    cache_path = (
+        Path(cache_dir)
+        / f"{region_id}_{sensor_type}_{cache_period}_{_MOSAIC_CACHE_VERSION}{cache_suffix}.{ext}"
+    )
     if cache_path.exists():
         return cache_path.read_bytes(), f"image/{ext}"
 
@@ -265,9 +342,18 @@ def build_mosaic(
             paths.append(path)
 
     if not paths:
+        available_months = _available_sensor_months(
+            roots, region_id, sensor_type
+        )
+        availability = (
+            f" Available months for {sensor_type}: {', '.join(available_months)}."
+            if available_months
+            else ""
+        )
         raise DataNotFoundError(
             f"No raw {sensor_type} images found for {region_id}/{date}; "
             "check date/sensor_type. Supported formats: YYYY-MM, YYYYMM, YYYYMMDD."
+            f"{availability}"
         )
 
     with rasterio.Env():
@@ -283,7 +369,7 @@ def build_mosaic(
     if fmt in ("tif", "tiff"):
         return _write_raw_geotiff(merged, transform, crs, cache_path)
 
-    rgb = _to_rgb(merged, sensor_type)
+    rgb = _to_mosaic_rgba(merged, sensor_type)
     pil_img = Image.fromarray(rgb)
     buf = io.BytesIO()
     pil_img.save(buf, format="PNG")
@@ -409,6 +495,37 @@ def _to_rgb(arr: np.ndarray, sensor_type: str) -> np.ndarray:
     valid = np.isfinite(rgb).all(axis=0) & ~(np.all(rgb == 0, axis=0))
     alpha = (valid * 255).astype(np.uint8)
 
+    rgba = np.concatenate([rgb, alpha[None, ...]], axis=0)
+    return np.transpose(rgba, (1, 2, 0))
+
+
+def _to_mosaic_rgba(arr: np.ndarray, sensor_type: str) -> np.ndarray:
+    """Convert raw bands to PNG with a fixed sensor scale and no auto enhancement."""
+    count, _, _ = arr.shape
+    red_i, green_i, blue_i = _SENSOR_RGB[sensor_type]
+    required = [index for index in (red_i, green_i, blue_i) if index is not None]
+    if not required or max(required) >= count:
+        raise DataValidationError(
+            f"{sensor_type} image has {count} band(s), but its RGB mapping "
+            f"requires at least {max(required) + 1} band(s)"
+        )
+
+    red = arr[red_i].astype(np.float32, copy=False)
+    green = arr[green_i].astype(np.float32, copy=False)
+    if blue_i is None:
+        with np.errstate(divide="ignore", invalid="ignore"):
+            blue = np.where(red != 0, green / red, 0)
+    else:
+        blue = arr[blue_i].astype(np.float32, copy=False)
+
+    source_rgb = np.stack([red, green, blue], axis=0)
+    low, high = _SENSOR_DISPLAY_RANGES[sensor_type]
+    scaled = (source_rgb - low) / (high - low)
+    scaled = np.nan_to_num(scaled, nan=0.0, posinf=1.0, neginf=0.0)
+    rgb = np.rint(np.clip(scaled, 0.0, 1.0) * 255.0).astype(np.uint8)
+    # PNG is a display derivative: raw zero/NaN pixels are rendered black,
+    # not transparent, so a browser's white page cannot appear as noise.
+    alpha = np.full(rgb.shape[1:], 255, dtype=np.uint8)
     rgba = np.concatenate([rgb, alpha[None, ...]], axis=0)
     return np.transpose(rgba, (1, 2, 0))
 

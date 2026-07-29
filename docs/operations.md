@@ -20,7 +20,8 @@
 推荐：
 
 ```bash
-python service_watchdog.py
+python service_watchdog.py start
+python service_watchdog.py status
 ```
 
 停止：
@@ -103,8 +104,9 @@ http://60.31.21.42:22065/logs/request-audit
 | `CORS_ORIGINS` | 空 | 允许跨域访问的浏览器来源，逗号分隔 |
 | `DOCS_URL` | `/docs` | Swagger 路径；设为 `none` 可关闭 |
 | `REDOC_URL` | `/redoc` | ReDoc 路径；设为 `none` 可关闭 |
-| `WATCHDOG_CHECK_INTERVAL` | `60` | watchdog 健康检查间隔 |
+| `WATCHDOG_CHECK_INTERVAL` | `15` | watchdog 健康检查间隔 |
 | `WATCHDOG_HEALTH_TIMEOUT` | `20` | watchdog 健康检查超时 |
+| `WATCHDOG_FAILURE_THRESHOLD` | `3` | 连续多少次健康检查失败后重启；子进程退出时立即重启 |
 | `CUSTOM_MODEL_CLEANUP_ENABLED` | `true` | 是否启用用户自定义模型自动清理 |
 | `CUSTOM_MODEL_TTL_HOURS` | `24` | 自定义模型最短保留时间（小时） |
 | `CUSTOM_MODEL_CLEANUP_INTERVAL_HOURS` | `24` | 后台清理执行间隔（小时） |

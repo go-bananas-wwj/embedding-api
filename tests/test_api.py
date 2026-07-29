@@ -384,9 +384,53 @@ class TestTasks:
         assert "land_use_classification" in task_ids
         assert "land_cover_classification" in task_ids
         assert "water_extraction" in task_ids
-        # change_detection and construction_joint are not exposed for Haidian
-        assert "change_detection" not in task_ids
+        assert "change_detection" in task_ids
         assert "construction_joint" not in task_ids
+
+    def test_haidian_change_detection_result_is_generated_on_demand(self):
+        response = client.get(
+            "/regions/haidian/patches/patch_000010/tasks/change_detection/result",
+            params={
+                "format": "npy",
+                "before_month": "202512",
+                "after_month": "202604",
+            },
+        )
+
+        assert response.status_code == 200
+        prediction = np.load(io.BytesIO(response.content), allow_pickle=False)
+        assert prediction.shape == (128, 128)
+        assert prediction.dtype == np.uint8
+        assert set(np.unique(prediction)).issubset({0, 1})
+        assert response.headers["x-change-algorithm"] == (
+            "p10c-cosine-bidirectional-5x5-mean"
+        )
+
+    def test_haidian_change_detection_png_documents_threshold(self):
+        response = client.get(
+            "/regions/haidian/patches/patch_000010/tasks/change_detection/result",
+            params={
+                "format": "png",
+                "before_month": "2025-12",
+                "after_month": "2026-04",
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "image/png"
+        assert response.headers["x-change-threshold"] == "0.771541"
+        image = Image.open(io.BytesIO(response.content))
+        assert image.size == (128, 128)
+
+    def test_haidian_change_detection_requires_both_months(self):
+        response = client.get(
+            "/regions/haidian/patches/patch_000010/tasks/change_detection/result",
+            params={"before_month": "202512"},
+        )
+
+        assert response.status_code == 422
+        assert "before_month" in response.json()["detail"]
+        assert "after_month" in response.json()["detail"]
 
     def test_get_task_summary(self):
         response = client.get("/regions/harbin/tasks/building_extraction/summary?version=v1")

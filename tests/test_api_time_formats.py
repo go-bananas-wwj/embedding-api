@@ -55,6 +55,8 @@ class TestNewlyAddedDataTasks:
         )
         assert response.status_code == 200
         assert response.headers["content-type"] == "image/png"
+        assert response.headers["cache-control"] == "no-store"
+        assert response.headers["x-result-version"] == "haidian-land-independent-conv3x3-20260724"
 
     def test_haidian_land_cover_classification_result(self):
         response = client.get(
@@ -62,6 +64,8 @@ class TestNewlyAddedDataTasks:
         )
         assert response.status_code == 200
         assert response.headers["content-type"] == "image/png"
+        assert response.headers["cache-control"] == "no-store"
+        assert response.headers["x-result-version"] == "haidian-land-independent-conv3x3-20260724"
 
     def test_haidian_patch_lists_new_tasks(self):
         response = client.get("/regions/haidian/patches/patch_000000")

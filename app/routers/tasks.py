@@ -25,6 +25,12 @@ from app.services.system_model_service import (
 from app.services.tile_service import TileService
 from app.services.task_summary_service import build_task_summary
 from app.services.summary_image_service import SUMMARY_IMAGE_DIR, publish_summary_images
+from app.services.haidian_change_detection import (
+    CHANGE_THRESHOLD as HAIDIAN_CHANGE_THRESHOLD,
+    change_mask as haidian_change_mask,
+    load_change_scores as load_haidian_change_scores,
+    render_change_png as render_haidian_change_png,
+)
 
 router = APIRouter()
 TASK_FORMATS = Literal["png", "npy"]
@@ -36,6 +42,19 @@ _BINARY_TASKS = {
     "water_extraction",
     "construction",
 }
+_HAIDIAN_LAND_RESULT_VERSION = "haidian-land-independent-conv3x3-20260724"
+
+
+def _result_cache_headers(region_id: str, task_type: str) -> dict[str, str]:
+    if region_id == "haidian" and task_type in {
+        "land_use_classification",
+        "land_cover_classification",
+    }:
+        return {
+            "Cache-Control": "no-store",
+            "X-Result-Version": _HAIDIAN_LAND_RESULT_VERSION,
+        }
+    return {}
 
 
 def _resolve_task_version(region_id: str, task: dict, requested: Optional[str]) -> str:
@@ -96,11 +115,13 @@ _MONTH_OPENAPI_EXAMPLES = {
 }
 
 _BEFORE_MONTH_OPENAPI_EXAMPLES = {
+    "haidian": {"summary": "海淀变化前月份", "value": "202512"},
     "compact": {"summary": "紧凑写法", "value": "202504"},
     "hyphen": {"summary": "带横杠写法", "value": "2025-04"},
 }
 
 _AFTER_MONTH_OPENAPI_EXAMPLES = {
+    "haidian": {"summary": "海淀变化后月份", "value": "202604"},
     "compact": {"summary": "紧凑写法", "value": "202506"},
     "hyphen": {"summary": "带横杠写法", "value": "2025-06"},
 }
@@ -457,7 +478,11 @@ async def get_summary_result_image(filename: str):
     path = SUMMARY_IMAGE_DIR / filename
     if not path.exists():
         raise HTTPException(status_code=404, detail="Summary image expired or not found")
-    return FileResponse(path, media_type="image/png")
+    return FileResponse(
+        path,
+        media_type="image/png",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 def _resolve_classification_tile(
@@ -817,6 +842,8 @@ async def get_task_result(
     """获取单个 Patch 的任务结果，支持 `png` 和 `npy`。
 
     单期任务只填写 `month`；变化检测同时填写 `before_month` 和 `after_month`。
+    海淀变化检测使用 P10C 64D embedding、双向 5×5 邻域平均融合；
+    PNG 中达到全区 P98 阈值 `0.7715` 的像素显示为红色，NPY 返回对应的 0/1 掩膜。
     `version` 省略时按区域自动选择当前默认模型。
     """
     if format not in ("png", "npy"):
@@ -846,6 +873,40 @@ async def get_task_result(
     if not task:
         raise HTTPException(status_code=404, detail=f"Task '{task_type}' not found")
     version = _resolve_task_version(region_id, task, version)
+
+    if region_id == "haidian" and task_type == "change_detection":
+        if not before_month or not after_month:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "海淀变化检测必须同时填写 before_month 和 after_month；"
+                    "例如 before_month=202512&after_month=202604。"
+                ),
+            )
+        try:
+            scores, valid = load_haidian_change_scores(
+                patch_id,
+                before_month,
+                after_month,
+                version=task.get("embedding_version", "v1"),
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+        headers = {
+            "X-Change-Algorithm": "p10c-cosine-bidirectional-5x5-mean",
+            "X-Change-Threshold": f"{HAIDIAN_CHANGE_THRESHOLD:.6f}",
+        }
+        if format == "npy":
+            response = _npy_result_response(
+                haidian_change_mask(scores, valid), patch_id, task_type
+            )
+            response.headers.update(headers)
+            return response
+        return Response(
+            content=render_haidian_change_png(scores, valid),
+            media_type="image/png",
+            headers=headers,
+        )
 
     try:
         patch = DataService.get_patch(region_id, patch_id)
@@ -929,13 +990,21 @@ async def get_task_result(
                 region_id, patch_id, task_type, "png", version, effective_period
             )
             if path and path.lower().endswith(".png"):
-                return FileResponse(path, media_type="image/png")
+                return FileResponse(
+                    path,
+                    media_type="image/png",
+                    headers=_result_cache_headers(region_id, task_type),
+                )
             # Fallback: per-patch tile image (results/.../tiles/patch_*.png)
             path = DataService.get_task_result_path(
                 region_id, patch_id, task_type, "tile", version, effective_period
             )
             if path and path.lower().endswith(".png"):
-                return FileResponse(path, media_type="image/png")
+                return FileResponse(
+                    path,
+                    media_type="image/png",
+                    headers=_result_cache_headers(region_id, task_type),
+                )
 
             # Last resort: run system model inference. For Haidian this uses the
             # latest v1 task heads from models/haidian/v1/task_heads.
@@ -944,7 +1013,11 @@ async def get_task_result(
                     region_id, task_type, patch_id, class_month, version
                 )
                 if tile_path:
-                    return FileResponse(tile_path, media_type="image/png")
+                    return FileResponse(
+                        tile_path,
+                        media_type="image/png",
+                        headers=_result_cache_headers(region_id, task_type),
+                    )
     except DataValidationError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except ValueError as e:

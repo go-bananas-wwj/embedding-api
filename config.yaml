@@ -95,7 +95,11 @@ regions:
   harbin:
     name: "哈尔滨新区"
     patches_meta: "data/harbin/patches_meta.json"
+    s1_dir: "/workspace/data/raw/harbin_scenes/s1"
     s2_dir: "/workspace/data/raw/harbin_scenes/s2"
+    landsat_dir: "/workspace/data/raw/harbin_scenes/landsat"
+    s1_hr_dir: "/workspace/data/raw/harbin_scenes/s1_hr"
+    s2_hr_dir: "/workspace/data/raw/harbin_scenes/s2_hr"
     embeddings:
       v1:
         path: "data/harbin/embeddings/v1"
@@ -160,8 +164,11 @@ regions:
   haidian:
     name: "海淀区"
     patches_meta: "data/haidian/patches_meta_v1.json"
+    s1_dir: "data/haidian/archive/processed_training_data/extracted/patches/s1"
     s2_dir: "data/haidian/archive/processed_training_data/extracted/patches/s2"
+    landsat_dir: "data/haidian/archive/processed_training_data/extracted/patches/landsat"
     highres_dir: "data/haidian/archive/processed_training_data/extracted/patches/highres_optical"
+    highres_sar_dir: "data/haidian/archive/processed_training_data/extracted/patches/highres_sar"
     embeddings:
       v1:
         path: "data/haidian/embeddings/v1"
@@ -169,6 +176,18 @@ regions:
         formats: ["npy", "png", "json"]
         alt_templates: ["{month}/{patch_id}.png"]
     tasks:
+      change_detection:
+        name: "变化检测"
+        description: "基于两期 P10C 64D embedding 的双向 5×5 邻域平均变化检测；全区 P98 阈值标记高变化。"
+        embedding_version: "v1"
+        algorithm:
+          metric: "cosine_distance"
+          neighborhood: "bidirectional_5x5"
+          fusion: "mean"
+          displacement_penalty: 0.05
+          high_change_threshold: 0.7715411186218262
+        versions:
+          v1: {}
       building_extraction:
         name: "建筑物提取"
         description: "基于海淀 V1 embedding 的 OSM 建筑物提取"
@@ -195,7 +214,7 @@ regions:
             labels: "data/haidian/tasks/construction/v1/labels"
       land_use_classification:
         name: "土地利用分类"
-        description: "海淀区 V1 月度土地利用分类 (Dynamic World Linear Probe)"
+        description: "海淀区 V1 月度土地利用分类（独立 P10C 64D Conv 3x3 头；WorldCover 与 OSM 人类活动约束）"
         versions:
           v1:
             results: "data/haidian/tasks/land_use_classification/v1/results"
@@ -203,7 +222,7 @@ regions:
             labels: "data/haidian/tasks/land_use_classification/v1/labels"
       land_cover_classification:
         name: "土地覆盖分类"
-        description: "海淀区 V1 月度土地覆盖分类 (WorldCover Linear Probe)"
+        description: "海淀区 V1 月度土地覆盖分类（独立 P10C 64D Conv 3x3 头；WorldCover 物理地表覆盖监督）"
         versions:
           v1:
             results: "data/haidian/tasks/land_cover_classification/v1/results"

@@ -41,7 +41,8 @@
 
 ```bash
 pip install -r requirements.txt
-python service_watchdog.py
+python service_watchdog.py start
+python service_watchdog.py status
 ```
 
 本地入口：
