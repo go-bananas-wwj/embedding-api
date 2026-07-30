@@ -1,16 +1,23 @@
 """Build region-wide mosaic PNG/GeoTIFF from per-patch raw satellite TIFFs."""
 
+import hashlib
 import io
+import json
 import logging
 import os
 import re
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import rasterio
 from PIL import Image
+from rasterio.features import rasterize
 from rasterio.merge import merge as rio_merge
+from rasterio.transform import array_bounds
+from rasterio.warp import Resampling, calculate_default_transform, reproject
+from shapely.geometry import Polygon, mapping
+from shapely.ops import unary_union
 
 from app.config import get_config
 from app.services.data_service import DataNotFoundError, DataService, DataValidationError
@@ -66,12 +73,29 @@ _SENSOR_DISPLAY_RANGES = {
     "s2_hr": (0.0, 255.0),
 }
 
-_MOSAIC_CACHE_VERSION = "raw-v3"
+_MOSAIC_CACHE_VERSION = "georef-v1"
+
+
+def _configure_rasterio_proj_data() -> None:
+    """Use Rasterio's matching PROJ database in mixed Conda environments."""
+    bundled = Path(rasterio.__file__).resolve().parent / "proj_data"
+    if (bundled / "proj.db").is_file():
+        os.environ["PROJ_DATA"] = str(bundled)
+        os.environ["PROJ_LIB"] = str(bundled)
 
 
 def _sensor_storage_key(sensor_type: str) -> str:
     """Map a public frontend sensor value to its on-disk filename prefix."""
     return _SENSOR_STORAGE_KEYS.get(sensor_type, sensor_type)
+
+
+def _patch_cache_suffix(patch_ids: set[str]) -> str:
+    """Return a compact collision-resistant key for a selected Patch set."""
+    if not patch_ids:
+        return ""
+    canonical = "\n".join(sorted(patch_ids)).encode("utf-8")
+    digest = hashlib.sha256(canonical).hexdigest()[:16]
+    return f"_patches-{len(patch_ids)}-{digest}"
 
 
 def _available_sensor_months(
@@ -261,7 +285,7 @@ def _get_raw_tiff_path(
     return None
 
 
-def build_mosaic(
+def build_mosaic_artifact(
     region_id: str,
     date: str,
     sensor_type: str = "s2",
@@ -269,7 +293,7 @@ def build_mosaic(
     fmt: str = "png",
     patch_ids: Optional[List[str]] = None,
     cache_dir: str = "users/default/mosaic",
-) -> Tuple[bytes, str]:
+) -> Tuple[bytes, str, Dict[str, Any]]:
     """Build a mosaic image for the given region, date and sensor.
 
     Reads raw per-patch TIFFs from /workspace/data/raw/{region_id}/{sensor_type}.
@@ -279,6 +303,7 @@ def build_mosaic(
     Returns:
         (image_bytes, mime_type)
     """
+    _configure_rasterio_proj_data()
     config = get_config()
     if region_id not in config.list_regions():
         raise DataValidationError(f"Region '{region_id}' does not exist")
@@ -291,8 +316,13 @@ def build_mosaic(
     if sensor_type == "embedding":
         if fmt.lower() != "png":
             raise DataValidationError("embedding mosaic only supports format='png'")
-        return _build_embedding_mosaic(
-            region_id, date, version, patch_ids, cache_dir, config.get_patches(region_id)
+        return _build_embedding_mosaic_artifact(
+            region_id,
+            date,
+            version,
+            patch_ids,
+            cache_dir,
+            config.get_patches(region_id),
         )
 
     del version  # raw sensors do not use embedding versions
@@ -317,20 +347,22 @@ def build_mosaic(
     allowed_ids = set(patch_ids) if patch_ids else None
     cache_suffix = ""
     if allowed_ids:
-        cache_suffix = "_" + "_".join(sorted(allowed_ids))[:64]
+        cache_suffix = _patch_cache_suffix(allowed_ids)
     ext = "tif" if fmt in ("tif", "tiff") else "png"
     cache_path = (
         Path(cache_dir)
         / f"{region_id}_{sensor_type}_{cache_period}_{_MOSAIC_CACHE_VERSION}{cache_suffix}.{ext}"
     )
-    if cache_path.exists():
-        return cache_path.read_bytes(), f"image/{ext}"
+    metadata_path = cache_path.with_suffix(cache_path.suffix + ".json")
+    if cache_path.exists() and metadata_path.exists():
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        return cache_path.read_bytes(), f"image/{ext}", metadata
 
     patches = config.get_patches(region_id)
     if not patches:
         raise DataNotFoundError(f"No patches found for region '{region_id}'")
 
-    paths = []
+    selected = []
     for patch in patches:
         patch_id = patch.get("patch_id")
         if not patch_id:
@@ -339,9 +371,9 @@ def build_mosaic(
             continue
         path = _get_raw_tiff_path(region_id, patch_id, sensor_type, periods, roots=roots)
         if path:
-            paths.append(path)
+            selected.append((patch, path))
 
-    if not paths:
+    if not selected:
         available_months = _available_sensor_months(
             roots, region_id, sensor_type
         )
@@ -357,26 +389,181 @@ def build_mosaic(
         )
 
     with rasterio.Env():
-        datasets = [rasterio.open(p) for p in paths]
+        datasets = [rasterio.open(path) for _, path in selected]
         try:
-            merged, transform = rio_merge(datasets)
+            source_crs = datasets[0].crs
+            source_bounds = [tuple(ds.bounds) for ds in datasets]
+            merged, transform = rio_merge(datasets, masked=True)
         finally:
             for ds in datasets:
                 ds.close()
 
-    crs = datasets[0].crs if datasets else None
+    raw = merged.filled(0) if np.ma.isMaskedArray(merged) else merged
+    coverage = rasterize(
+        [
+            (
+                {
+                    "type": "Polygon",
+                    "coordinates": [[
+                        [left, bottom],
+                        [right, bottom],
+                        [right, top],
+                        [left, top],
+                        [left, bottom],
+                    ]],
+                },
+                1,
+            )
+            for left, bottom, right, top in source_bounds
+        ],
+        out_shape=raw.shape[1:],
+        transform=transform,
+        fill=0,
+        dtype=np.uint8,
+    ).astype(bool)
 
     if fmt in ("tif", "tiff"):
-        return _write_raw_geotiff(merged, transform, crs, cache_path)
+        data, mime = _write_raw_geotiff(raw, transform, source_crs, cache_path)
+        return data, mime, {}
 
-    rgb = _to_mosaic_rgba(merged, sensor_type)
-    pil_img = Image.fromarray(rgb)
+    rgba = _to_mosaic_rgba(raw, sensor_type, coverage_mask=coverage)
+    rgba_wgs84, dst_transform = _reproject_rgba_to_wgs84(
+        rgba, transform, source_crs
+    )
+    metadata = _build_mosaic_metadata(
+        region_id=region_id,
+        date=date,
+        sensor_type=sensor_type,
+        source_crs=source_crs,
+        rgba=rgba_wgs84,
+        transform=dst_transform,
+        selected=selected,
+    )
+    pil_img = Image.fromarray(rgba_wgs84)
     buf = io.BytesIO()
     pil_img.save(buf, format="PNG")
     data = buf.getvalue()
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     cache_path.write_bytes(data)
-    return data, "image/png"
+    metadata_path.write_text(
+        json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    return data, "image/png", metadata
+
+
+def build_mosaic(
+    region_id: str,
+    date: str,
+    sensor_type: str = "s2",
+    version: Optional[str] = None,
+    fmt: str = "png",
+    patch_ids: Optional[List[str]] = None,
+    cache_dir: str = "users/default/mosaic",
+) -> Tuple[bytes, str]:
+    """Backward-compatible image-only mosaic builder."""
+    data, mime, _ = build_mosaic_artifact(
+        region_id=region_id,
+        date=date,
+        sensor_type=sensor_type,
+        version=version,
+        fmt=fmt,
+        patch_ids=patch_ids,
+        cache_dir=cache_dir,
+    )
+    return data, mime
+
+
+def _reproject_rgba_to_wgs84(
+    rgba: np.ndarray, src_transform, src_crs
+) -> Tuple[np.ndarray, Any]:
+    """Warp a display image to an axis-aligned WGS84 raster."""
+    if src_crs is None:
+        raise DataValidationError("Mosaic source images have no CRS")
+    height, width = rgba.shape[:2]
+    left, bottom, right, top = array_bounds(height, width, src_transform)
+    dst_transform, dst_width, dst_height = calculate_default_transform(
+        src_crs,
+        "EPSG:4326",
+        width,
+        height,
+        left,
+        bottom,
+        right,
+        top,
+    )
+    destination = np.zeros((dst_height, dst_width, 4), dtype=np.uint8)
+    for band in range(4):
+        reproject(
+            source=rgba[:, :, band],
+            destination=destination[:, :, band],
+            src_transform=src_transform,
+            src_crs=src_crs,
+            dst_transform=dst_transform,
+            dst_crs="EPSG:4326",
+            resampling=Resampling.nearest if band == 3 else Resampling.bilinear,
+        )
+    destination[destination[:, :, 3] == 0, :3] = 0
+    return destination, dst_transform
+
+
+def _build_mosaic_metadata(
+    *,
+    region_id: str,
+    date: str,
+    sensor_type: str,
+    source_crs,
+    rgba: np.ndarray,
+    transform,
+    selected: List[Tuple[dict, str]],
+) -> Dict[str, Any]:
+    """Build the JSON contract used to place a mosaic on a web map."""
+    height, width = rgba.shape[:2]
+    left, bottom, right, top = array_bounds(height, width, transform)
+    patch_items = []
+    polygons = []
+    for patch, path in selected:
+        footprint = DataService._build_patch_footprint_wgs84(patch)
+        if not footprint:
+            continue
+        ring = footprint["coordinates"][0]
+        polygon = Polygon(ring)
+        polygons.append(polygon)
+        pixel_coords = [~transform * (lon, lat) for lon, lat in ring]
+        xs = [item[0] for item in pixel_coords]
+        ys = [item[1] for item in pixel_coords]
+        date_match = re.search(r"(?<!\d)(\d{8})(?!\d)", Path(path).stem)
+        patch_items.append(
+            {
+                "patch_id": patch["patch_id"],
+                "footprint_wgs84": footprint,
+                "pixel_bounds": [
+                    max(0, int(np.floor(min(xs)))),
+                    max(0, int(np.floor(min(ys)))),
+                    min(width, int(np.ceil(max(xs)))),
+                    min(height, int(np.ceil(max(ys)))),
+                ],
+                "source_date": date_match.group(1) if date_match else None,
+            }
+        )
+    footprint = mapping(unary_union(polygons)) if polygons else None
+    return {
+        "region_id": region_id,
+        "date": date,
+        "sensor_type": sensor_type,
+        "width": width,
+        "height": height,
+        "crs": "EPSG:4326",
+        "source_crs": str(source_crs),
+        "bounds_wgs84": [left, bottom, right, top],
+        "footprint_wgs84": footprint,
+        "corner_coordinates_wgs84": {
+            "top_left": [left, top],
+            "top_right": [right, top],
+            "bottom_right": [right, bottom],
+            "bottom_left": [left, bottom],
+        },
+        "patches": patch_items,
+    }
 
 
 def _legacy_quarter_key(date: str) -> Optional[str]:
@@ -405,7 +592,7 @@ def _build_embedding_mosaic(
     allowed_ids = set(patch_ids) if patch_ids else None
     suffix = ""
     if allowed_ids:
-        suffix = "_" + "_".join(sorted(allowed_ids))[:64]
+        suffix = _patch_cache_suffix(allowed_ids)
     cache_path = (
         Path(cache_dir)
         / f"{region_id}_embedding_{effective_version}_{periods[0]}{suffix}.png"
@@ -467,6 +654,66 @@ def _build_embedding_mosaic(
     return data, "image/png"
 
 
+def _build_embedding_mosaic_artifact(
+    region_id: str,
+    date: str,
+    version: Optional[str],
+    patch_ids: Optional[List[str]],
+    cache_dir: str,
+    patches: List[dict],
+) -> Tuple[bytes, str, Dict[str, Any]]:
+    """Build a WGS84 embedding mosaic with the same metadata contract."""
+    native_data, _ = _build_embedding_mosaic(
+        region_id, date, version, patch_ids, cache_dir, patches
+    )
+    allowed_ids = set(patch_ids) if patch_ids else None
+    effective_version = version or ("v1" if region_id == "haidian" else "v2")
+    selected = []
+    for patch in patches:
+        patch_id = patch.get("patch_id")
+        if (
+            not patch_id
+            or not patch.get("bounds")
+            or (allowed_ids is not None and patch_id not in allowed_ids)
+        ):
+            continue
+        path = DataService.get_embedding_path(
+            region_id, patch_id, "png", version=effective_version, month=date
+        )
+        if path:
+            selected.append((patch, path))
+    selected_patches = [patch for patch, _ in selected]
+    if not selected_patches:
+        raise DataNotFoundError(f"No patches found for embedding mosaic {region_id}")
+    crs_values = {patch.get("crs") for patch in selected_patches}
+    if len(crs_values) != 1 or None in crs_values:
+        raise DataValidationError("Embedding mosaic patches must use one CRS")
+    min_x = min(patch["bounds"][0] for patch in selected_patches)
+    min_y = min(patch["bounds"][1] for patch in selected_patches)
+    max_x = max(patch["bounds"][2] for patch in selected_patches)
+    max_y = max(patch["bounds"][3] for patch in selected_patches)
+    with Image.open(io.BytesIO(native_data)) as image:
+        native_rgba = np.asarray(image.convert("RGBA"))
+    src_transform = rasterio.transform.from_bounds(
+        min_x, min_y, max_x, max_y, native_rgba.shape[1], native_rgba.shape[0]
+    )
+    rgba_wgs84, dst_transform = _reproject_rgba_to_wgs84(
+        native_rgba, src_transform, next(iter(crs_values))
+    )
+    metadata = _build_mosaic_metadata(
+        region_id=region_id,
+        date=date,
+        sensor_type="embedding",
+        source_crs=next(iter(crs_values)),
+        rgba=rgba_wgs84,
+        transform=dst_transform,
+        selected=selected,
+    )
+    buffer = io.BytesIO()
+    Image.fromarray(rgba_wgs84).save(buffer, format="PNG")
+    return buffer.getvalue(), "image/png", metadata
+
+
 def _to_rgb(arr: np.ndarray, sensor_type: str) -> np.ndarray:
     """Convert a multi-band float array to an 8-bit RGBA image."""
     count, height, width = arr.shape
@@ -499,7 +746,11 @@ def _to_rgb(arr: np.ndarray, sensor_type: str) -> np.ndarray:
     return np.transpose(rgba, (1, 2, 0))
 
 
-def _to_mosaic_rgba(arr: np.ndarray, sensor_type: str) -> np.ndarray:
+def _to_mosaic_rgba(
+    arr: np.ndarray,
+    sensor_type: str,
+    coverage_mask: Optional[np.ndarray] = None,
+) -> np.ndarray:
     """Convert raw bands to PNG with a fixed sensor scale and no auto enhancement."""
     count, _, _ = arr.shape
     red_i, green_i, blue_i = _SENSOR_RGB[sensor_type]
@@ -525,7 +776,11 @@ def _to_mosaic_rgba(arr: np.ndarray, sensor_type: str) -> np.ndarray:
     rgb = np.rint(np.clip(scaled, 0.0, 1.0) * 255.0).astype(np.uint8)
     # PNG is a display derivative: raw zero/NaN pixels are rendered black,
     # not transparent, so a browser's white page cannot appear as noise.
-    alpha = np.full(rgb.shape[1:], 255, dtype=np.uint8)
+    alpha = (
+        np.where(coverage_mask, 255, 0).astype(np.uint8)
+        if coverage_mask is not None
+        else np.full(rgb.shape[1:], 255, dtype=np.uint8)
+    )
     rgba = np.concatenate([rgb, alpha[None, ...]], axis=0)
     return np.transpose(rgba, (1, 2, 0))
 

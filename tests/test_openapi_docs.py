@@ -177,9 +177,30 @@ def test_binary_download_routes_do_not_claim_json_success_bodies():
     )
     for path in paths:
         media = schema["paths"][path]["get"]["responses"]["200"]["content"]
-        assert "application/json" not in media
+        if path == "/regions/{region_id}/mosaic":
+            assert "application/json" in media
+        else:
+            assert "application/json" not in media
 
     assert "image/png" in schema["paths"][paths[0]]["get"]["responses"]["200"]["content"]
+
+
+def test_mosaic_json_response_has_documented_wgs84_schema():
+    schema = app.openapi()
+    response = schema["paths"]["/regions/{region_id}/mosaic"]["get"]["responses"]["200"]
+    json_schema = response["content"]["application/json"]["schema"]
+
+    assert json_schema["$ref"].endswith("/MosaicMetadataResponse")
+    model = schema["components"]["schemas"]["MosaicMetadataResponse"]
+    assert set(
+        [
+            "bounds_wgs84",
+            "footprint_wgs84",
+            "corner_coordinates_wgs84",
+            "patches",
+            "image_url",
+        ]
+    ).issubset(model["properties"])
 
 
 def test_unimplemented_xyz_tile_route_is_not_advertised():

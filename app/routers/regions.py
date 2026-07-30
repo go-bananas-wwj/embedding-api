@@ -2,15 +2,21 @@
 
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Path, Query
-from fastapi.responses import Response
+from fastapi import APIRouter, HTTPException, Path, Query, Request
+from fastapi.responses import JSONResponse, Response
 
 from app.config import get_config
 from app.schemas.models import (
-    ErrorResponse, RegionsResponse, RegionInfo, HealthResponse, RegionDetail, RegionTaskMeta,
+    ErrorResponse,
+    HealthResponse,
+    MosaicMetadataResponse,
+    RegionDetail,
+    RegionInfo,
+    RegionsResponse,
+    RegionTaskMeta,
 )
 from app.services.data_service import DataNotFoundError, DataValidationError
-from app.services.mosaic_service import build_mosaic
+from app.services.mosaic_service import build_mosaic_artifact
 from app.services.time_utils import is_valid_month_or_date
 
 router = APIRouter()
@@ -100,8 +106,12 @@ async def get_region(
     response_class=Response,
     responses={
         200: {
-            "description": "区域影像或 Embedding 大图",
-            "content": {"image/png": {}, "image/tiff": {}},
+            "description": "区域影像、GeoTIFF 或带 WGS84 空间信息的 JSON",
+            "model": MosaicMetadataResponse,
+            "content": {
+                "image/png": {},
+                "image/tiff": {},
+            },
         },
         400: {"model": ErrorResponse},
         404: {"model": ErrorResponse},
@@ -110,6 +120,7 @@ async def get_region(
     },
 )
 async def get_region_mosaic(
+    request: Request,
     region_id: str = Path(
         ...,
         description="区域 ID。当前可用：'harbin'（哈尔滨新区）、'haidian'（海淀区）。",
@@ -165,12 +176,14 @@ async def get_region_mosaic(
         "png",
         description=(
             "输出格式。`png` 使用各传感器固定量程转换为 8 位图，不做逐图增强；"
-            "`tif` 原样保留多波段数值和地理坐标。"
+            "`tif` 原样保留多波段数值和地理坐标；`json` 返回图片 URL、"
+            "WGS84 四至、整体 footprint_wgs84 和逐 Patch footprint_wgs84。"
         ),
         examples=["png"],
         openapi_examples={
             "png": {"summary": "PNG 可视化", "value": "png"},
             "tif": {"summary": "GeoTIFF 原始数据", "value": "tif"},
+            "json": {"summary": "前端地图叠加元数据", "value": "json"},
         },
     ),
     patch_ids: Optional[List[str]] = Query(
@@ -264,12 +277,13 @@ async def get_region_mosaic(
                 detail=f"Patch '{missing[0]}' not found in region '{region_id}'",
             )
     try:
-        data, mime = build_mosaic(
+        requested_format = format.lower()
+        data, mime, metadata = build_mosaic_artifact(
             region_id=region_id,
             date=date,
             sensor_type=sensor_type,
             version=version,
-            fmt=format,
+            fmt="png" if requested_format == "json" else requested_format,
             patch_ids=patch_ids,
         )
     except DataValidationError as e:
@@ -279,4 +293,20 @@ async def get_region_mosaic(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to build mosaic: {e}")
 
-    return Response(content=data, media_type=mime)
+    if requested_format == "json":
+        metadata["image_url"] = str(
+            request.url.include_query_params(format="png")
+        )
+        return JSONResponse(metadata)
+
+    headers = {}
+    if metadata.get("bounds_wgs84"):
+        headers = {
+            "X-Mosaic-CRS": str(metadata.get("crs", "")),
+            "X-Mosaic-Bounds-WGS84": ",".join(
+                str(value) for value in metadata["bounds_wgs84"]
+            ),
+            "X-Mosaic-Width": str(metadata.get("width", "")),
+            "X-Mosaic-Height": str(metadata.get("height", "")),
+        }
+    return Response(content=data, media_type=mime, headers=headers)

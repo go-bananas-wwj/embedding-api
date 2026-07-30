@@ -7,7 +7,12 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from app.services.mosaic_service import _to_mosaic_rgba, _to_rgb, build_mosaic
+from app.services.mosaic_service import (
+    _patch_cache_suffix,
+    _to_mosaic_rgba,
+    _to_rgb,
+    build_mosaic,
+)
 from app.services.data_service import DataNotFoundError, DataValidationError
 
 
@@ -18,6 +23,16 @@ def shared_cache(tmp_path_factory):
 
 def _sample_patches(n: int = 5):
     return [f"patch_{i:06d}" for i in range(n)]
+
+
+def test_patch_cache_suffix_uses_the_complete_patch_set():
+    first = {f"patch_{index:06d}" for index in range(20)}
+    second = set(first)
+    second.remove("patch_000019")
+    second.add("patch_999999")
+
+    assert _patch_cache_suffix(first) != _patch_cache_suffix(second)
+    assert _patch_cache_suffix(first).startswith("_patches-20-")
 
 
 def test_build_mosaic_png_returns_rgba_image(shared_cache):
@@ -67,7 +82,7 @@ def test_build_mosaic_uses_cache(shared_cache):
     sample = _sample_patches()
     cache_file = (
         shared_cache
-        / f"harbin_s2_2025-04_raw-v3_{'_'.join(sorted(sample))}.png"
+        / f"harbin_s2_2025-04_georef-v1{_patch_cache_suffix(set(sample))}.png"
     )
     assert cache_file.exists()
     data1 = cache_file.read_bytes()
@@ -152,6 +167,17 @@ def test_mosaic_png_renders_non_finite_source_as_opaque_black():
     rgba = _to_mosaic_rgba(arr, "s2")
 
     assert rgba[0, 0].tolist() == [0, 0, 0, 255]
+
+
+def test_mosaic_png_uses_patch_coverage_for_transparent_background():
+    arr = np.zeros((7, 1, 3), dtype=np.float32)
+    coverage = np.array([[True, False, True]])
+
+    rgba = _to_mosaic_rgba(arr, "landsat", coverage_mask=coverage)
+
+    assert rgba[0, 0].tolist() == [0, 0, 0, 255]
+    assert rgba[0, 1].tolist() == [0, 0, 0, 0]
+    assert rgba[0, 2].tolist() == [0, 0, 0, 255]
 
 
 def test_s1_hr_mosaic_accepts_single_band_source():

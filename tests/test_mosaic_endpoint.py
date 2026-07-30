@@ -16,7 +16,20 @@ def test_mosaic_returns_the_complete_png(monkeypatch):
     buffer = io.BytesIO()
     Image.new("RGB", (8, 8), "red").save(buffer, format="PNG")
     expected = buffer.getvalue()
-    monkeypatch.setattr(regions, "build_mosaic", lambda **kwargs: (expected, "image/png"))
+    monkeypatch.setattr(
+        regions,
+        "build_mosaic_artifact",
+        lambda **kwargs: (
+            expected,
+            "image/png",
+            {
+                "crs": "EPSG:4326",
+                "bounds_wgs84": [1, 2, 3, 4],
+                "width": 8,
+                "height": 8,
+            },
+        ),
+    )
 
     response = client.get(
         "/regions/haidian/mosaic",
@@ -26,6 +39,55 @@ def test_mosaic_returns_the_complete_png(monkeypatch):
     assert response.status_code == 200
     assert response.content == expected
     assert len(response.content) > 8
+    assert response.headers["x-mosaic-crs"] == "EPSG:4326"
+
+
+def test_mosaic_json_returns_image_and_wgs84_footprints(monkeypatch):
+    metadata = {
+        "region_id": "haidian",
+        "date": "202603",
+        "sensor_type": "s2",
+        "width": 256,
+        "height": 128,
+        "crs": "EPSG:4326",
+        "bounds_wgs84": [116.2, 39.8, 116.3, 39.9],
+        "footprint_wgs84": {"type": "Polygon", "coordinates": []},
+        "corner_coordinates_wgs84": {
+            "top_left": [116.2, 39.9],
+            "top_right": [116.3, 39.9],
+            "bottom_right": [116.3, 39.8],
+            "bottom_left": [116.2, 39.8],
+        },
+        "patches": [
+            {
+                "patch_id": "patch_000000",
+                "footprint_wgs84": {"type": "Polygon", "coordinates": []},
+                "pixel_bounds": [0, 0, 128, 128],
+                "source_date": "20260331",
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        regions,
+        "build_mosaic_artifact",
+        lambda **kwargs: (b"png", "image/png", metadata),
+    )
+
+    response = client.get(
+        "/regions/haidian/mosaic",
+        params={
+            "date": "202603",
+            "sensor_type": "s2",
+            "format": "json",
+            "patch_ids": "patch_000000",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["crs"] == "EPSG:4326"
+    assert body["patches"][0]["patch_id"] == "patch_000000"
+    assert "format=png" in body["image_url"]
 
 
 def test_mosaic_rejects_unknown_region_before_building():

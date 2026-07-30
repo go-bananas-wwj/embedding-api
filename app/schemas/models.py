@@ -36,6 +36,59 @@ class RegionsResponse(BaseModel):
     regions: List[RegionInfo]
 
 
+class MosaicCornerCoordinates(BaseModel):
+    top_left: List[float] = Field(..., description="大图左上角 WGS84 坐标 `[经度, 纬度]`。")
+    top_right: List[float] = Field(..., description="大图右上角 WGS84 坐标 `[经度, 纬度]`。")
+    bottom_right: List[float] = Field(..., description="大图右下角 WGS84 坐标 `[经度, 纬度]`。")
+    bottom_left: List[float] = Field(..., description="大图左下角 WGS84 坐标 `[经度, 纬度]`。")
+
+
+class MosaicPatchMetadata(BaseModel):
+    patch_id: str = Field(..., description="Patch ID，例如 `patch_000000`。")
+    footprint_wgs84: Dict[str, Any] = Field(
+        ...,
+        description="该 Patch 的精确 WGS84 GeoJSON Polygon；前端应优先使用它绘制边界。",
+    )
+    pixel_bounds: List[int] = Field(
+        ...,
+        description="该 Patch 在 PNG 中的像素范围 `[左, 上, 右, 下]`。",
+    )
+    source_date: Optional[str] = Field(
+        None,
+        description="本次月度检索实际选中的影像采集日期，格式 `YYYYMMDD`。",
+    )
+
+
+class MosaicMetadataResponse(BaseModel):
+    region_id: str = Field(..., description="区域 ID：`haidian` 或 `harbin`。")
+    date: str = Field(..., description="请求的月份或日期。")
+    sensor_type: str = Field(..., description="实际使用的数据源类型。")
+    width: int = Field(..., description="PNG 大图宽度，单位为像素。")
+    height: int = Field(..., description="PNG 大图高度，单位为像素。")
+    crs: str = Field("EPSG:4326", description="PNG 和 GeoJSON 使用的坐标系。")
+    source_crs: Optional[str] = Field(None, description="源 GeoTIFF 的原始坐标系。")
+    bounds_wgs84: List[float] = Field(
+        ...,
+        description="整张大图的 WGS84 四至 `[西, 南, 东, 北]`。",
+    )
+    footprint_wgs84: Optional[Dict[str, Any]] = Field(
+        None,
+        description="所有实际 Patch 覆盖范围合并后的 WGS84 GeoJSON Polygon/MultiPolygon。",
+    )
+    corner_coordinates_wgs84: MosaicCornerCoordinates = Field(
+        ...,
+        description="大图四个顶点的 WGS84 坐标。",
+    )
+    patches: List[MosaicPatchMetadata] = Field(
+        ...,
+        description="参与拼接的逐 Patch 空间位置、像素位置和实际采集日期。",
+    )
+    image_url: str = Field(
+        ...,
+        description="同一请求对应的 PNG 图片网址，可直接交给前端地图图层加载。",
+    )
+
+
 class PatchBase(BaseModel):
     patch_id: str = Field(..., description="Patch identifier.")
     bounds_wgs84: List[float] = Field(..., description="Bounding box in WGS84 [minx, miny, maxx, maxy].")
