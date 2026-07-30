@@ -179,18 +179,6 @@ def audit_region(
             note = "PNG-only embedding fallback expected"
         add_record(records, endpoint, params, resp.status_code, ct, path, elapsed, note)
 
-    # Mosaic with small subset to keep it fast
-    if sample_month:
-        endpoint = f"/regions/{region_id}/mosaic"
-        params = {"date": sample_month, "sensor_type": "s2", "format": "png", "patch_ids": [first_patch]}
-        resp, elapsed = call(session, "GET", endpoint, params)
-        path, ct = save_response(output_dir, endpoint, params, resp, counter[0])
-        counter[0] += 1
-        note = ""
-        if resp.status_code == 404:
-            note = "Expected 404 - raw scene missing for this date"
-        add_record(records, endpoint, params, resp.status_code, ct, path, elapsed, note)
-
     # SAM3 status
     endpoint = f"/regions/{region_id}/sam3/status"
     resp, elapsed = call(session, "GET", endpoint)

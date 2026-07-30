@@ -39,8 +39,7 @@ def test_operation_descriptions_do_not_repeat_native_swagger_tables():
             assert "### Request Body 说明" not in description
             assert "### Response 说明" not in description
             assert "| 参数 |" not in description
-            max_length = 2000 if path == "/regions/{region_id}/mosaic" else 600
-            assert len(description) <= max_length
+            assert len(description) <= 600
 
 
 def test_concise_docs_keep_chinese_field_help_and_runnable_examples():
@@ -158,49 +157,20 @@ def test_embedding_version_is_optional_and_documents_region_defaults():
     assert "example" not in month
 
 
-def test_mosaic_docs_are_monthly_and_offer_embedding_visualization():
+def test_online_mosaic_route_is_not_exposed():
     schema = client.get("/openapi.json").json()
-    operation = schema["paths"]["/regions/{region_id}/mosaic"]["get"]
-    parameters = {item["name"]: item for item in operation["parameters"]}
-
-    assert "季度" not in parameters["date"]["description"]
-    assert "YYYYMM" in parameters["date"]["description"]
-    assert parameters["sensor_type"]["examples"]["embedding"]["value"] == "embedding"
+    assert "/regions/{region_id}/mosaic" not in schema["paths"]
 
 
 def test_binary_download_routes_do_not_claim_json_success_bodies():
     schema = client.get("/openapi.json").json()
     paths = (
-        "/regions/{region_id}/mosaic",
         "/models/results/{filename}",
         "/system-models/results/{filename}",
     )
     for path in paths:
         media = schema["paths"][path]["get"]["responses"]["200"]["content"]
-        if path == "/regions/{region_id}/mosaic":
-            assert "application/json" in media
-        else:
-            assert "application/json" not in media
-
-    assert "image/png" in schema["paths"][paths[0]]["get"]["responses"]["200"]["content"]
-
-
-def test_mosaic_json_response_has_documented_wgs84_schema():
-    schema = app.openapi()
-    response = schema["paths"]["/regions/{region_id}/mosaic"]["get"]["responses"]["200"]
-    json_schema = response["content"]["application/json"]["schema"]
-
-    assert json_schema["$ref"].endswith("/MosaicMetadataResponse")
-    model = schema["components"]["schemas"]["MosaicMetadataResponse"]
-    assert set(
-        [
-            "bounds_wgs84",
-            "footprint_wgs84",
-            "corner_coordinates_wgs84",
-            "patches",
-            "image_url",
-        ]
-    ).issubset(model["properties"])
+        assert "application/json" not in media
 
 
 def test_unimplemented_xyz_tile_route_is_not_advertised():

@@ -187,6 +187,28 @@ class TestRegions:
         ids = [r["id"] for r in data["regions"]]
         assert "harbin" in ids
         assert "haidian" in ids
+        for region in data["regions"]:
+            mosaic = region["mosaic"]
+            assert mosaic["crs"] == "EPSG:4326"
+            assert len(mosaic["bounds_wgs84"]) == 4
+            assert mosaic["footprint_wgs84"]["type"] in {"Polygon", "MultiPolygon"}
+            assert set(mosaic["corner_coordinates_wgs84"]) == {
+                "top_left",
+                "top_right",
+                "bottom_right",
+                "bottom_left",
+            }
+            assert mosaic["image_format"] == "png"
+            assert mosaic["transparent_background"] is True
+            assert mosaic["package_filename"] == "regional-mosaics.zip"
+            assert mosaic["assets"]
+            for asset in mosaic["assets"]:
+                assert asset["path_template"] == (
+                    f"{region['id']}/{asset['sensor_type']}/{{date}}/mosaic.png"
+                )
+                assert asset["start_date"] == min(asset["available_dates"])
+                assert asset["end_date"] == max(asset["available_dates"])
+                assert asset["date_count"] == len(asset["available_dates"])
 
     def test_get_region_harbin(self):
         response = client.get("/regions/harbin")
@@ -196,6 +218,7 @@ class TestRegions:
         assert data["patch_count"] == 424
         assert "tasks" in data
         assert "embeddings" in data
+        assert data["mosaic"]["assets"]
 
     def test_get_region_haidian(self):
         response = client.get("/regions/haidian")
@@ -203,6 +226,7 @@ class TestRegions:
         data = response.json()
         assert data["id"] == "haidian"
         assert data["patch_count"] == 320
+        assert data["mosaic"]["bounds_wgs84"]
 
     def test_get_region_not_found(self):
         response = client.get("/regions/beijing")

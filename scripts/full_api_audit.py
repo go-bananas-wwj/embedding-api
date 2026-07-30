@@ -286,16 +286,6 @@ def main() -> int:
         params={"format": "json", "version": "v1", "month": MONTH},
         required_keys=["patch_id", "shape", "dtype"],
     )
-    call(
-        "mosaic_png",
-        "GET /regions/{region_id}/mosaic",
-        "GET",
-        f"/regions/{REGION}/mosaic",
-        params={"date": MONTH, "sensor_type": "s2", "format": "png", "patch_ids": PATCH_ID},
-        binary=True,
-        timeout=180,
-    )
-
     # Task APIs.
     call("tasks", "GET /regions/{region_id}/tasks", "GET", f"/regions/{REGION}/tasks", required_keys=["tasks"])
     call(

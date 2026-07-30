@@ -58,6 +58,7 @@ test_output_agent/
 Tmp/
 audit_results/
 temp/
+backup-staging/
 .msc
 .mv
 

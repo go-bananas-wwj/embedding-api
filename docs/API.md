@@ -250,7 +250,7 @@ docker-compose up -d
 | **任务** | `/regions/{region_id}/patches/{patch_id}/tasks/{task_type}/label` | GET | 标签数据 |
 | **瓦片** | `/regions/{region_id}/tasks/{task_type}/tiles` | GET | 列出可用瓦片 |
 | **瓦片** | `/regions/{region_id}/tasks/{task_type}/tiles/{z}/{x}/{y}.png` | GET | 标准 XYZ 瓦片（暂未实现） |
-| **马赛克** | `/regions/{region_id}/mosaic` | GET | 整区域 S2/S1/Landsat 马赛克大图 |
+| **区域** | `/regions` | GET | 区域列表、静态大图坐标及传感器时间范围 |
 | **自定义模型** | `/models` | GET/POST | 模型列表 / 创建训练 |
 | **自定义模型** | `/models/{model_id}` | GET/PUT/PATCH/DELETE | 模型详情 / 重命名 / 删除 |
 | **自定义模型** | `/models/{model_id}/infer` | POST | 单 Patch 推理 |
@@ -1789,69 +1789,24 @@ curl -s "http://60.31.21.42:22065/models/results/infer_model_ghi789_harbin_patch
 
 ---
 
-## 🛰 区域马赛克大图
+## 🛰 区域静态大图
 
-### 23. 获取整区域马赛克大图
+在线大图生成接口已经停用。所有区域大图由后端离线预生成，并通过
+`regional-mosaics.zip` 交付前端。ZIP 内统一使用：
 
-将某个区域、某个月份下所有 Patch 按地理范围拼接成一张大图。既可以返回原始卫星影像，也可以返回 Embedding PCA 色彩可视化。
-
-```
-GET /regions/{region_id}/mosaic?date=YYYY-MM&sensor_type=s2&format=png
-```
-
-**路径参数**:
-
-| 参数 | 类型 | 必填 | 可取值 | 说明 |
-|------|------|------|--------|------|
-| `region_id` | string | 是 | `harbin` / `haidian` | 区域 ID |
-
-**查询参数**:
-
-| 参数 | 类型 | 必填 | 可取值 | 默认值 | 说明 |
-|------|------|------|--------|--------|------|
-| `date` | string | 是 | `YYYY-MM` / `YYYYMM` / `YYYYMMDD` | - | 日期/月。两个区域均支持带横杠和不带横杠的月份；月度请求按日期倒序选择当月最新一景 |
-| `sensor_type` | string | 否 | `s2` / `s1` / `landsat` / `highres` / `embedding` | `s2` | 大图数据源；`embedding` 返回 PCA 色彩图 |
-| `version` | string | 否 | `v1` / `v2` | 按区域自动选择 | 仅 Embedding 大图使用；海淀默认 P10C (`v1`)，哈尔滨默认 V5 (`v2`) |
-| `format` | string | 否 | `png` / `tif` | `png` | 输出格式：`png` 可视化；`tif` GeoTIFF 原始数据 |
-| `patch_ids` | string[] | 否 | 如 `patch_000000`、`patch_000001` | 全区域 | 只拼接指定 Patch ID 列表，可多次传入 |
-
-> **多景影像选择规则**：如果同一个 patch、同一个传感器、同一个月下有多张日级 TIFF，
-> 后端按文件名日期倒序排列，固定选择最新的一景。
-> 如果前端要指定某一天，请传 `YYYYMMDD`，例如 `20251214`，此时必须精确命中该日期，
-> 不会自动改用其它日期。
-
-**波段合成规则**：
-
-| 传感器 | PNG 合成 | 说明 |
-|--------|----------|------|
-| `s2` | B4(R) / B3(G) / B2(B) | Sentinel-2 真彩色 |
-| `landsat` | B4(R) / B3(G) / B2(B) | Landsat 真彩色 |
-| `s1` | R=VV, G=VH, B=VH/VV | Sentinel-1 伪彩色合成 |
-| `embedding` | 全局 PCA 色彩投影 | 使用该区域默认 Embedding 版本的逐月 PNG |
-
-**完整请求示例**：
-
-```bash
-# 1. 哈尔滨全区域 Sentinel-2 真彩色 PNG（最大图，首次较慢）
-curl -s "http://60.31.21.42:22065/regions/harbin/mosaic?date=2025-04&sensor_type=s2&format=png" -o /tmp/harbin_s2_2025-04.png
-
-# 2. 只拼前两个 patch 的 Sentinel-1 伪彩色预览（快）
-curl -s "http://60.31.21.42:22065/regions/harbin/mosaic?date=2025-04&sensor_type=s1&format=png&patch_ids=patch_000000&patch_ids=patch_000001" -o /tmp/harbin_s1_preview.png
-
-# 3. Landsat 全区域 GeoTIFF 原始数据（保留多波段与坐标）
-curl -s "http://60.31.21.42:22065/regions/harbin/mosaic?date=2025-04&sensor_type=landsat&format=tif" -o /tmp/harbin_landsat_2025-04.tif
-
-# 4. 本地调试地址（服务重启后默认端口 9061）
-curl -s "http://localhost:9061/regions/harbin/mosaic?date=2025-04&sensor_type=s2&format=png&patch_ids=patch_000000&patch_ids=patch_000001" -o /tmp/harbin_s2_preview.png
-
-# 5. 海淀 P10C Embedding PCA 大图（version 可省略）
-curl -s "http://localhost:9061/regions/haidian/mosaic?date=202512&sensor_type=embedding&format=png" -o /tmp/haidian_embedding_202512.png
+```text
+{regionId}/{sensor}/{date}/mosaic.png
 ```
 
-**成功响应** (200): 返回 PNG 或 GeoTIFF 图片。
+`GET /regions` 和 `GET /regions/{region_id}` 的 `mosaic` 字段返回：
 
-> 首次生成后会缓存到 `users/default/mosaic/{region_id}_{sensor_type}_{date}.{format}`，后续直接读取。
-> 默认按 Patch 文件名排序后拼接，因此多次请求同一组 `patch_ids` 会命中缓存。
+- 区域统一的 `bounds_wgs84`、`footprint_wgs84` 和四角坐标；
+- 可用 `sensor_type`；
+- 每个传感器的 `start_date`、`end_date`、`date_count` 和 `available_dates`；
+- PNG 路径模板、透明背景约定和压缩包文件名。
+
+前端解压后按 `path_template` 读取 PNG，并使用区域级 WGS84 四至定位。
+压缩包不包含 GeoTIFF。
 
 ---
 

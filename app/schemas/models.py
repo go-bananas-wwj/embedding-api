@@ -11,11 +11,66 @@ class HealthResponse(BaseModel):
     regions: List[str] = Field(..., description="List of available region identifiers.")
 
 
+class RegionMosaicCornerCoordinates(BaseModel):
+    top_left: List[float] = Field(..., description="区域大图左上角 `[经度, 纬度]`。")
+    top_right: List[float] = Field(..., description="区域大图右上角 `[经度, 纬度]`。")
+    bottom_right: List[float] = Field(..., description="区域大图右下角 `[经度, 纬度]`。")
+    bottom_left: List[float] = Field(..., description="区域大图左下角 `[经度, 纬度]`。")
+
+
+class RegionMosaicAsset(BaseModel):
+    sensor_type: str = Field(
+        ...,
+        description="静态 PNG 数据源目录名，例如 `s2`、`highres` 或 `embedding-v1`。",
+    )
+    start_date: str = Field(..., description="该传感器最早可用月份，格式 `YYYYMM`。")
+    end_date: str = Field(..., description="该传感器最晚可用月份，格式 `YYYYMM`。")
+    date_count: int = Field(..., description="压缩包中该传感器实际包含的大图数量。")
+    available_dates: List[str] = Field(
+        ...,
+        description="实际可用月份列表；用于识别起止范围中间缺失的月份。",
+    )
+    path_template: str = Field(
+        ...,
+        description="ZIP 内 PNG 相对路径模板：`{regionId}/{sensor}/{date}/mosaic.png`。",
+    )
+
+
+class RegionMosaicInfo(BaseModel):
+    crs: str = Field("EPSG:4326", description="全部静态 PNG 使用的坐标系。")
+    bounds_wgs84: List[float] = Field(
+        ...,
+        description="区域大图统一四至 `[西, 南, 东, 北]`。",
+    )
+    footprint_wgs84: Dict[str, Any] = Field(
+        ...,
+        description="所有 Patch 合并后的 WGS84 GeoJSON Polygon/MultiPolygon。",
+    )
+    corner_coordinates_wgs84: RegionMosaicCornerCoordinates = Field(
+        ...,
+        description="区域大图外接矩形四个顶点。",
+    )
+    image_format: Literal["png"] = Field("png", description="静态大图统一使用 PNG。")
+    transparent_background: bool = Field(
+        True,
+        description="没有 Patch 或没有影像的区域使用透明背景。",
+    )
+    package_filename: str = Field(
+        "regional-mosaics.zip",
+        description="交付给前端的静态大图压缩包文件名。",
+    )
+    assets: List[RegionMosaicAsset] = Field(
+        default_factory=list,
+        description="该区域可用传感器、起止月份、实际月份和 PNG 路径模板。",
+    )
+
+
 class RegionInfo(BaseModel):
     id: str = Field(..., description="Region identifier.")
     name: str = Field(..., description="Human-readable region name.")
     patch_count: int = Field(..., description="Number of patches in the region.")
     tasks: List[str] = Field(..., description="Task types available for the region.")
+    mosaic: RegionMosaicInfo = Field(..., description="该区域静态 PNG 大图的统一空间信息。")
 
 
 class RegionTaskMeta(BaseModel):
@@ -30,63 +85,11 @@ class RegionDetail(BaseModel):
     patch_count: int = Field(..., description="Number of patches in the region.")
     tasks: Dict[str, RegionTaskMeta] = Field(..., description="Task metadata keyed by task type.")
     embeddings: List[str] = Field(..., description="Available embedding versions.")
+    mosaic: RegionMosaicInfo = Field(..., description="该区域静态 PNG 大图的统一空间信息。")
 
 
 class RegionsResponse(BaseModel):
     regions: List[RegionInfo]
-
-
-class MosaicCornerCoordinates(BaseModel):
-    top_left: List[float] = Field(..., description="大图左上角 WGS84 坐标 `[经度, 纬度]`。")
-    top_right: List[float] = Field(..., description="大图右上角 WGS84 坐标 `[经度, 纬度]`。")
-    bottom_right: List[float] = Field(..., description="大图右下角 WGS84 坐标 `[经度, 纬度]`。")
-    bottom_left: List[float] = Field(..., description="大图左下角 WGS84 坐标 `[经度, 纬度]`。")
-
-
-class MosaicPatchMetadata(BaseModel):
-    patch_id: str = Field(..., description="Patch ID，例如 `patch_000000`。")
-    footprint_wgs84: Dict[str, Any] = Field(
-        ...,
-        description="该 Patch 的精确 WGS84 GeoJSON Polygon；前端应优先使用它绘制边界。",
-    )
-    pixel_bounds: List[int] = Field(
-        ...,
-        description="该 Patch 在 PNG 中的像素范围 `[左, 上, 右, 下]`。",
-    )
-    source_date: Optional[str] = Field(
-        None,
-        description="本次月度检索实际选中的影像采集日期，格式 `YYYYMMDD`。",
-    )
-
-
-class MosaicMetadataResponse(BaseModel):
-    region_id: str = Field(..., description="区域 ID：`haidian` 或 `harbin`。")
-    date: str = Field(..., description="请求的月份或日期。")
-    sensor_type: str = Field(..., description="实际使用的数据源类型。")
-    width: int = Field(..., description="PNG 大图宽度，单位为像素。")
-    height: int = Field(..., description="PNG 大图高度，单位为像素。")
-    crs: str = Field("EPSG:4326", description="PNG 和 GeoJSON 使用的坐标系。")
-    source_crs: Optional[str] = Field(None, description="源 GeoTIFF 的原始坐标系。")
-    bounds_wgs84: List[float] = Field(
-        ...,
-        description="整张大图的 WGS84 四至 `[西, 南, 东, 北]`。",
-    )
-    footprint_wgs84: Optional[Dict[str, Any]] = Field(
-        None,
-        description="所有实际 Patch 覆盖范围合并后的 WGS84 GeoJSON Polygon/MultiPolygon。",
-    )
-    corner_coordinates_wgs84: MosaicCornerCoordinates = Field(
-        ...,
-        description="大图四个顶点的 WGS84 坐标。",
-    )
-    patches: List[MosaicPatchMetadata] = Field(
-        ...,
-        description="参与拼接的逐 Patch 空间位置、像素位置和实际采集日期。",
-    )
-    image_url: str = Field(
-        ...,
-        description="同一请求对应的 PNG 图片网址，可直接交给前端地图图层加载。",
-    )
 
 
 class PatchBase(BaseModel):

@@ -1,0 +1,9 @@
+Linux faff96ba9160 5.15.0-78-generic #85-Ubuntu SMP Fri Jul 7 15:25:09 UTC 2023 x86_64 x86_64 x86_64 GNU/Linux
+
+Python 3.9.18
+torch 2.8.0+cu128
+cuda 12.8
+rasterio 1.4.3
+fastapi 0.128.8
+pydantic 2.13.4
+scikit-learn 1.6.1
