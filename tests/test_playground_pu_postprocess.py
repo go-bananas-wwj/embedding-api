@@ -85,6 +85,33 @@ def test_hysteresis_rejects_non_finite_thresholds(high, low):
         )
 
 
+@pytest.mark.parametrize("min_pixels", [True, np.bool_(True), 1.5, np.nan, np.inf])
+def test_hysteresis_rejects_non_integer_min_pixels(min_pixels):
+    with pytest.raises(ValueError, match="min_pixels must be a finite integer"):
+        hysteresis_prediction(
+            np.zeros((4, 4), dtype=np.float32),
+            high=0.90,
+            low=0.60,
+            min_pixels=min_pixels,
+        )
+
+
+@pytest.mark.parametrize(
+    "max_component_pixels", [True, np.bool_(True), 1.5, np.nan, np.inf]
+)
+def test_hysteresis_rejects_non_integer_max_component_pixels(max_component_pixels):
+    with pytest.raises(
+        ValueError, match="max_component_pixels must be a finite integer"
+    ):
+        hysteresis_prediction(
+            np.zeros((4, 4), dtype=np.float32),
+            high=0.90,
+            low=0.60,
+            min_pixels=1,
+            max_component_pixels=max_component_pixels,
+        )
+
+
 def test_strict_threshold_prefers_higher_precision_then_smaller_area():
     scores = [np.array([[0.20, 0.30, 0.40, 0.95]], dtype=np.float32)]
     labels = [np.array([[False, True, False, True]])]

@@ -1,6 +1,7 @@
 """Offline postprocessing utilities for Haidian PU + Query score maps."""
 from __future__ import annotations
 
+from numbers import Integral
 from typing import Dict, List, Optional, Sequence
 
 import numpy as np
@@ -76,6 +77,11 @@ def hysteresis_prediction(
         raise ValueError("thresholds must be finite")
     if high < low:
         raise ValueError("high must be greater than or equal to low")
+    min_pixels = _finite_integer(min_pixels, "min_pixels")
+    if max_component_pixels is not None:
+        max_component_pixels = _finite_integer(
+            max_component_pixels, "max_component_pixels"
+        )
     if min_pixels < 1:
         raise ValueError("min_pixels must be at least 1")
     if max_component_pixels is not None and max_component_pixels < min_pixels:
@@ -174,3 +180,9 @@ def component_statistics(prediction: np.ndarray, score: np.ndarray) -> List[Dict
 
 def _safe_ratio(numerator: int, denominator: int) -> float:
     return float(numerator / denominator) if denominator else 0.0
+
+
+def _finite_integer(value: object, name: str) -> int:
+    if isinstance(value, (bool, np.bool_)) or not isinstance(value, Integral):
+        raise ValueError(f"{name} must be a finite integer")
+    return int(value)
