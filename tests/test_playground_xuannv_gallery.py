@@ -212,6 +212,32 @@ def test_gallery_builds_only_focused_patches_with_nine_views(tmp_path):
     assert html.count('class="patch-section"') == 8
 
 
+def test_gallery_warns_about_suspected_training_mislabels(tmp_path):
+    input_dir = _synthetic_input(tmp_path)
+
+    output = build_gallery(input_dir, repo_root=tmp_path)
+
+    html = output.read_text(encoding="utf-8")
+    assert "P1 数据质量警告：原训练标注疑似错标，当前模型不可上线" in html
+    assert "纹理与面积实验仅用于评估错误标注模型的风险抑制" in html
+    assert "原训练标注（疑似错标）" in html
+
+    expected_reviews = {
+        "patch_000059": "标注主要落在院落和建筑区域，疑似不是操场",
+        "patch_000060": "标注位于建筑旁的小块区域，疑似不是操场",
+        "patch_000064": "标注落在左侧建成区；真实蓝绿操场位于影像下方",
+    }
+    for patch_id, review in expected_reviews.items():
+        row = re.search(
+            rf'<section class="patch-section" data-patch-id="{patch_id}">(.*?)</section>',
+            html,
+            flags=re.DOTALL,
+        )
+        assert row, patch_id
+        assert "原训练标注（疑似错标）" in row.group(1)
+        assert review in row.group(1)
+
+
 def test_gallery_resources_and_metrics_are_consistent(tmp_path):
     input_dir = _synthetic_input(tmp_path)
 

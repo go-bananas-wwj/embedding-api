@@ -21,17 +21,25 @@ from scipy import ndimage
 
 ROOT = Path(__file__).resolve().parents[1]
 ROLE_LABELS = {
-    "training": "训练样本",
+    "training": "原训练标注（疑似错标）",
     "independent_osm": "独立 OSM 测试",
     "global_high_false_positive": "极端高误检复核",
     "spatial_high_score": "中右下高分复核",
 }
 GROUP_LABELS = (
-    ("training", "训练操场"),
+    ("training", "原训练标注（疑似错标）"),
     ("independent_osm", "独立 OSM 操场"),
     ("global_high_false_positive", "全域极端高误检代表"),
     ("spatial_high_score", "区域中右下高分代表"),
 )
+TRAINING_VISUAL_REVIEWS = {
+    "patch_000059": "视觉核验：标注主要落在院落和建筑区域，疑似不是操场。",
+    "patch_000060": "视觉核验：标注位于建筑旁的小块区域，疑似不是操场。",
+    "patch_000064": (
+        "视觉核验：标注落在左侧建成区；真实蓝绿操场位于影像下方，"
+        "原标注疑似错位。"
+    ),
+}
 VIEW_TITLES = (
     ("optical", "高分辨率光学影像"),
     ("reference_overlay", "参考 Polygon 叠加"),
@@ -229,7 +237,7 @@ def _plot_reference_metrics(
         x - width / 2,
         [training[name]["f1"] for name in variants],
         width,
-        label="训练 Polygon 参考相对 F1",
+        label="原训练标注（疑似错标）参考相对 F1",
         color="#176B87",
     )
     axis.bar(
@@ -278,6 +286,8 @@ def _patch_section(
     patch_metrics = metrics["per_patch"][patch_id]["variants"]
     figures = []
     for key, title in VIEW_TITLES:
+        if artifact["role"] == "training" and key == "reference_overlay":
+            title = "原训练标注（疑似错标）叠加"
         suffix = ""
         if key in patch_metrics:
             suffix = " · " + _percent(patch_metrics[key]["positive_ratio"])
@@ -295,6 +305,12 @@ def _patch_section(
             </figure>"""
         )
     center = reason["center_wgs84"]
+    visual_review = TRAINING_VISUAL_REVIEWS.get(patch_id)
+    review_html = (
+        f'<p class="visual-review">{html.escape(visual_review)}</p>'
+        if visual_review
+        else ""
+    )
     return f"""
     <section class="patch-section" data-patch-id="{html.escape(patch_id, quote=True)}">
       <div class="patch-heading">
@@ -303,6 +319,7 @@ def _patch_section(
         <span class="reason">{html.escape(reason["reason"])}</span>
         <span class="coords">{center[0]:.5f}, {center[1]:.5f}</span>
       </div>
+      {review_html}
       <div class="patch-grid">{''.join(figures)}</div>
     </section>"""
 
@@ -376,6 +393,11 @@ def _build_html(
       background: var(--surface); border-left: 4px solid var(--yellow);
       padding: 12px 14px; margin: 12px 0;
     }}
+    .p1-warning {{
+      background: #fff0f0; border: 2px solid #b4232d;
+      color: #771721; padding: 15px 16px; margin: 16px 0;
+      font-size: 16px; line-height: 1.55;
+    }}
     .verdict {{
       background: #fff6dd; border: 1px solid #e4c56b;
       border-radius: 6px; padding: 14px; margin: 14px 0;
@@ -422,6 +444,11 @@ def _build_html(
     }}
     .reason {{ font-size: 13px; }}
     .coords {{ margin-left: auto; font-size: 12px; }}
+    .visual-review {{
+      margin: 0 11px 11px; padding: 9px 11px;
+      background: #fff0f0; border-left: 3px solid #b4232d;
+      color: #771721; font-size: 13px;
+    }}
     .patch-grid {{
       display: grid; grid-template-columns: repeat(9, minmax(0, 1fr));
       gap: 6px; padding: 0 7px;
@@ -475,6 +502,11 @@ def _build_html(
     <h1>操场纹理边界实验</h1>
     <p class="subtitle">playground_xuannv · 海淀 2026 年 4 月 · 只展示 8 个典型 Patch</p>
   </header>
+  <div class="p1-warning" role="alert">
+    <strong>P1 数据质量警告：原训练标注疑似错标，当前模型不可上线。</strong><br>
+    纹理与面积实验仅用于评估错误标注模型的风险抑制，不能证明操场识别能力，
+    也不能作为生产部署依据。
+  </div>
   <div class="summary">
     <div class="stat"><small>独立 OSM · 纯面积 F1</small><strong>{area["f1"]:.4f}</strong></div>
     <div class="stat"><small>独立 OSM · 纹理方案 F1</small><strong>{texture["f1"]:.4f}</strong></div>
@@ -627,10 +659,12 @@ def build_gallery(input_dir: Path, repo_root: Path = ROOT) -> Path:
 不在本页面继续铺开。
 
 - 红色为预测目标，黄色边线为已有 Polygon。
+- P1 数据质量警告：三个原训练标注疑似错标，当前模型不可上线。
 - `area_guard` 是 Patch 相对种子加面积筛选，不使用光学纹理。
 - `texture_boundary_area_guard` 在同一对照上增加真实高分辨率光学纹理边界。
 - 纹理边界没有使用建筑、道路或操场类别掩膜。
 - 当前实验判定：纹理边界相对公平面积对照没有证明实质增益。
+- 纹理和面积结果仅是错误标注模型上的风险抑制对照，不可用于上线结论。
 """,
         encoding="utf-8",
     )
