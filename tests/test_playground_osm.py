@@ -46,6 +46,22 @@ def test_extract_playgrounds_excludes_specialised_athletics_subfacilities():
     assert [item.osm_id for item in extract_playgrounds(payload)] == [1]
 
 
+def test_extract_playgrounds_rejects_indoor_athletics_venues():
+    ring = [
+        {"lon": 116.30, "lat": 39.95},
+        {"lon": 116.31, "lat": 39.95},
+        {"lon": 116.31, "lat": 39.96},
+        {"lon": 116.30, "lat": 39.95},
+    ]
+    payload = {"elements": [
+        {"type": "way", "id": 1, "tags": {"leisure": "track", "sport": "athletics"}, "geometry": ring},
+        {"type": "way", "id": 2, "tags": {"leisure": "track", "sport": "athletics", "indoor": "yes"}, "geometry": ring},
+        {"type": "way", "id": 3, "tags": {"leisure": "pitch", "sport": "athletics", "indoor": "sports_hall"}, "geometry": ring},
+    ]}
+
+    assert [item.osm_id for item in extract_playgrounds(payload)] == [1]
+
+
 def test_extract_playgrounds_rejects_open_or_invalid_way_geometry():
     payload = {"elements": [
         {"type": "way", "id": 1, "tags": {"leisure": "track", "sport": "athletics"},
@@ -129,6 +145,7 @@ def test_fetch_overpass_identifies_the_dataset_builder(tmp_path, monkeypatch):
 
     assert payload == {"elements": []}
     assert request["headers"]["User-Agent"] == "embedding-api-haidian-osm-labels/1.0"
+    assert json.loads((tmp_path / "raw.metadata.json").read_text())["retrieved_at_utc"].endswith("Z")
 
 
 def test_fetch_overpass_retries_and_atomically_writes_validated_cache(tmp_path, monkeypatch):
@@ -160,12 +177,17 @@ def test_fetch_overpass_retries_and_atomically_writes_validated_cache(tmp_path, 
     assert len(attempts) == 2
     assert pauses == [1.0]
     assert json.loads(cache_path.read_text()) == payload
+    assert json.loads(cache_path.with_suffix(".metadata.json").read_text())["retrieved_at_utc"].endswith("Z")
     assert not list(tmp_path.glob(".raw.json.*.tmp"))
 
 
 def test_fetch_overpass_rejects_an_invalid_cached_response(tmp_path):
     cache_path = tmp_path / "raw.json"
     cache_path.write_text('{"elements": "not-a-list"}', encoding="utf-8")
+    cache_path.with_suffix(".metadata.json").write_text(
+        '{"retrieved_at_utc": "2026-07-31T03:34:30Z"}',
+        encoding="utf-8",
+    )
 
     with pytest.raises(ValueError, match="elements"):
         playground_osm.fetch_overpass((39.9, 116.2, 40.0, 116.3), cache_path)
@@ -189,6 +211,10 @@ def test_build_dataset_records_reference_target_metadata(tmp_path, monkeypatch):
         '{"lon": 116.31, "lat": 39.96}, {"lon": 116.30, "lat": 39.95}]}]}',
         encoding="utf-8",
     )
+    raw_path.with_suffix(".metadata.json").write_text(
+        '{"retrieved_at_utc": "2026-07-31T03:34:30Z"}',
+        encoding="utf-8",
+    )
     embeddings_root = tmp_path / "embeddings"
     embedding_path = embeddings_root / "v1" / "202604" / "patch_fixture.npy"
     embedding_path.parent.mkdir(parents=True)
@@ -207,8 +233,13 @@ def test_build_dataset_records_reference_target_metadata(tmp_path, monkeypatch):
         "patch_metadata_sha256": hashlib.sha256(metadata_path.read_bytes()).hexdigest(),
     }
     assert manifest["source"]["timestamp_osm_base"] == "2026-07-31T00:00:00Z"
+    assert manifest["source"]["retrieved_at_utc"] == "2026-07-31T03:34:30Z"
     assert manifest["source"]["raw_response_sha256"] == hashlib.sha256(raw_path.read_bytes()).hexdigest()
     assert manifest["source"]["attribution"] == "OpenStreetMap contributors, ODbL 1.0"
+    snapshot_path = output_root / manifest["source"]["snapshot_path"]
+    assert manifest["source"]["snapshot_path"] == f"sources/{manifest['source']['raw_response_sha256']}.json"
+    assert snapshot_path.read_bytes() == raw_path.read_bytes()
+    assert playground_osm.build_dataset(output_root)["source"]["retrieved_at_utc"] == "2026-07-31T03:34:30Z"
 
 
 def test_build_dataset_requires_each_referenced_target_embedding(tmp_path, monkeypatch):
@@ -226,6 +257,10 @@ def test_build_dataset_requires_each_referenced_target_embedding(tmp_path, monke
         '"tags": {"leisure": "track", "sport": "athletics"}, '
         '"geometry": [{"lon": 116.30, "lat": 39.95}, {"lon": 116.31, "lat": 39.95}, '
         '{"lon": 116.31, "lat": 39.96}, {"lon": 116.30, "lat": 39.95}]}]}',
+        encoding="utf-8",
+    )
+    (output_root / "osm_raw.metadata.json").write_text(
+        '{"retrieved_at_utc": "2026-07-31T03:34:30Z"}',
         encoding="utf-8",
     )
     monkeypatch.setattr(playground_osm, "PATCHES_META_PATH", metadata_path)

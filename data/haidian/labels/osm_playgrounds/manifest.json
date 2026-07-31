@@ -9,9 +9,10 @@
     ],
     "query": "[out:json][timeout:120];\n(\n  way[\"leisure\"=\"track\"][\"sport\"=\"athletics\"]({south},{west},{north},{east});\n  way[\"leisure\"=\"pitch\"][\"sport\"=\"athletics\"]({south},{west},{north},{east});\n);\nout tags geom;",
     "raw_response": "osm_raw.json",
-    "retrieved_at_utc": "2026-07-31T03:34:30Z",
-    "timestamp_osm_base": "2026-07-31T03:32:36Z",
-    "raw_response_sha256": "42669ea4ee65d27f41297b5c66eb59714ff5d755c33292dd2fb7b4342ce2a10c",
+    "retrieved_at_utc": "2026-07-31T04:00:12Z",
+    "timestamp_osm_base": "2026-07-31T03:59:06Z",
+    "raw_response_sha256": "80f3f7e83d87efaf2f85122359ed7201d3b7c5b4c08f8b25c28167d4422885a7",
+    "snapshot_path": "sources/80f3f7e83d87efaf2f85122359ed7201d3b7c5b4c08f8b25c28167d4422885a7.json",
     "attribution": "OpenStreetMap contributors, ODbL 1.0"
   },
   "purpose": {

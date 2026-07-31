@@ -81,9 +81,41 @@ def _write_json_atomically(path: Path, payload: dict) -> None:
         raise
 
 
+def _write_bytes_atomically(path: Path, content: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary_file:
+            temporary_path = Path(temporary_file.name)
+            temporary_file.write(content)
+        os.replace(temporary_path, path)
+    except OSError:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+        raise
+
+
+def _cache_metadata_path(cache_path: Path) -> Path:
+    return cache_path.with_suffix(".metadata.json")
+
+
+def _read_cache_metadata(cache_path: Path) -> dict:
+    metadata = json.loads(_cache_metadata_path(cache_path).read_text(encoding="utf-8"))
+    if not isinstance(metadata, dict) or not isinstance(metadata.get("retrieved_at_utc"), str):
+        raise ValueError("Overpass cache metadata must contain retrieved_at_utc")
+    return metadata
+
+
 def fetch_overpass(bounds: tuple[float, float, float, float], cache_path: Path) -> dict:
     """Fetch and validate an Overpass response, retaining an atomic raw cache."""
     if cache_path.exists():
+        _read_cache_metadata(cache_path)
         return _validate_overpass_payload(json.loads(cache_path.read_text(encoding="utf-8")))
 
     south, west, north, east = bounds
@@ -103,6 +135,10 @@ def fetch_overpass(bounds: tuple[float, float, float, float], cache_path: Path) 
                 raise ValueError(f"Overpass response was not JSON: {content_type or 'missing Content-Type'}")
             payload = _validate_overpass_payload(response.json())
             _write_json_atomically(cache_path, payload)
+            _write_json_atomically(
+                _cache_metadata_path(cache_path),
+                {"retrieved_at_utc": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")},
+            )
             return payload
         except (requests.RequestException, ValueError, OSError) as error:
             last_error = error
@@ -123,6 +159,9 @@ def extract_playgrounds(payload: dict) -> list[PlaygroundFeature]:
         if tags.get("leisure") not in {"track", "pitch"}:
             continue
         if tags.get("athletics"):
+            continue
+        indoor = str(tags.get("indoor", "")).strip().lower()
+        if indoor and indoor not in {"no", "false", "0", "outdoor"}:
             continue
         coordinates = [
             (point["lon"], point["lat"])
@@ -179,8 +218,20 @@ def _sha256_file(path: Path) -> str:
 
 
 def _cache_retrieval_timestamp(path: Path) -> str:
-    timestamp = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
-    return timestamp.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return _read_cache_metadata(path)["retrieved_at_utc"]
+
+
+def _write_source_snapshot(output_root: Path, raw_path: Path) -> tuple[str, str]:
+    raw_content = raw_path.read_bytes()
+    checksum = hashlib.sha256(raw_content).hexdigest()
+    relative_path = Path("sources") / f"{checksum}.json"
+    snapshot_path = output_root / relative_path
+    if snapshot_path.exists():
+        if _sha256_file(snapshot_path) != checksum:
+            raise ValueError(f"Content-addressed source snapshot does not match {checksum}")
+    else:
+        _write_bytes_atomically(snapshot_path, raw_content)
+    return relative_path.as_posix(), checksum
 
 
 def _embedding_path(patch_id: str) -> Path:
@@ -203,6 +254,7 @@ def build_dataset(output_root: Path) -> dict:
     bounds = _patch_bounds_wgs84(patches)
     raw_path = output_root / "osm_raw.json"
     payload = fetch_overpass(bounds, raw_path)
+    snapshot_path, raw_checksum = _write_source_snapshot(output_root, raw_path)
     features = extract_playgrounds(payload)
 
     manifest_items = []
@@ -261,7 +313,8 @@ def build_dataset(output_root: Path) -> dict:
             "raw_response": raw_path.name,
             "retrieved_at_utc": _cache_retrieval_timestamp(raw_path),
             "timestamp_osm_base": payload.get("osm3s", {}).get("timestamp_osm_base"),
-            "raw_response_sha256": _sha256_file(raw_path),
+            "raw_response_sha256": raw_checksum,
+            "snapshot_path": snapshot_path,
             "attribution": "OpenStreetMap contributors, ODbL 1.0",
         },
         "purpose": {
