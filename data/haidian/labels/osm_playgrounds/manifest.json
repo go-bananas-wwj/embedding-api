@@ -1,0 +1,59 @@
+{
+  "source": {
+    "overpass_url": "https://overpass-api.de/api/interpreter",
+    "bounds_wgs84": [
+      39.885118,
+      116.042476,
+      40.161672,
+      116.403321
+    ],
+    "query": "[out:json][timeout:120];\n(\n  way[\"leisure\"=\"track\"][\"sport\"=\"athletics\"]({south},{west},{north},{east});\n  way[\"leisure\"=\"pitch\"][\"sport\"=\"athletics\"]({south},{west},{north},{east});\n);\nout tags geom;",
+    "raw_response": "osm_raw.json"
+  },
+  "constraints": {
+    "tags": {
+      "leisure": [
+        "track",
+        "pitch"
+      ],
+      "sport": "athletics"
+    },
+    "minimum_patch_pixels": 4,
+    "minimum_playgrounds": 3
+  },
+  "playgrounds": [
+    {
+      "osm_id": 78142346,
+      "name": "操场",
+      "tags": {
+        "leisure": "pitch",
+        "name": "操场",
+        "name:zh": "操场",
+        "name:zh-Hans": "操场",
+        "name:zh-Hant": "操場",
+        "sport": "athletics"
+      },
+      "patches": [
+        {
+          "patch_id": "patch_000076",
+          "pixel_count": 194
+        }
+      ]
+    },
+    {
+      "osm_id": 1498960703,
+      "name": "OSM way 1498960703",
+      "tags": {
+        "athletics": "shot_put",
+        "leisure": "pitch",
+        "sport": "athletics"
+      },
+      "patches": [
+        {
+          "patch_id": "patch_000092",
+          "pixel_count": 6
+        }
+      ]
+    }
+  ]
+}

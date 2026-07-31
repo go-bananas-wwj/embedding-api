@@ -1,0 +1,90 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "id": 78142346,
+      "properties": {
+        "osm_id": 78142346,
+        "name": "操场",
+        "tags": {
+          "leisure": "pitch",
+          "name": "操场",
+          "name:zh": "操场",
+          "name:zh-Hans": "操场",
+          "name:zh-Hant": "操場",
+          "sport": "athletics"
+        },
+        "patch_count": 1
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              116.3051932,
+              39.9689892
+            ],
+            [
+              116.3064691,
+              39.9690823
+            ],
+            [
+              116.3066653,
+              39.9675016
+            ],
+            [
+              116.3053894,
+              39.9674085
+            ],
+            [
+              116.3051932,
+              39.9689892
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": 1498960703,
+      "properties": {
+        "osm_id": 1498960703,
+        "name": "OSM way 1498960703",
+        "tags": {
+          "athletics": "shot_put",
+          "leisure": "pitch",
+          "sport": "athletics"
+        },
+        "patch_count": 1
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              116.3068589,
+              39.9857615
+            ],
+            [
+              116.3074759,
+              39.9857907
+            ],
+            [
+              116.3072981,
+              39.9856362
+            ],
+            [
+              116.3070739,
+              39.9856292
+            ],
+            [
+              116.3068589,
+              39.9857615
+            ]
+          ]
+        ]
+      }
+    }
+  ]
+}
