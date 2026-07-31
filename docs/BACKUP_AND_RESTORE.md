@@ -1,5 +1,8 @@
 # 稳定版本备份与恢复
 
+> 新机器的逐步恢复命令请直接阅读
+> [`docs/REPRODUCTION.md`](REPRODUCTION.md)。本文主要说明备份维护规则。
+
 本项目使用两处互补备份：
 
 - GitHub 保存源码、配置、文档、测试和环境清单。
@@ -25,6 +28,15 @@ SHA256。ModelScope 中的源码归档与 Git bundle 必须由该 commit 生成�
 5. 设置 Rasterio 使用的 `PROJ_DATA`，运行 `pytest -q`。
 6. 使用 `python service_watchdog.py start` 启动服务，确认 `/health`、`/regions`、
    `/openapi.json` 和 `/docs` 均返回 HTTP 200。
+
+当前稳定备份：
+
+| 项目 | 值 |
+|---|---|
+| Git tag | `embedding-api-20260730-stable` |
+| Git commit | `22921a71569c2ee6f03dc0e27e67cc51339d58ba` |
+| ModelScope 数据集 | `WeijieWu/xuannv_embdding_backup` |
+| 版本目录 | `embedding-api-20260730-stable/` |
 
 ## 安全约束
 
