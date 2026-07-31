@@ -8,7 +8,20 @@
       116.403321
     ],
     "query": "[out:json][timeout:120];\n(\n  way[\"leisure\"=\"track\"][\"sport\"=\"athletics\"]({south},{west},{north},{east});\n  way[\"leisure\"=\"pitch\"][\"sport\"=\"athletics\"]({south},{west},{north},{east});\n);\nout tags geom;",
-    "raw_response": "osm_raw.json"
+    "raw_response": "osm_raw.json",
+    "retrieved_at_utc": "2026-07-31T03:34:30Z",
+    "timestamp_osm_base": "2026-07-31T03:32:36Z",
+    "raw_response_sha256": "42669ea4ee65d27f41297b5c66eb59714ff5d755c33292dd2fb7b4342ce2a10c",
+    "attribution": "OpenStreetMap contributors, ODbL 1.0"
+  },
+  "purpose": {
+    "reference_role": "independent locator for the existing playground_xuannv head",
+    "known_positives": "The head's three training polygons are separate known-positive locations."
+  },
+  "target": {
+    "embedding_version": "v1",
+    "embedding_month": "202604",
+    "patch_metadata_sha256": "cb04109fb43e4fdbc4f93a39ebba4994e9d0661af52fdf651ae476bde6de0cce"
   },
   "constraints": {
     "tags": {
@@ -18,8 +31,9 @@
       ],
       "sport": "athletics"
     },
+    "excluded_athletics_subfacilities": "all athletics=* tagged subfacilities",
     "minimum_patch_pixels": 4,
-    "minimum_playgrounds": 3
+    "minimum_playgrounds": 1
   },
   "playgrounds": [
     {
@@ -36,22 +50,8 @@
       "patches": [
         {
           "patch_id": "patch_000076",
-          "pixel_count": 194
-        }
-      ]
-    },
-    {
-      "osm_id": 1498960703,
-      "name": "OSM way 1498960703",
-      "tags": {
-        "athletics": "shot_put",
-        "leisure": "pitch",
-        "sport": "athletics"
-      },
-      "patches": [
-        {
-          "patch_id": "patch_000092",
-          "pixel_count": 6
+          "pixel_count": 194,
+          "embedding_path": "v1/202604/patch_000076.npy"
         }
       ]
     }
