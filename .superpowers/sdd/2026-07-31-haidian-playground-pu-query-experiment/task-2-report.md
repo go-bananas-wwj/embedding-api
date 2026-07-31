@@ -8,6 +8,8 @@ COMPLETE
 
 `d687d53` (`feat: add guarded PU query playground postprocessing`)
 
+P2 validation follow-up: `7d53719` (`fix: validate PU query area guard inputs`).
+
 ## Changed Files
 
 - `scripts/playground_pu_postprocess.py`
@@ -45,6 +47,22 @@ Result: `305 passed, 31 warnings in 60.26s`. The warnings are pre-existing
 third-party deprecation, TIFF metadata, and scikit-learn checkpoint-version
 warnings; no test failed.
 
+P2 validation follow-up:
+
+```text
+/opt/conda/envs/pyseims/bin/python -m pytest tests/test_playground_pu_postprocess.py -q
+```
+
+Result: `18 passed in 0.30s`, including five invalid values each for
+`min_pixels` and `max_component_pixels`: Python and NumPy booleans, fractional
+floats, `NaN`, and infinity.
+
+```text
+/opt/conda/envs/pyseims/bin/python -m pytest tests/ -q
+```
+
+Result: `317 passed, 31 warnings in 58.84s`.
+
 ## API And Signature
 
 - `strict_threshold(scores: List[np.ndarray], labels: List[np.ndarray]) -> float`
@@ -69,8 +87,10 @@ warnings; no test failed.
 - Scores must be finite and match their corresponding labels; score maps and
   diagnostic maps must be two-dimensional where spatial connectivity applies.
 - Hysteresis rejects non-finite thresholds and a `high` value below `low`.
-- `min_pixels` is at least one; `max_component_pixels` cannot be below it;
-  `max_total_ratio` must be in `[0, 1]`.
+- `min_pixels` and `max_component_pixels`, when provided, must be finite
+  non-boolean integers; NumPy integer types are accepted. `min_pixels` is at
+  least one and `max_component_pixels` cannot be below it. `max_total_ratio`
+  must be in `[0, 1]`.
 - Empty metric denominators return `0.0`, avoiding NaN/Infinity metrics.
 - A fractional total-area cap floors to an integer pixel budget; components are
   never partially retained.
