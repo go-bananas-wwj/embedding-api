@@ -41,7 +41,7 @@
 
 - **前端自治**：分类和标注完全由前端在浏览器 `localStorage` / `IndexedDB` 中管理，后端不再提供 `/annotations` 接口。
 - **训练包**：前端在调用 `POST /models` 时，把完整的标注包（GeoJSON FeatureCollection + classes 数组）一次性传给后端。
-- **后端训练**：后端解析 GeoJSON，把 WGS84 多边形栅格化为 128×128 mask 并提取 embedding。每个有标注的类别分别训练一个二分类头：该类别有效 Polygon 少于 10 个时使用 `PU + Query`，达到 10 个时使用 `binary_conv3x3`。
+- **后端训练**：后端解析 GeoJSON，把 WGS84 多边形栅格化为 128×128 mask 并提取 embedding。每个有标注的类别分别训练一个二分类头：该类别有效 Polygon 少于 10 个时，海淀区自动比较“玄女局部区域模型”和 `PU + Query` 并选择标注留出验证更稳的方案；达到 10 个时使用 `binary_conv3x3`。哈尔滨少样本任务保持原 `PU + Query`。
 - **模型名称用户定义**：`name` 字段由用户输入，后端只负责生成 `model_id`。
 - **无演示兜底**：`POST /models` 必须提交完整 `annotations` 和
   `classes`。空请求、缺字段或格式错误会返回 `422`，不会自动创建 demo
@@ -294,9 +294,10 @@ Content-Type: application/json
 5. 推理结果图统一输出为 128×128 PNG。
 6. 加载对应月份的 embedding；变化检测会加载前后两期并计算 embedding 差分。
 7. 将 Polygon 内部作为目标正样本；Polygon 外部保持“未标注”语义，不整体视为负样本。
-8. 按类别分别统计有效 Polygon。某类别少于 10 个时，从远离该类标注且前景相似度最低的 30% 未标注像素中估计可靠背景，训练 PU 前景/背景原型并用 F0.5 自动选择阈值；推理时执行一次受限 Query 自适应。
-9. 某类别有效 Polygon 大于等于 10 个时，为该类别训练 `binary_conv3x3` few-shot 二分类下游头并自动选择推理阈值。同一模型可同时包含 PU + Query 头和 Conv 3×3 头。
-10. 保存带格式版本的模型 checkpoint，更新模型状态。
+8. 按类别分别统计有效 Polygon。海淀区某类别少于 10 个时，同时准备原 `PU + Query` 与玄女局部区域模型。新模型组合 64 维 embedding、同期 S2 色彩、3×3/7×7 局部纹理和边界特征，只从远离标注且相似度较低的未标注像素中抽取可靠负样本，并使用正样本密度抑制分布外误检。
+9. 有多个 Polygon 时，后端最多执行 3 折留一 Polygon 验证，综合比较标注内召回和预测范围；新模型没有稳定优势时自动保留 `PU + Query`。细长标注使用通用形态保护，避免道路结果被区域模型过度收缩。选择结果写入 checkpoint 的 `selection` 字段。
+10. 某类别有效 Polygon 大于等于 10 个时，为该类别训练 `binary_conv3x3` few-shot 二分类下游头并自动选择推理阈值。同一模型可包含不同策略的类别头。
+11. 保存带格式版本的模型 checkpoint，更新模型状态。
 
 ### 校验与限制
 

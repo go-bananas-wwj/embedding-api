@@ -6,6 +6,7 @@ from collections import defaultdict
 from typing import Any, Dict, List, Tuple
 
 import numpy as np
+from scipy import ndimage
 
 
 CHECKPOINT_FORMAT = "pu_query_retrieval_v1"
@@ -20,6 +21,9 @@ QUERY_MAX_PIXELS = 128
 QUERY_MIN_MARGIN = 0.05
 QUERY_MAX_GROWTH = 1.35
 QUERY_MIN_AREA_CAP = 64
+POSTPROCESS_SEED_QUANTILE = 0.99
+POSTPROCESS_RECALL_RATIO = 0.85
+_EIGHT_CONNECTED = np.ones((3, 3), dtype=np.uint8)
 
 
 def _l2_normalize(values: np.ndarray) -> np.ndarray:
@@ -102,6 +106,162 @@ def tune_threshold(positive_scores: np.ndarray, negative_scores: np.ndarray) -> 
     return best_threshold, best_f05
 
 
+def _area_guard_prediction(
+    score: np.ndarray,
+    *,
+    low: float,
+    seed_quantile: float,
+    min_pixels: int,
+    max_component_pixels: int,
+    max_total_ratio: float,
+) -> np.ndarray:
+    score_array = np.asarray(score, dtype=np.float32)
+    high = max(float(low), float(np.quantile(score_array, seed_quantile)))
+    candidates = score_array >= float(low)
+    seeds = score_array >= high
+    components, count = ndimage.label(candidates, structure=_EIGHT_CONNECTED)
+    accepted = []
+    for component_id in range(1, count + 1):
+        component = components == component_id
+        area = int(component.sum())
+        if (
+            area < int(min_pixels)
+            or area > int(max_component_pixels)
+            or not seeds[component].any()
+        ):
+            continue
+        accepted.append(
+            (float(score_array[np.logical_and(component, seeds)].max()), component)
+        )
+
+    pixel_cap = max(1, int(np.floor(score_array.size * max_total_ratio)))
+    result = np.zeros(score_array.shape, dtype=bool)
+    retained = 0
+    for _, component in sorted(accepted, key=lambda item: item[0], reverse=True):
+        area = int(component.sum())
+        if retained + area > pixel_cap:
+            continue
+        result[component] = True
+        retained += area
+    return result
+
+
+def _calibrate_postprocess(
+    scores: List[np.ndarray],
+    masks: List[np.ndarray],
+    positive_scores: np.ndarray,
+    threshold: float,
+) -> Dict[str, Any]:
+    """Fit generic spatial guards without treating unlabeled pixels as negatives."""
+    baseline = np.concatenate(
+        [(score >= threshold).reshape(-1) for score in scores]
+    )
+    expected = np.concatenate([mask.reshape(-1) for mask in masks])
+    positive_count = max(1, int(expected.sum()))
+    baseline_recall = float(np.logical_and(baseline, expected).sum() / positive_count)
+    recall_floor = max(
+        0.55, min(0.90, baseline_recall * POSTPROCESS_RECALL_RATIO)
+    )
+    component_areas = np.asarray(
+        [int(component.sum()) for mask in masks for component in [mask] if component.any()],
+        dtype=np.float32,
+    )
+    min_area = max(1, int(component_areas.min()))
+    max_area = max(1, int(component_areas.max()))
+    support_ratios = [float(mask.mean()) for mask in masks]
+    base_ratio = max(support_ratios)
+    lows = sorted(
+        {
+            float(threshold),
+            *[
+                max(float(threshold), float(value))
+                for value in np.quantile(positive_scores, [0.01, 0.05, 0.10])
+            ],
+        }
+    )
+    min_values = sorted({1, max(2, int(min_area * 0.05)), max(4, int(min_area * 0.10))})
+    max_values = sorted({max_area * 2, max_area * 4, max_area * 8})
+    ratio_values = sorted(
+        {
+            min(1.0, max(0.02, base_ratio * scale))
+            for scale in (2.0, 3.0, 5.0)
+        }
+    )
+
+    best_parameters = None
+    best_rank = None
+    best_recall = 0.0
+    for seed_quantile in (0.95, 0.98, POSTPROCESS_SEED_QUANTILE):
+        for low in lows:
+            for min_pixels in min_values:
+                for max_component_pixels in max_values:
+                    for max_total_ratio in ratio_values:
+                        predictions = [
+                            _area_guard_prediction(
+                                score,
+                                low=low,
+                                seed_quantile=seed_quantile,
+                                min_pixels=min_pixels,
+                                max_component_pixels=max_component_pixels,
+                                max_total_ratio=max_total_ratio,
+                            )
+                            for score in scores
+                        ]
+                        predicted = np.concatenate(
+                            [prediction.reshape(-1) for prediction in predictions]
+                        )
+                        recall = float(
+                            np.logical_and(predicted, expected).sum()
+                            / positive_count
+                        )
+                        if recall < recall_floor:
+                            continue
+                        rank = (
+                            -max_total_ratio,
+                            float(low),
+                            min_pixels,
+                            -max_component_pixels,
+                            seed_quantile,
+                            recall,
+                        )
+                        if best_rank is None or rank > best_rank:
+                            best_rank = rank
+                            best_recall = recall
+                            best_parameters = {
+                                "method": "relative_seed_area_guard",
+                                "low": float(low),
+                                "seed_quantile": float(seed_quantile),
+                                "min_pixels": int(min_pixels),
+                                "max_component_pixels": int(max_component_pixels),
+                                "max_total_ratio": float(max_total_ratio),
+                            }
+    if best_parameters is None:
+        return {"method": "fixed_threshold", "threshold": float(threshold)}
+    best_parameters["calibration_positive_recall"] = float(best_recall)
+    best_parameters["baseline_positive_recall"] = float(baseline_recall)
+    best_parameters["recall_floor"] = float(recall_floor)
+    return best_parameters
+
+
+def predict_pu_query(score: np.ndarray, model_data: Dict[str, Any]) -> np.ndarray:
+    """Convert a PU score map into a mask, preserving old checkpoints."""
+    parameters = model_data.get("postprocess")
+    if (
+        not isinstance(parameters, dict)
+        or not parameters.get("enabled", False)
+        or parameters.get("method") != "relative_seed_area_guard"
+    ):
+        return np.asarray(score) >= float(model_data["threshold"])
+    return _area_guard_prediction(
+        score,
+        low=float(parameters["low"]),
+        seed_quantile=float(parameters["seed_quantile"]),
+        min_pixels=int(parameters["min_pixels"]),
+        max_component_pixels=int(parameters["max_component_pixels"]),
+        max_total_ratio=float(parameters["max_total_ratio"]),
+    )
+
+
 def train_pu_query(
     polygon_samples: List[Tuple[str, np.ndarray, np.ndarray]],
 ) -> Dict[str, Any]:
@@ -160,7 +320,7 @@ def train_pu_query(
     positive_scores = positives @ foreground - BACKGROUND_WEIGHT * (positives @ background)
     negative_scores = negatives @ foreground - BACKGROUND_WEIGHT * (negatives @ background)
     threshold, f05 = tune_threshold(positive_scores, negative_scores)
-    return {
+    result = {
         "feature_mean": mean,
         "feature_std": std,
         "foreground_center": foreground,
@@ -168,6 +328,22 @@ def train_pu_query(
         "threshold": threshold,
         "training_f05": f05,
     }
+    support_scores = [
+        score_pu_query(feature, result)[0]
+        for feature in unique_features.values()
+    ]
+    support_masks = [
+        np.logical_or.reduce(masks_by_support[key])
+        for key in unique_features
+    ]
+    result["postprocess"] = _calibrate_postprocess(
+        support_scores,
+        support_masks,
+        positive_scores,
+        threshold,
+    )
+    result["postprocess"]["enabled"] = False
+    return result
 
 
 def score_pu_query(feature: np.ndarray, model_data: Dict[str, Any]) -> Tuple[np.ndarray, bool]:
