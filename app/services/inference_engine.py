@@ -16,15 +16,9 @@ from app.services.external_embeddings import EXTERNAL_MLP_CHECKPOINT_FORMAT, loa
 from app.services.model_binding import validate_model_binding
 from app.services.model_registry import get_model_registry
 from app.services.pu_query import CHECKPOINT_FORMAT as PU_QUERY_CHECKPOINT_FORMAT
-from app.services.pu_query import predict_pu_query, score_pu_query
+from app.services.pu_query import score_pu_query
 from app.services.user_paths import get_user_dir
 from app.services.s2_ml import CHECKPOINT_FORMAT as S2_RF_CHECKPOINT_FORMAT, load_s2_features
-from app.services.sparse_region_model import (
-    CHECKPOINT_FORMAT as SPARSE_REGION_CHECKPOINT_FORMAT,
-    load_optical_features,
-    predict_sparse_region_model,
-    score_sparse_region_model,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -127,10 +121,6 @@ class InferenceEngine:
                 month=month,
                 before_month=before_month,
                 after_month=after_month,
-            )
-        if model_data.get("__format__") == SPARSE_REGION_CHECKPOINT_FORMAT:
-            return self._infer_sparse_region_model(
-                model_data, model_id, region_id, patch_id, month=month
             )
         if model_data.get("__format__") == "torch_fewshot_head":
             return self._infer_torch_fewshot(
@@ -289,13 +279,7 @@ class InferenceEngine:
         classes = []
         for label, item in enumerate(model_data.get("heads", []), start=1):
             checkpoint = item["checkpoint"]
-            score, threshold = self._score_binary_head(
-                checkpoint,
-                feature,
-                region_id=region_id,
-                patch_id=patch_id,
-                month=month,
-            )
+            score, threshold = self._score_binary_head(checkpoint, feature)
             confidence = (score - threshold) / max(1.0 - threshold, 1e-6)
             selected = (
                 valid
@@ -321,40 +305,11 @@ class InferenceEngine:
         self,
         checkpoint: Dict[str, Any],
         feature: np.ndarray,
-        region_id: Optional[str] = None,
-        patch_id: Optional[str] = None,
-        month: Optional[str] = None,
     ) -> Tuple[np.ndarray, float]:
         checkpoint_format = checkpoint.get("__format__")
         if checkpoint_format == PU_QUERY_CHECKPOINT_FORMAT:
             score, _ = score_pu_query(feature, checkpoint)
-            threshold = float(checkpoint["threshold"])
-            selected = predict_pu_query(score, checkpoint)
-            filtered = np.where(
-                selected,
-                score,
-                np.nextafter(
-                    np.float32(threshold), np.float32(-np.inf)
-                ),
-            )
-            return filtered.astype(np.float32), threshold
-        if checkpoint_format == SPARSE_REGION_CHECKPOINT_FORMAT:
-            if not region_id or not patch_id or not month:
-                raise ValueError(
-                    "Sparse region inference requires region_id, patch_id, and month"
-                )
-            optical = load_optical_features(
-                region_id, patch_id, month, feature.shape[1:]
-            )
-            score = score_sparse_region_model(feature, optical, checkpoint)
-            threshold = float(checkpoint["threshold"])
-            selected = predict_sparse_region_model(score, checkpoint)
-            filtered = np.where(
-                selected,
-                score,
-                np.nextafter(np.float32(threshold), np.float32(-np.inf)),
-            )
-            return filtered.astype(np.float32), threshold
+            return score.astype(np.float32), float(checkpoint["threshold"])
         if checkpoint_format == "torch_fewshot_head":
             normalized = self._normalize_feature_map(feature)
             head = BinaryConv3x3ProbeHead(
@@ -545,7 +500,7 @@ class InferenceEngine:
             patch_id,
             query_adapted,
         )
-        prediction = predict_pu_query(score, model_data).astype(np.uint8)
+        prediction = (score >= float(model_data["threshold"])).astype(np.uint8)
         if is_change:
             rendered = self._color_encode_cd(prediction)
         else:
@@ -555,37 +510,6 @@ class InferenceEngine:
         )
         result_path = self.results_dir / result_filename
         image.save(result_path)
-        return str(result_path)
-
-    def _infer_sparse_region_model(
-        self,
-        model_data: Dict[str, Any],
-        model_id: str,
-        region_id: str,
-        patch_id: str,
-        month: Optional[str] = None,
-    ) -> str:
-        """Run the category-agnostic sparse region model for one patch."""
-        if not month:
-            raise ValueError("Single-time inference requires month")
-        embedding_version = model_data.get("embedding_version", "v2")
-        feature = _load_embedding_for_inference(
-            region_id, patch_id, month, version=embedding_version
-        )
-        if feature is None:
-            raise FileNotFoundError(f"Embedding not found for {patch_id} {month}")
-        optical = load_optical_features(
-            region_id, patch_id, month, feature.shape[1:]
-        )
-        score = score_sparse_region_model(feature, optical, model_data)
-        prediction = predict_sparse_region_model(score, model_data).astype(np.uint8)
-        rendered = self._color_encode_binary_fewshot(prediction, model_data)
-        result_path = self.results_dir / (
-            f"infer_{model_id}_{region_id}_{patch_id}_{month}.png"
-        )
-        Image.fromarray(rendered).resize(
-            (128, 128), Image.Resampling.NEAREST
-        ).save(result_path)
         return str(result_path)
 
     def _infer_torch_fewshot(
