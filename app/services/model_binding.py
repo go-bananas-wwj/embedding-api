@@ -23,7 +23,11 @@ def build_model_binding(checkpoint: Dict[str, Any]) -> Dict[str, Any]:
     method = checkpoint.get("training_method")
     if checkpoint_format == "s2_random_forest_v1":
         method = "traditional_ml"
-    elif checkpoint_format in {"torch_fewshot_head", "pu_query_retrieval_v1"}:
+    elif checkpoint_format in {
+        "torch_fewshot_head",
+        "pu_query_retrieval_v1",
+        "sparse_region_model_v1",
+    }:
         method = "xuannv_earth"
     elif checkpoint_format == "external_embedding_mlp_v1":
         method = method or checkpoint.get("feature_source")

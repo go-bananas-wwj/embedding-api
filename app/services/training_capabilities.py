@@ -28,7 +28,7 @@ def get_training_capabilities(region_id: Optional[str] = None) -> Dict[str, Any]
                 "feature_source": "xuannv_embedding",
                 "supported_model_types": ["single_time_detection", "change_detection"],
                 "trainer": "auto",
-                "selection_rule": "按类别分别统计：某类有效 Polygon 少于 10 个使用 PU + Query，否则使用 Binary Conv 3x3",
+                "selection_rule": "按类别分别统计：海淀某类有效 Polygon 少于 10 个使用 ExtraTrees Sparse Region，否则使用 Binary Conv 3x3",
                 "required_sensor": None,
             },
             {

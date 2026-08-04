@@ -36,6 +36,11 @@ from app.services.s2_ml import (
     save_random_forest_checkpoint,
     train_random_forest,
 )
+from app.services.sparse_region_model import (
+    CHECKPOINT_FORMAT as SPARSE_REGION_CHECKPOINT_FORMAT,
+    load_optical_features,
+    train_sparse_region_model,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -348,6 +353,50 @@ def _save_pu_query_checkpoint(
     return model_path
 
 
+def _save_sparse_checkpoint(
+    user_id: str,
+    model_id: str,
+    sparse_data: Dict[str, Any],
+    metadata: Dict[str, Any],
+) -> Path:
+    registry = get_model_registry(user_id)
+    record = registry.get_model(model_id)
+    if record is None:
+        raise ValueError(f"Model {model_id} not found in registry")
+    model_path = Path(record["model_path"])
+    model_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = model_path.with_suffix(f".tmp.{uuid.uuid4().hex}")
+    try:
+        checkpoint = {
+            "__format__": SPARSE_REGION_CHECKPOINT_FORMAT,
+            "head_type": "sparse_region_model",
+            **sparse_data,
+            **metadata,
+        }
+        checkpoint.update(build_model_binding(checkpoint))
+        torch.save(checkpoint, tmp)
+        tmp.replace(model_path)
+    finally:
+        if tmp.exists():
+            tmp.unlink()
+    return model_path
+
+
+def _load_sparse_optical(
+    polygon_samples: List[Tuple[str, np.ndarray, np.ndarray]],
+    region_id: str,
+) -> Dict[str, np.ndarray]:
+    optical: Dict[str, np.ndarray] = {}
+    for support_key, feature, _ in polygon_samples:
+        if support_key in optical:
+            continue
+        patch_id, month = support_key.split(":", 1)
+        optical[support_key] = load_optical_features(
+            region_id, patch_id, month, feature.shape[1:]
+        )
+    return optical
+
+
 def _save_external_mlp_checkpoint(
     user_id: str,
     model_id: str,
@@ -489,6 +538,25 @@ class ClassificationTrainingEngine:
             "trained_at": datetime.now().isoformat(),
         }
         if polygon_count < 10:
+            if region_id == "haidian":
+                sparse_data = train_sparse_region_model(
+                    polygon_samples,
+                    _load_sparse_optical(polygon_samples, region_id),
+                )
+                metadata.update(
+                    {"epochs": 0, "training_strategy": "sparse_region_model"}
+                )
+                model_path = _save_sparse_checkpoint(
+                    self._user_id, model_id, sparse_data, metadata
+                )
+                return {
+                    "model_id": model_id,
+                    "model_path": str(model_path),
+                    "accuracy": float(sparse_data["training_positive_recall"]),
+                    "n_samples": polygon_count,
+                    "resolved_training_method": "sparse_region_model",
+                    "feature_source": "xuannv_embedding",
+                }
             retrieval_data = train_pu_query(polygon_samples)
             metadata.update({"epochs": 0, "training_strategy": "pu_query_retrieval"})
             model_path = _save_pu_query_checkpoint(

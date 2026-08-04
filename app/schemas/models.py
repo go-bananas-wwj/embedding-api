@@ -299,7 +299,7 @@ class ModelCreate(BaseModel):
         "xuannv_earth",
         description=(
             "训练方式。默认 xuannv_earth：使用玄女 embedding，并按类别分别统计；"
-            "某类少于 10 个有效 Polygon 时采用 PU + Query，否则采用 Binary Conv 3x3；traditional_ml "
+            "海淀某类少于 10 个有效 Polygon 时采用 ExtraTrees Sparse Region，否则采用 Binary Conv 3x3；traditional_ml "
             "读取 Sentinel-2 六波段和四个光谱指数，为每个有标注类别分别训练 Random Forest；aef 使用年度 "
             "embedding（当前固定回退到 2025 年），dinov3_sat493m 使用月度光学影像，"
             "并为每个有标注类别分别训练两层像素 MLP。多类别最终仍返回一个 model_id。"
@@ -313,7 +313,7 @@ class ModelCreate(BaseModel):
         description=(
             "训练迭代次数。按类别统计：某类有效 Polygon 大于等于 10 个时使用 "
             "Binary Conv 3x3，服务端最多执行 100 轮；少于 10 个时使用免迭代的 "
-            "PU + Query 检索。"
+            "ExtraTrees Sparse Region 少样本检测。"
         ),
         examples=[100],
     )
@@ -335,7 +335,7 @@ class ModelCreate(BaseModel):
         description=(
             "GeoJSON FeatureCollection 用户标注包。坐标必须是 WGS84。"
             "Polygon 内部作为目标正样本，Polygon 外是未标注样本而不是直接负样本。"
-            "后端按 class_id 独立训练；某类有效 Polygon 少于 10 个时使用 PU + Query，"
+            "后端按 class_id 独立训练；海淀某类有效 Polygon 少于 10 个时使用 ExtraTrees Sparse Region，"
             "达到 10 个时使用 Binary Conv 3x3。没有 Polygon 标注的类别自动跳过。"
         ),
     )
@@ -500,7 +500,7 @@ class ModelOut(BaseModel):
         None, description="生成输入特征时使用的预处理契约版本。"
     )
     head_type: Optional[str] = Field(
-        None, description="下游头类型，例如 pu_query_retrieval、binary_conv3x3、pixel_mlp。"
+        None, description="下游头类型，例如 sparse_region_model、binary_conv3x3、pu_query_retrieval（历史模型）或 pixel_mlp。"
     )
     class_heads: List[Dict[str, Any]] = Field(
         default_factory=list,

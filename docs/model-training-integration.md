@@ -20,7 +20,7 @@
 
 | training_method | 中文名称 | 输入 | 下游算法 | 当前状态 |
 |---|---|---|---|---|
-| `xuannv_earth` | 玄女地球训练（默认） | 玄女 embedding | `<10` 个有效 Polygon 使用 PU + Query，`>=10` 使用 Binary Conv 3x3 | 可用 |
+| `xuannv_earth` | 玄女地球训练（默认） | 玄女 embedding | 海淀 `<10` 个有效 Polygon 使用 ExtraTrees Sparse Region，`>=10` 使用 Binary Conv 3x3 | 可用 |
 | `traditional_ml` | 传统方法训练 | 仅 Sentinel-2 L2A 光学影像 | Random Forest 像素二分类 | 可用，限单时相 |
 | `aef` | AEF 下游训练 | 冻结 AEF embedding | 两层像素 MLP | 安装真实 AEF embedding 后可用 |
 | `dinov3_sat493m` | DINOv3-SAT493M 下游训练 | 冻结 ViT-L/16 SAT-493M dense tokens | 两层像素 MLP | 安装权重后可用 |
@@ -74,7 +74,7 @@ Polygon 内部是正样本，外部是未标注区域，不会整体当作负样
 | 字段 | 含义 |
 |---|---|
 | `requested_training_method` | 前端请求的方案 |
-| `resolved_training_method` | 实际执行算法，例如 `random_forest`、`pu_query_retrieval` |
+| `resolved_training_method` | 实际执行算法，例如 `random_forest`、`sparse_region_model`、`binary_conv3x3` |
 | `feature_source` | `sentinel2_l2a` 或 `xuannv_embedding` |
 
 传统模型 checkpoint 同时保存波段顺序、光谱指数、阈值、Random Forest 参数、
