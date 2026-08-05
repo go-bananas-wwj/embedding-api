@@ -46,6 +46,8 @@ nohup.out
 
 # Data and models (large files, not committed)
 data/
+!sam3_pkg/sam3/train/data/
+!sam3_pkg/sam3/train/data/*.py
 models/
 
 # User-generated annotations and trained models

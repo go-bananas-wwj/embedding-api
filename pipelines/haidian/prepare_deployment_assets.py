@@ -42,6 +42,14 @@ ASSET_GROUPS = (
         ),
     ),
     (
+        "harbin_road_results",
+        (Path("data/harbin/tasks/road_extraction/v1/results"),),
+    ),
+    (
+        "external_aef_2025",
+        (Path("data/external_embeddings/aef"),),
+    ),
+    (
         "raw_s1",
         (
             Path(

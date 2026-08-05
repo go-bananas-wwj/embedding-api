@@ -55,7 +55,11 @@ python pipelines/haidian/download_modelscope_assets.py \
 
 下载器也会安装 `artifacts/haidian-embedding-v1/deployment` 下的可选部署归档，
 包括三个 Conv3×3 系统任务头、已经生成的按月任务结果，以及 S1、S2、Landsat、
-高分光学和高分 SAR GeoTIFF。归档在解压前会进行 SHA256 校验。
+高分光学和高分 SAR GeoTIFF。补充包包含哈尔滨道路结果和可选 AEF 2025 外部
+embedding。归档在解压前会进行 SHA256 校验。
+
+海淀施工地六个月目录当前复用同一套静态结果，不代表六个月分别完成了模型
+推理，也不应用于施工地月际变化分析。
 
 目标机器已经具备 embedding 时，增加 `--deployment-only`，避免重复下载和
 转换 embedding。
