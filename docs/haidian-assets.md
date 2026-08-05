@@ -41,6 +41,13 @@ python pipelines/haidian/download_modelscope_assets.py \
   --target .
 ```
 
+下载器还会校验并安装 `deployment/` 下的部署归档：三个 Conv3×3 系统任务头、
+按月任务结果，以及 `s1`、`s2`、`landsat`、`highres_optical`、
+`highres_sar` 五类原始 Patch 影像。部署归档不重复包含 embedding。
+
+当前施工地目录只保留已有标签资产；没有经过验证的月度预生成预测时，安装器
+不会用旧模型结果冒充当前结果。
+
 ## 安装后的目录
 
 | 资产 | 路径 |

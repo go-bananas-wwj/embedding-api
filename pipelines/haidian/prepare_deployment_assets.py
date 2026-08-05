@@ -23,11 +23,40 @@ except ImportError:  # Direct script execution.
 
 ASSET_GROUPS = (
     (
+        "task_heads",
+        (
+            Path("models/haidian/v1/task_heads/building_conv3x3_best.pt"),
+            Path("models/haidian/v1/task_heads/road_conv3x3_best.pt"),
+            Path("models/haidian/v1/task_heads/water_conv3x3_best.pt"),
+        ),
+    ),
+    (
         "task_results",
         (
+            Path("data/haidian/tasks/building_extraction"),
+            Path("data/haidian/tasks/road_extraction"),
+            Path("data/haidian/tasks/construction"),
             Path("data/haidian/tasks/land_use_classification"),
             Path("data/haidian/tasks/land_cover_classification"),
             Path("data/haidian/tasks/water_extraction"),
+        ),
+    ),
+    (
+        "raw_s1",
+        (
+            Path(
+                "data/haidian/archive/processed_training_data/"
+                "extracted/patches/s1"
+            ),
+        ),
+    ),
+    (
+        "raw_landsat",
+        (
+            Path(
+                "data/haidian/archive/processed_training_data/"
+                "extracted/patches/landsat"
+            ),
         ),
     ),
     (
@@ -45,6 +74,15 @@ ASSET_GROUPS = (
             Path(
                 "data/haidian/archive/processed_training_data/"
                 "extracted/patches/highres_optical"
+            ),
+        ),
+    ),
+    (
+        "raw_highres_sar",
+        (
+            Path(
+                "data/haidian/archive/processed_training_data/"
+                "extracted/patches/highres_sar"
             ),
         ),
     ),
@@ -68,6 +106,9 @@ def parse_args() -> argparse.Namespace:
 
 
 def _iter_files(path: Path) -> Iterable[Path]:
+    if path.is_file():
+        yield path
+        return
     yield from (
         item
         for item in sorted(path.rglob("*"))
@@ -91,7 +132,7 @@ def _archive_group(name: str, roots: tuple[Path, ...], output_root: Path) -> dic
     with tarfile.open(archive, "w", dereference=True) as tar:
         for relative_root in roots:
             source_root = PROJECT_ROOT / relative_root
-            if not source_root.is_dir():
+            if not source_root.exists():
                 missing.append(relative_root.as_posix())
                 continue
             for source in _iter_files(source_root):
