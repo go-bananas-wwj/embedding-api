@@ -41,6 +41,17 @@ python pipelines/haidian/download_modelscope_assets.py \
   --target .
 ```
 
+部署机已经有 embedding 时，只同步部署资产：
+
+```bash
+python pipelines/haidian/download_modelscope_assets.py \
+  --repo WeijieWu/xuannv_haidian_embdding \
+  --prefix artifacts/haidian-embedding-v1 \
+  --target . \
+  --deployment-only \
+  --force
+```
+
 下载器还会校验并安装 `deployment/` 下的部署归档：三个 Conv3×3 系统任务头、
 按月任务结果，以及 `s1`、`s2`、`landsat`、`highres_optical`、
 `highres_sar` 五类原始 Patch 影像。部署归档不重复包含 embedding。

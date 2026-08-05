@@ -57,6 +57,9 @@ python pipelines/haidian/download_modelscope_assets.py \
 包括三个 Conv3×3 系统任务头、已经生成的按月任务结果，以及 S1、S2、Landsat、
 高分光学和高分 SAR GeoTIFF。归档在解压前会进行 SHA256 校验。
 
+目标机器已经具备 embedding 时，增加 `--deployment-only`，避免重复下载和
+转换 embedding。
+
 道路结果可从本地 embedding 和系统任务头重新生成：
 
 ```bash

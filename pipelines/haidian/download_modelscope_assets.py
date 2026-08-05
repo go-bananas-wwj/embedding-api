@@ -79,6 +79,11 @@ def parse_args() -> argparse.Namespace:
             "assets only: embeddings, checkpoints, and downstream_heads."
         ),
     )
+    parser.add_argument(
+        "--deployment-only",
+        action="store_true",
+        help="Download and install only deployment archives; keep existing embeddings.",
+    )
     return parser.parse_args()
 
 
@@ -306,14 +311,20 @@ def main() -> None:
     args.cache_dir.mkdir(parents=True, exist_ok=True)
     cache_root = args.cache_dir
     if not args.skip_download:
+        includes = args.include or _default_includes(args.prefix)
+        if args.deployment_only and args.include is None:
+            includes = [f"{args.prefix.rstrip('/')}/deployment/**"]
         cache_root = download_with_cli(
             args.repo,
             args.cache_dir,
-            args.include or _default_includes(args.prefix),
+            includes,
             args.max_workers,
         )
     src = cache_root / args.prefix
-    install_artifacts(src, args.target, args.embedding_artifact, args.force)
+    if args.deployment_only:
+        install_deployment_assets(src, args.target, args.force)
+    else:
+        install_artifacts(src, args.target, args.embedding_artifact, args.force)
     print(f"Haidian V1 assets installed into {args.target}")
 
 
