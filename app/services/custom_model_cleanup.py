@@ -9,6 +9,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
+from zoneinfo import ZoneInfo
 
 from app.services.model_registry import ModelRegistry
 from app.services.user_paths import get_users_dir
@@ -16,7 +17,7 @@ from app.services.user_paths import get_users_dir
 logger = logging.getLogger(__name__)
 
 DEFAULT_TTL_HOURS = 24
-DEFAULT_INTERVAL_HOURS = 24
+CLEANUP_TIMEZONE = ZoneInfo("Asia/Shanghai")
 
 
 def _positive_float_env(name: str, default: float) -> float:
@@ -155,12 +156,23 @@ def cleanup_custom_models(
 
 
 async def custom_model_cleanup_loop() -> None:
-    """Run custom-model cleanup once per configured interval."""
-    interval = _positive_float_env(
-        "CUSTOM_MODEL_CLEANUP_INTERVAL_HOURS", DEFAULT_INTERVAL_HOURS
-    )
+    """Run custom-model cleanup at 00:00 Asia/Shanghai every day."""
     ttl = _positive_float_env("CUSTOM_MODEL_TTL_HOURS", DEFAULT_TTL_HOURS)
     while True:
-        await asyncio.sleep(interval * 3600)
+        await asyncio.sleep(_seconds_until_next_midnight())
         if cleanup_enabled():
             await asyncio.to_thread(cleanup_custom_models, ttl, False)
+
+
+def _seconds_until_next_midnight(now: Optional[datetime] = None) -> float:
+    """Return seconds until the next midnight in the service business timezone."""
+    current = now or datetime.now(CLEANUP_TIMEZONE)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=CLEANUP_TIMEZONE)
+    else:
+        current = current.astimezone(CLEANUP_TIMEZONE)
+    tomorrow = current.date() + timedelta(days=1)
+    next_midnight = datetime.combine(
+        tomorrow, datetime.min.time(), tzinfo=CLEANUP_TIMEZONE
+    )
+    return (next_midnight - current).total_seconds()

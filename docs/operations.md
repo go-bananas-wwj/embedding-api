@@ -109,11 +109,10 @@ http://60.31.21.42:22065/logs/request-audit
 | `WATCHDOG_FAILURE_THRESHOLD` | `3` | 连续多少次健康检查失败后重启；子进程退出时立即重启 |
 | `CUSTOM_MODEL_CLEANUP_ENABLED` | `true` | 是否启用用户自定义模型自动清理 |
 | `CUSTOM_MODEL_TTL_HOURS` | `24` | 自定义模型最短保留时间（小时） |
-| `CUSTOM_MODEL_CLEANUP_INTERVAL_HOURS` | `24` | 后台清理执行间隔（小时） |
 
 ## 自定义模型自动清理
 
-服务启动时执行一次清理，随后每隔 24 小时再次执行。只处理 `users/{user_id}` 下创建超过 24 小时且状态为 `completed` 或 `failed` 的自定义模型，同时删除关联训练任务和推理结果。`training`、`running` 模型会保留。
+服务启动时执行一次清理，随后每天北京时间 00:00 执行。只处理 `users/{user_id}` 下创建超过 24 小时且状态为 `completed` 或 `failed` 的自定义模型，同时删除关联训练任务和推理结果。`training`、`running` 模型会保留。
 
 官方模型位于项目 `models/` 目录，不在清理扫描范围内。海淀建筑物、道路、水体任务头，以及哈尔滨建筑物、水体、土地利用和土地覆盖任务头均永久保留。
 

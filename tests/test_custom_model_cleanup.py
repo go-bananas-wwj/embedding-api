@@ -95,3 +95,11 @@ def test_cleanup_skips_corrupt_registry(tmp_path, monkeypatch):
 
     assert (user / "models_index.json").read_text(encoding="utf-8") == "{broken"
     assert report["errors"]
+
+
+def test_seconds_until_next_midnight_uses_shanghai_timezone():
+    now = datetime(2026, 8, 28, 15, 30, tzinfo=timezone.utc)
+
+    seconds = custom_model_cleanup._seconds_until_next_midnight(now)
+
+    assert seconds == 30 * 60

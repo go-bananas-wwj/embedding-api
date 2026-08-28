@@ -149,6 +149,6 @@ docs/         接口、训练、部署和复现文档
 - 建议通过 HTTPS 反向代理暴露服务，避免浏览器混合内容限制。
 - 浏览器跨域来源通过 `CORS_ORIGINS` 配置。
 - 自定义模型默认保留 24 小时，并由后台定时清理；官方预设模型不受影响。
-- 可使用 `CUSTOM_MODEL_CLEANUP_ENABLED`、`CUSTOM_MODEL_TTL_HOURS` 和
-  `CUSTOM_MODEL_CLEANUP_INTERVAL_HOURS` 调整清理策略。
+- 后台在服务启动时和每天北京时间 00:00 执行清理；可使用
+  `CUSTOM_MODEL_CLEANUP_ENABLED` 和 `CUSTOM_MODEL_TTL_HOURS` 调整清理策略。
 - 如需关闭在线文档，设置 `DOCS_URL=none` 和 `REDOC_URL=none`。
